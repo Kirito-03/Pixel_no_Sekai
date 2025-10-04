@@ -1,11 +1,11 @@
 {
   "expo": {
-    "name": "netflix_app",
-    "slug": "netflix_app",
+    "name": "netflix_clone",
+    "slug": "netflix_clone",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "netflixapp",
+    "scheme": "netflixclone",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
