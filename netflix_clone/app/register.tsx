@@ -92,7 +92,7 @@ export default function RegisterScreen() {
       await updateProfile(userCredential.user, { displayName: name });
       
       Alert.alert(
-        '¡Bienvenido a Netflix!',
+        '¡Bienvenido a Pixel!',
         `Cuenta creada exitosamente, ${name}`,
         // @ts-ignore
         [{ text: 'Empezar', onPress: () => router.replace('/(tabs)') }]
@@ -173,7 +173,7 @@ export default function RegisterScreen() {
             <Text style={styles.stepNumber}>PASO 2 DE 3</Text>
             <Text style={styles.stepTitle}>Crea tu cuenta</Text>
             <Text style={styles.stepSubtitle}>
-              Netflix es personalizado para ti. Ingresa tu nombre para que podamos personalizar tu experiencia.
+              Pixel es personalizado para ti. Ingresa tu nombre para que podamos personalizar tu experiencia.
             </Text>
             
             <View style={[styles.inputContainer, nameFocused && styles.inputFocused]}>
@@ -253,7 +253,7 @@ export default function RegisterScreen() {
               <TouchableOpacity onPress={handleBack} style={styles.backButton}>
                 <Text style={styles.backText}>←</Text>
               </TouchableOpacity>
-              <Text style={styles.logo}>NETFLIX</Text>
+              <Text style={styles.logo}>Pixel</Text>
               <TouchableOpacity onPress={handleHelp}>
                 <Text style={styles.helpText}>Ayuda</Text>
               </TouchableOpacity>

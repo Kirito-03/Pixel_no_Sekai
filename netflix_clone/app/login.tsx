@@ -107,7 +107,7 @@ export default function LoginScreen() {
           >
             {/* Logo */}
             <View style={styles.logoContainer}>
-              <Text style={styles.logo}>NETFLIX</Text>
+              <Text style={styles.logo}>PIXEL NO SEKAI</Text>
             </View>
 
             {/* Form */}
@@ -173,7 +173,7 @@ export default function LoginScreen() {
                 disabled={loading}
               >
                 <Text style={styles.signUpText}>
-                  ¿Primera vez en Netflix?{' '}
+                  ¿Primera vez en Pixel?{' '}
                   <Text style={styles.signUpLink} onPress={() => router.push('/register')}>
                     Suscríbete ahora
                   </Text>

@@ -2,9 +2,14 @@ import { Tabs } from 'expo-router';
 import React from 'react';
 
 import { HapticTab } from '@/components/haptic-tab';
-import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+
+// Importa tus SVG como componentes
+import HomeIcon from '@/assets/images/menu/ho.svg';
+import ExploreIcon from '@/assets/images/menu/explore.svg';
+import SearchIcon from '@/assets/images/menu/buscar.svg';
+import MenuIcon from '@/assets/images/menu/menu.svg';
 
 export default function TabLayout() {
   const colorScheme = useColorScheme();
@@ -27,7 +32,7 @@ export default function TabLayout() {
         options={{
           title: 'Inicio',
           tabBarIcon: ({ color }) => (
-            <IconSymbol size={28} name="house.fill" color={color} />
+            <HomeIcon width={28} height={28} color={color} />
           ),
         }}
       />
@@ -36,7 +41,7 @@ export default function TabLayout() {
         options={{
           title: 'Explorar',
           tabBarIcon: ({ color }) => (
-            <IconSymbol size={28} name="globe" color={color} />
+            <ExploreIcon width={28} height={28} color={color} />
           ),
         }}
       />
@@ -45,7 +50,7 @@ export default function TabLayout() {
         options={{
           title: 'Buscar',
           tabBarIcon: ({ color }) => (
-            <IconSymbol size={28} name="magnifyingglass" color={color} />
+            <SearchIcon width={28} height={28} color={color} />
           ),
         }}
       />
@@ -54,7 +59,7 @@ export default function TabLayout() {
         options={{
           title: 'Menú',
           tabBarIcon: ({ color }) => (
-            <IconSymbol size={28} name="line.3.horizontal" color={color} />
+            <MenuIcon width={28} height={28} color={color} />
           ),
         }}
       />
