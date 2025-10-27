@@ -1,16 +1,23 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { View, Image, Text, TouchableOpacity, StyleSheet, SafeAreaView, Animated, useWindowDimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../theme';
+import CategoriesMenu from './CategoriesMenu';
 
 interface HeaderProps {
   black?: boolean;
   onProfilePress?: () => void;
+  onSearchPress?: () => void;
+  onFilterChange?: (filter: 'series' | 'peliculas' | 'categorias') => void;
+  onCategorySelect?: (categoryId: string, categoryName: string) => void;
+  currentCategoryId?: string;
 }
 
-export default function Header({ black = false, onProfilePress }: HeaderProps) {
+export default function Header({ black = false, onProfilePress, onSearchPress, onFilterChange, onCategorySelect, currentCategoryId }: HeaderProps) {
   const { width } = useWindowDimensions();
   const isSmallScreen = width < 768;
+  const [selectedFilter, setSelectedFilter] = useState<'series' | 'peliculas' | 'categorias' | null>(null);
+  const [showCategoriesMenu, setShowCategoriesMenu] = useState(false);
   
   const backgroundOpacity = useRef(new Animated.Value(0)).current;
 
@@ -26,6 +33,25 @@ export default function Header({ black = false, onProfilePress }: HeaderProps) {
     inputRange: [0, 1],
     outputRange: ['rgba(0, 0, 0, 0)', 'rgba(20, 20, 20, 1)'],
   });
+
+  const handleFilterPress = (filter: 'series' | 'peliculas' | 'categorias') => {
+    if (filter === 'categorias') {
+      setShowCategoriesMenu(true);
+      setSelectedFilter('categorias');
+    } else {
+      setSelectedFilter(filter === selectedFilter ? null : filter);
+      onFilterChange?.(filter);
+    }
+  };
+
+  const handleCategorySelect = (categoryId: string, categoryName: string) => {
+    onCategorySelect?.(categoryId, categoryName);
+  };
+
+  const handleCloseMenu = () => {
+    setShowCategoriesMenu(false);
+    setSelectedFilter(null);
+  };
 
   const dynamicStyles = {
     container: {
@@ -80,27 +106,102 @@ export default function Header({ black = false, onProfilePress }: HeaderProps) {
             <Text style={dynamicStyles.logo}>DSIVIEW</Text>
           </TouchableOpacity>
 
-          {/* Contenedor derecho: Notificaciones + Avatar */}
+          {/* Contenedor derecho: Búsqueda + Notificaciones */}
           <View style={dynamicStyles.rightContainer}>
+            {/* Botón de búsqueda */}
+            <TouchableOpacity 
+              style={dynamicStyles.notificationButton}
+              onPress={onSearchPress}
+            >
+              <Ionicons name="search" size={isSmallScreen ? 24 : 26} color={colors.text} />
+            </TouchableOpacity>
+
             {/* Botón de notificaciones */}
             <TouchableOpacity style={dynamicStyles.notificationButton}>
               <Ionicons name="notifications-outline" size={isSmallScreen ? 24 : 26} color={colors.text} />
             </TouchableOpacity>
-
-            {/* Avatar de usuario */}
-            <TouchableOpacity 
-              style={dynamicStyles.userContainer}
-              onPress={onProfilePress}
-            >
-              <Image
-                source={{ uri: 'https://upload.wikimedia.org/wikipedia/commons/0/0b/Netflix-avatar.png' }}
-                style={dynamicStyles.avatar}
-              />
-            </TouchableOpacity>
           </View>
         </View>
+
+        {/* Filtros: Series, Películas, Categorías */}
+        <View style={styles.filtersContainer}>
+          <TouchableOpacity 
+            style={[styles.filterButton, selectedFilter === 'series' && styles.filterButtonActive]}
+            onPress={() => handleFilterPress('series')}
+          >
+            <Text style={[styles.filterText, selectedFilter === 'series' && styles.filterTextActive]}>
+              Series
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity 
+            style={[styles.filterButton, selectedFilter === 'peliculas' && styles.filterButtonActive]}
+            onPress={() => handleFilterPress('peliculas')}
+          >
+            <Text style={[styles.filterText, selectedFilter === 'peliculas' && styles.filterTextActive]}>
+              Películas
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity 
+            style={[styles.filterButton, selectedFilter === 'categorias' && styles.filterButtonActive]}
+            onPress={() => handleFilterPress('categorias')}
+          >
+            <Text style={[styles.filterText, selectedFilter === 'categorias' && styles.filterTextActive]}>
+              Categorías
+            </Text>
+            <Ionicons 
+              name="chevron-down" 
+              size={14} 
+              color={selectedFilter === 'categorias' ? colors.text : colors.textGray} 
+              style={{ marginLeft: 4 }}
+            />
+          </TouchableOpacity>
+        </View>
       </SafeAreaView>
+
+      {/* Menú de Categorías */}
+      <CategoriesMenu
+        visible={showCategoriesMenu}
+        onClose={handleCloseMenu}
+        onSelectCategory={handleCategorySelect}
+        currentCategoryId={currentCategoryId}
+      />
     </Animated.View>
   );
 }
+
+const styles = StyleSheet.create({
+  filtersContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-start',
+    paddingHorizontal: 12,
+    paddingBottom: 10,
+    gap: 12,
+  },
+  filterButton: {
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: colors.textGray,
+    backgroundColor: 'transparent',
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  filterButtonActive: {
+    backgroundColor: colors.text,
+    borderColor: colors.text,
+  },
+  filterText: {
+    color: colors.textGray,
+    fontSize: 13,
+    fontWeight: '500',
+  },
+  filterTextActive: {
+    color: colors.background,
+    fontWeight: '600',
+  },
+});
 

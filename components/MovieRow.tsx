@@ -3,10 +3,11 @@ import {
   View, 
   Text, 
   FlatList, 
-  StyleSheet, 
   TouchableOpacity, 
   useWindowDimensions,
-  Animated 
+  PanResponder,
+  Platform,
+  GestureResponderHandlers
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Movie } from '../types';
@@ -22,10 +23,42 @@ interface Props {
 export default function MovieRow({ title, movies, onMoviePress }: Props) {
   const { width } = useWindowDimensions();
   const isSmallScreen = width < 768;
-  const SCROLL_AMOUNT = width * 0.7;
+  const CARD_WIDTH = isSmallScreen ? width * 0.32 : 130;
+  const CARD_MARGIN = isSmallScreen ? 8 : 10;
+  const TOTAL_CARD_WIDTH = CARD_WIDTH + CARD_MARGIN;
+  const CARDS_PER_SCREEN = Math.floor(width / TOTAL_CARD_WIDTH);
+  const SCROLL_AMOUNT = TOTAL_CARD_WIDTH * CARDS_PER_SCREEN;
   
-  const flatListRef = useRef<FlatList>(null);
+  const flatListRef = useRef<FlatList<Movie>>(null);
   const [scrollX, setScrollX] = useState(0);
+  const [showLeftArrow, setShowLeftArrow] = useState(false);
+  const [showRightArrow, setShowRightArrow] = useState(true);
+  
+  const scrollXRef = useRef(0);
+  const isDragging = useRef(false);
+
+  const panResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => Platform.OS === 'web',
+      onMoveShouldSetPanResponder: () => Platform.OS === 'web',
+
+      onPanResponderGrant: () => {
+        scrollXRef.current = scrollX;
+        isDragging.current = true;
+      },
+
+      onPanResponderMove: (_, gestureState) => {
+        // Velocidad mínima: factor de 0.3 (mucho más lento)
+        const newOffset = scrollXRef.current - (gestureState.dx * 0.3);
+        flatListRef.current?.scrollToOffset({ offset: newOffset, animated: false });
+      },
+
+      onPanResponderRelease: () => {
+        isDragging.current = false;
+      },
+    })
+  ).current;
+
 
   const handleLeftArrow = () => {
     const newPosition = Math.max(0, scrollX - SCROLL_AMOUNT);
@@ -33,7 +66,6 @@ export default function MovieRow({ title, movies, onMoviePress }: Props) {
       offset: newPosition, 
       animated: true 
     });
-    setScrollX(newPosition);
   };
 
   const handleRightArrow = () => {
@@ -42,12 +74,21 @@ export default function MovieRow({ title, movies, onMoviePress }: Props) {
       offset: newPosition, 
       animated: true 
     });
-    setScrollX(newPosition);
   };
 
   const handleScroll = (event: any) => {
     const offsetX = event.nativeEvent.contentOffset.x;
+    const contentWidth = event.nativeEvent.contentSize.width;
+    const layoutWidth = event.nativeEvent.layoutMeasurement.width;
+    const maxScroll = contentWidth - layoutWidth;
+    
+    // Sincronizamos el estado de la posición de scroll
     setScrollX(offsetX);
+    scrollXRef.current = offsetX;
+
+    // Lógica para mostrar/ocultar las flechas
+    setShowLeftArrow(offsetX > 5);
+    setShowRightArrow(offsetX < maxScroll - 5);
   };
 
   const dynamicStyles = {
@@ -55,34 +96,41 @@ export default function MovieRow({ title, movies, onMoviePress }: Props) {
       marginBottom: isSmallScreen ? spacing.md : spacing.lg,
     },
     title: {
-      fontSize: isSmallScreen ? 16 : 20,
+      fontSize: isSmallScreen ? 17 : 20,
       fontWeight: 'bold' as const,
       color: colors.text,
       marginBottom: isSmallScreen ? spacing.sm : spacing.md,
-      marginLeft: isSmallScreen ? spacing.sm : spacing.md,
+      marginLeft: isSmallScreen ? spacing.md : spacing.md,
     },
     listContainer: {
       position: 'relative' as const,
+      cursor: Platform.OS === 'web' ? 'grab' : 'auto',
     },
     list: {
       paddingHorizontal: isSmallScreen ? spacing.sm : spacing.md,
+      paddingVertical: isSmallScreen ? 6 : 4,
+      minHeight: isSmallScreen ? 200 : 180,
     },
     arrow: {
       position: 'absolute' as const,
       top: 0,
       bottom: 0,
-      width: isSmallScreen ? 0 : 40,
-      backgroundColor: 'rgba(0, 0, 0, 0.6)',
+      width: isSmallScreen ? 0 : 50,
+      backgroundColor: 'rgba(0, 0, 0, 0.75)',
       justifyContent: 'center' as const,
       alignItems: 'center' as const,
       zIndex: 99,
-      opacity: isSmallScreen ? 0 : 1,
+      cursor: 'pointer' as const,
     },
     leftArrow: {
       left: 0,
+      borderTopRightRadius: 4,
+      borderBottomRightRadius: 4,
     },
     rightArrow: {
       right: 0,
+      borderTopLeftRadius: 4,
+      borderBottomLeftRadius: 4,
     },
   };
 
@@ -90,9 +138,8 @@ export default function MovieRow({ title, movies, onMoviePress }: Props) {
     <View style={dynamicStyles.container}>
       <Text style={dynamicStyles.title}>{title}</Text>
       
-      <View style={dynamicStyles.listContainer}>
-        {/* Flecha izquierda */}
-        {scrollX > 0 && !isSmallScreen && (
+      <View style={dynamicStyles.listContainer} {...(panResponder.panHandlers as GestureResponderHandlers)}>
+        {showLeftArrow && !isSmallScreen && (
           <TouchableOpacity 
             style={[dynamicStyles.arrow, dynamicStyles.leftArrow]}
             onPress={handleLeftArrow}
@@ -102,7 +149,6 @@ export default function MovieRow({ title, movies, onMoviePress }: Props) {
           </TouchableOpacity>
         )}
 
-        {/* Lista de películas */}
         <FlatList
           ref={flatListRef}
           data={movies}
@@ -115,12 +161,10 @@ export default function MovieRow({ title, movies, onMoviePress }: Props) {
           contentContainerStyle={dynamicStyles.list}
           onScroll={handleScroll}
           scrollEventThrottle={16}
-          snapToInterval={width * 0.3 + 8}
-          decelerationRate="fast"
+          scrollEnabled={Platform.OS !== 'web'} 
         />
 
-        {/* Flecha derecha */}
-        {movies.length > 3 && !isSmallScreen && (
+        {showRightArrow && !isSmallScreen && (
           <TouchableOpacity 
             style={[dynamicStyles.arrow, dynamicStyles.rightArrow]}
             onPress={handleRightArrow}
@@ -133,4 +177,3 @@ export default function MovieRow({ title, movies, onMoviePress }: Props) {
     </View>
   );
 }
-

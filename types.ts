@@ -73,16 +73,20 @@ export interface ContentItem {
 export type RootStackParamList = {
   Login: undefined;
   Main: undefined;
+  MyList: undefined;
 };
 
 export type TabParamList = {
   Home: undefined;
   Search: undefined;
   Profile: undefined;
+  MyList: undefined;
 };
 
 export type HomeStackParamList = {
   HomeScreen: undefined;
   MovieDetail: { movieId: number };
+  Category: { categoryId: string; categoryName: string };
+  MyList: undefined;
 };
 

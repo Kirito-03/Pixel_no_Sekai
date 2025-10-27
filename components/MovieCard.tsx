@@ -17,13 +17,15 @@ interface Props {
 export default function MovieCard({ movie, onPress }: Props) {
   const { width } = useWindowDimensions();
   const isSmallScreen = width < 768;
-  const CARD_WIDTH = isSmallScreen ? width * 0.28 : 150;
+  // Aumentamos el tamaño de las tarjetas para que se vean mejor
+  const CARD_WIDTH = isSmallScreen ? width * 0.32 : 130;
+  const CARD_HEIGHT = CARD_WIDTH * 1.5; // Relación de aspecto 2:3 para posters
   
-  const scaleAnim = useRef(new Animated.Value(0.9)).current;
+  const scaleAnim = useRef(new Animated.Value(1)).current;
 
   const handlePressIn = () => {
     Animated.spring(scaleAnim, {
-      toValue: 1,
+      toValue: 1.05,
       useNativeDriver: true,
       friction: 3,
     }).start();
@@ -31,7 +33,7 @@ export default function MovieCard({ movie, onPress }: Props) {
 
   const handlePressOut = () => {
     Animated.spring(scaleAnim, {
-      toValue: 0.9,
+      toValue: 1,
       useNativeDriver: true,
       friction: 3,
     }).start();
@@ -40,35 +42,46 @@ export default function MovieCard({ movie, onPress }: Props) {
   const dynamicStyles = {
     card: {
       width: CARD_WIDTH,
-      marginRight: isSmallScreen ? 6 : 8,
+      height: CARD_HEIGHT,
+      marginRight: isSmallScreen ? 8 : 10,
       cursor: 'pointer' as const,
+    },
+    imageContainer: {
+      width: CARD_WIDTH,
+      height: CARD_HEIGHT,
+      borderRadius: isSmallScreen ? 4 : 6,
+      overflow: 'hidden' as const,
+      backgroundColor: '#1a1a1a',
     },
     image: {
       width: CARD_WIDTH,
-      height: CARD_WIDTH * 1.5,
-      borderRadius: isSmallScreen ? 3 : 4,
+      height: CARD_HEIGHT,
     },
   };
 
   return (
-    <TouchableOpacity 
-      style={dynamicStyles.card} 
-      onPress={onPress}
-      onPressIn={handlePressIn}
-      onPressOut={handlePressOut}
-      activeOpacity={1}
+    <Animated.View
+      style={[
+        dynamicStyles.card,
+        {
+          transform: [{ scale: scaleAnim }],
+        },
+      ]}
     >
-      <Animated.Image
-        source={{ uri: getImageUrl(movie.poster_path, 'w500') }}
-        style={[
-          dynamicStyles.image,
-          {
-            transform: [{ scale: scaleAnim }],
-          },
-        ]}
-        resizeMode="cover"
-      />
-    </TouchableOpacity>
+      <TouchableOpacity 
+        style={dynamicStyles.imageContainer} 
+        onPress={onPress}
+        onPressIn={handlePressIn}
+        onPressOut={handlePressOut}
+        activeOpacity={0.9}
+      >
+        <Image
+          source={{ uri: getImageUrl(movie.poster_path, 'w500') }}
+          style={dynamicStyles.image}
+          resizeMode="cover"
+        />
+      </TouchableOpacity>
+    </Animated.View>
   );
 }
 

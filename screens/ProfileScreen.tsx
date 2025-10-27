@@ -12,10 +12,12 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing } from '../theme';
+import { useProfile } from '../contexts/ProfileContext';
 
 export default function ProfileScreen() {
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
   const [autoplayEnabled, setAutoplayEnabled] = useState(true);
+  const { currentProfile } = useProfile();
   
   const { width } = useWindowDimensions();
   const isSmallScreen = width < 768;
@@ -40,12 +42,14 @@ export default function ProfileScreen() {
         <View style={styles.profileSection}>
           <View style={styles.avatarContainer}>
             <Image
-              source={{ uri: 'https://upload.wikimedia.org/wikipedia/commons/0/0b/Netflix-avatar.png' }}
+              source={{ 
+                uri: currentProfile?.avatar_url || 'https://upload.wikimedia.org/wikipedia/commons/0/0b/Netflix-avatar.png' 
+              }}
               style={styles.avatar}
             />
           </View>
-          <Text style={styles.username}>admin</Text>
-          <Text style={styles.email}>admin</Text>
+          <Text style={styles.username}>{currentProfile?.name || 'Usuario'}</Text>
+          <Text style={styles.email}>{currentProfile?.name || 'admin'}</Text>
         </View>
 
         {/* Sección CUENTA */}

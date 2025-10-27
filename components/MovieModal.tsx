@@ -12,6 +12,7 @@ import {
   ScrollView,
   Platform,
   FlatList,
+  Alert,
 } from 'react-native';
 import { WebView } from 'react-native-webview';
 import { Ionicons } from '@expo/vector-icons';
@@ -27,27 +28,47 @@ import {
   getImageUrl 
 } from '../services/api';
 import { colors, spacing } from '../theme';
+import { useProfile } from '../contexts/ProfileContext';
+import { useMyList } from '../contexts/MyListContext';
 
 interface MovieModalProps {
   content: ContentItem | null;
   visible: boolean;
   onClose: () => void;
-  movie?: MovieDetail | null; // Mantener compatibilidad hacia atrás
+  movie?: MovieDetail | null;
+  onAddToList?: (content: ContentItem) => void;
+  onRemoveFromList?: (contentId: number) => void;
+  isInList?: boolean;
 }
 
-export default function MovieModal({ content, movie, visible, onClose }: MovieModalProps) {
+export default function MovieModal({ 
+  content, 
+  movie, 
+  visible, 
+  onClose,
+  onAddToList,
+  onRemoveFromList,
+  isInList = false 
+}: MovieModalProps) {
   const [currentContent, setCurrentContent] = useState<ContentItem | null>(null);
   const [detailData, setDetailData] = useState<MovieDetail | TVShowDetail | null>(null);
   const [trailerKey, setTrailerKey] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [relatedContent, setRelatedContent] = useState<(Movie | TVShow)[]>([]);
   const [loadingRelated, setLoadingRelated] = useState(false);
+  const [activeTab, setActiveTab] = useState<'similar'>('similar');
+  
+  const { currentProfile } = useProfile();
+  const { isInMyList, toggleMyList } = useMyList();
   
   const { width, height } = useWindowDimensions();
   const isSmallScreen = width < 768;
   
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(50)).current;
+
+  // Verificar si el contenido actual está en Mi Lista
+  const currentInMyList = currentContent ? isInMyList(currentContent.id, currentContent.type) : false;
 
   // Actualizar contenido cuando cambie el prop
   useEffect(() => {
@@ -76,9 +97,10 @@ export default function MovieModal({ content, movie, visible, onClose }: MovieMo
       loadContentDetails();
       loadRelatedContent();
     } else {
-      // Reset animaciones
+      // Reset animaciones y estado
       fadeAnim.setValue(0);
       slideAnim.setValue(50);
+      setActiveTab('similar');
     }
   }, [visible, currentContent]);
 
@@ -146,7 +168,7 @@ export default function MovieModal({ content, movie, visible, onClose }: MovieMo
         index === self.findIndex((t) => t.id === item.id)
       );
       
-      setRelatedContent(uniqueContent.slice(0, 20));
+      setRelatedContent(uniqueContent.slice(0, 30));
     } catch (error) {
       console.error('Error loading related content:', error);
       setRelatedContent([]);
@@ -171,6 +193,31 @@ export default function MovieModal({ content, movie, visible, onClose }: MovieMo
     
     // Actualizar el contenido actual - esto recargará el modal con el nuevo contenido
     setCurrentContent(newContentItem);
+  };
+
+  const handleToggleList = async () => {
+    if (!currentContent || !currentProfile) {
+      console.log('❌ handleToggleList: Missing data', { 
+        currentContent: !!currentContent, 
+        currentProfile: !!currentProfile 
+      });
+      return;
+    }
+    
+    console.log('🎬 handleToggleList: Starting', { 
+      contentId: currentContent.id, 
+      contentType: currentContent.type,
+      profileId: currentProfile.id,
+      currentInMyList 
+    });
+    
+    try {
+      await toggleMyList(currentContent.id, currentContent.type);
+      console.log('✅ handleToggleList: Success');
+    } catch (error) {
+      console.error('❌ handleToggleList: Error', error);
+      Alert.alert('Error', 'No se pudo actualizar Mi Lista');
+    }
   };
 
   const getAgeRating = (): string => {
@@ -453,6 +500,23 @@ export default function MovieModal({ content, movie, visible, onClose }: MovieMo
                   </View>
                 )}
 
+                {/* Botón Mi Lista */}
+                <View style={styles.actionButtons}>
+                  <TouchableOpacity 
+                    style={styles.myListButton}
+                    onPress={handleToggleList}
+                  >
+                    <Ionicons 
+                      name={currentInMyList ? "checkmark" : "add"} 
+                      size={20} 
+                      color={colors.text} 
+                    />
+                    <Text style={styles.myListButtonText}>
+                      {currentInMyList ? "En mi lista" : "Mi lista"}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+
                 {/* Descripción */}
                 <View style={styles.overviewSection}>
                   <Text style={styles.overviewTitle}>Sinopsis</Text>
@@ -463,20 +527,14 @@ export default function MovieModal({ content, movie, visible, onClose }: MovieMo
 
                 {/* Contenido relacionado */}
                 <View style={styles.similarSection}>
-                  <Text style={styles.similarTitle}>
-                    {currentContent?.type === 'movie' ? 'Películas Relacionadas' : 'Series Relacionadas'}
-                  </Text>
+                  <Text style={styles.similarTitle}>Más títulos similares</Text>
                   
                   {loadingRelated ? (
                     <View style={styles.similarLoading}>
                       <ActivityIndicator size="small" color={colors.primary} />
                     </View>
                   ) : relatedContent.length > 0 ? (
-                    <ScrollView 
-                      horizontal 
-                      showsHorizontalScrollIndicator={false}
-                      style={styles.similarScroll}
-                    >
+                    <View style={styles.gridContainer}>
                       {relatedContent.map((item) => {
                         const isMovie = 'title' in item;
                         const title = isMovie ? (item as Movie).title : (item as TVShow).name;
@@ -484,29 +542,18 @@ export default function MovieModal({ content, movie, visible, onClose }: MovieMo
                         return (
                           <TouchableOpacity
                             key={item.id}
-                            style={styles.similarCard}
+                            style={styles.gridCard}
                             onPress={() => handleRelatedContentPress(item)}
                           >
                             <Image
                               source={{ uri: getImageUrl(item.poster_path, 'w500') }}
-                              style={styles.similarPoster}
+                              style={styles.gridPoster}
                               resizeMode="cover"
                             />
-                            <View style={styles.similarInfo}>
-                              <Text style={styles.similarMovieTitle} numberOfLines={2}>
-                                {title}
-                              </Text>
-                              <View style={styles.similarRating}>
-                                <Ionicons name="star" size={12} color="#ffd700" />
-                                <Text style={styles.similarRatingText}>
-                                  {item.vote_average.toFixed(1)}
-                                </Text>
-                              </View>
-                            </View>
                           </TouchableOpacity>
                         );
                       })}
-                    </ScrollView>
+                    </View>
                   ) : (
                     <Text style={styles.noSimilarText}>
                       No hay contenido relacionado disponible
@@ -551,6 +598,28 @@ const styles = StyleSheet.create({
   typeText: {
     color: colors.text,
     fontSize: 12,
+    fontWeight: '600',
+  },
+  actionButtons: {
+    flexDirection: 'row',
+    marginTop: 16,
+    marginBottom: 4,
+    gap: 12,
+  },
+  myListButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 6,
+    borderWidth: 2,
+    borderColor: 'rgba(255, 255, 255, 0.4)',
+    gap: 8,
+  },
+  myListButtonText: {
+    color: colors.text,
+    fontSize: 15,
     fontWeight: '600',
   },
   metadataRow: {
@@ -672,39 +741,33 @@ const styles = StyleSheet.create({
     paddingVertical: 30,
     alignItems: 'center',
   },
-  similarScroll: {
-    marginHorizontal: -5,
+  gridContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'flex-start',
+    gap: 6,
   },
-  similarCard: {
-    width: 140,
-    marginHorizontal: 6,
-    marginBottom: 10,
+  gridCard: {
+    width: '32%',
+    marginBottom: 6,
   },
-  similarPoster: {
+  gridPoster: {
     width: '100%',
-    height: 200,
-    borderRadius: 8,
+    aspectRatio: 2/3,
+    borderRadius: 4,
     backgroundColor: '#2a2a2a',
   },
-  similarInfo: {
-    marginTop: 8,
+  trailersContainer: {
+    marginTop: 10,
   },
-  similarMovieTitle: {
-    fontSize: 13,
-    color: colors.text,
+  trailerItem: {
+    marginBottom: 20,
+  },
+  trailerTitle: {
+    fontSize: 16,
     fontWeight: '600',
-    marginBottom: 4,
-    lineHeight: 16,
-  },
-  similarRating: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  similarRatingText: {
-    fontSize: 12,
-    color: colors.textGray,
-    fontWeight: '500',
+    color: colors.text,
+    marginBottom: 12,
   },
   noSimilarText: {
     fontSize: 14,
@@ -713,4 +776,3 @@ const styles = StyleSheet.create({
     paddingVertical: 20,
   },
 });
-
