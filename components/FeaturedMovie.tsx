@@ -171,12 +171,12 @@ export default function FeaturedMovie({ movie, onWatch, onAddList }: Props) {
             <View style={dynamicStyles.buttons}>
               <TouchableOpacity style={dynamicStyles.watchButton} onPress={onWatch}>
                 <Ionicons name="play" size={16} color="#000" />
-                <Text style={dynamicStyles.watchButtonText}>Assistir</Text>
+                <Text style={dynamicStyles.watchButtonText}>Ver ahora</Text>
               </TouchableOpacity>
               
               <TouchableOpacity style={dynamicStyles.myListButton} onPress={onAddList}>
                 <Ionicons name="add" size={16} color="#fff" />
-                <Text style={dynamicStyles.myListButtonText}>Minha lista</Text>
+                <Text style={dynamicStyles.myListButtonText}>Mi lista</Text>
               </TouchableOpacity>
             </View>
             

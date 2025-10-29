@@ -4,10 +4,10 @@ import databaseService from '../services/databaseService';
 
 interface MyListContextType {
   myListItems: Set<number>;
-  isInMyList: (movieId: number, contentType?: 'movie' | 'tv') => boolean;
-  addToMyList: (movieId: number, contentType?: 'movie' | 'tv') => Promise<void>;
-  removeFromMyList: (movieId: number, contentType?: 'movie' | 'tv') => Promise<void>;
-  toggleMyList: (movieId: number, contentType?: 'movie' | 'tv') => Promise<void>;
+  isInMyList: (movieId: number, contentType?: 'movie' | 'tv' | 'anime') => boolean;
+  addToMyList: (movieId: number, contentType?: 'movie' | 'tv' | 'anime') => Promise<void>;
+  removeFromMyList: (movieId: number, contentType?: 'movie' | 'tv' | 'anime') => Promise<void>;
+  toggleMyList: (movieId: number, contentType?: 'movie' | 'tv' | 'anime') => Promise<void>;
   refreshMyList: () => Promise<void>;
   loading: boolean;
 }
@@ -37,22 +37,27 @@ export const MyListProvider: React.FC<MyListProviderProps> = ({ children }) => {
     
     setLoading(true);
     try {
+      console.log('🔄 Cargando Mi Lista para perfil:', currentProfile.id);
       const items = await databaseService.getMyList(currentProfile.id);
       const movieIds = new Set<number>(items.map((item: { content_id: number }) => item.content_id));
       setMyListItems(movieIds);
+      console.log('✅ Mi Lista cargada exitosamente:', movieIds.size, 'items');
     } catch (error) {
-      console.error('Error loading my list:', error);
+      console.error('❌ Error loading my list:', error);
+      if (error.code === 'NETWORK_ERROR') {
+        console.error('💡 Error de red - verificar conexión al servidor');
+      }
       setMyListItems(new Set<number>());
     } finally {
       setLoading(false);
     }
   };
 
-  const isInMyList = (movieId: number, contentType?: 'movie' | 'tv'): boolean => {
+  const isInMyList = (movieId: number, contentType?: 'movie' | 'tv' | 'anime'): boolean => {
     return myListItems.has(movieId);
   };
 
-  const addToMyList = async (movieId: number, contentType: 'movie' | 'tv' = 'movie') => {
+  const addToMyList = async (movieId: number, contentType: 'movie' | 'tv' | 'anime' = 'movie') => {
     console.log('➕ addToMyList: Starting', { movieId, contentType });
     
     if (!currentProfile) {
@@ -73,7 +78,7 @@ export const MyListProvider: React.FC<MyListProviderProps> = ({ children }) => {
     }
   };
 
-  const removeFromMyList = async (movieId: number, contentType: 'movie' | 'tv' = 'movie') => {
+  const removeFromMyList = async (movieId: number, contentType: 'movie' | 'tv' | 'anime' = 'movie') => {
     console.log('➖ removeFromMyList: Starting', { movieId, contentType });
     
     if (!currentProfile) {
@@ -98,7 +103,7 @@ export const MyListProvider: React.FC<MyListProviderProps> = ({ children }) => {
     }
   };
 
-  const toggleMyList = async (contentId: number, contentType: 'movie' | 'tv') => {
+  const toggleMyList = async (contentId: number, contentType: 'movie' | 'tv' | 'anime' = 'movie') => {
     console.log('🔄 toggleMyList: Starting', { contentId, contentType });
     
     if (!currentProfile) {

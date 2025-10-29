@@ -1,7 +1,8 @@
 import axios from 'axios';
+import { DYNAMIC_NETWORK_CONFIG } from '../utils/networkUtils';
 
 // La URL base de tu servidor backend.
-const BASE_URL = 'http://localhost:3001';
+const BASE_URL = DYNAMIC_NETWORK_CONFIG.getBaseURL();
 
 // Interfaz para los datos necesarios al crear un nuevo perfil.
 export interface CreateProfilePayload {
@@ -64,13 +65,74 @@ export const databaseService = {
     return data;
   },
 
-  async addToMyList(perfilId: number, contentId: number, type: 'movie' | 'tv') {
+  async addToMyList(perfilId: number, contentId: number, type: 'movie' | 'tv' | 'anime') {
     const { data } = await axios.post(`${BASE_URL}/my-list/${perfilId}/items`, { content_id: contentId, content_type: type });
     return data;
   },
 
-  async removeFromMyList(perfilId: number, contentId: number, type: 'movie' | 'tv') {
+  async removeFromMyList(perfilId: number, contentId: number, type: 'movie' | 'tv' | 'anime') {
     const { data } = await axios.delete(`${BASE_URL}/my-list/${perfilId}/items/${contentId}/${type}`);
+    return data;
+  },
+
+  // --- Funciones para manejo de contenido ---
+
+  /**
+   * Obtiene todo el contenido almacenado en la base de datos
+   */
+  async getAllContent() {
+    const { data } = await axios.get(`${BASE_URL}/content`);
+    return data;
+  },
+
+  /**
+   * Obtiene contenido por tipo (movie, tv, anime)
+   */
+  async getContentByType(type: 'movie' | 'tv' | 'anime') {
+    const { data } = await axios.get(`${BASE_URL}/content/${type}`);
+    return data;
+  },
+
+  /**
+   * Agrega nuevo contenido a la base de datos
+   */
+  async addContent(content: {
+    title: string;
+    type: 'movie' | 'tv' | 'anime';
+    overview?: string;
+    poster_url?: string;
+    backdrop_url?: string;
+  }) {
+    const { data } = await axios.post(`${BASE_URL}/content`, content);
+    return data;
+  },
+
+  // --- Funciones para manejo de imágenes ---
+
+  /**
+   * Guarda metadatos de una imagen en la base de datos
+   */
+  async saveImageMetadata(imageData: {
+    filename: string;
+    original_name: string;
+    mime_type: string;
+    size: number;
+    width?: number;
+    height?: number;
+    url: string;
+    type: 'poster' | 'backdrop' | 'avatar' | 'thumbnail';
+    entity_id?: number;
+    entity_type?: 'contenido' | 'perfil';
+  }) {
+    const { data } = await axios.post(`${BASE_URL}/images`, imageData);
+    return data;
+  },
+
+  /**
+   * Obtiene imágenes asociadas a una entidad
+   */
+  async getImagesByEntity(entityType: 'contenido' | 'perfil', entityId: number) {
+    const { data } = await axios.get(`${BASE_URL}/images/${entityType}/${entityId}`);
     return data;
   }
 };

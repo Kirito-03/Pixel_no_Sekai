@@ -30,7 +30,7 @@ SET time_zone = "+00:00";
 CREATE TABLE `contenido` (
   `id` int(11) NOT NULL,
   `title` varchar(255) NOT NULL,
-  `type` enum('movie','tv') NOT NULL,
+  `type` enum('movie','tv','anime') NOT NULL,
   `overview` text DEFAULT NULL,
   `poster_url` varchar(500) DEFAULT NULL,
   `backdrop_url` varchar(500) DEFAULT NULL,
@@ -61,7 +61,7 @@ CREATE TABLE `lista_items` (
   `id` int(11) NOT NULL,
   `lista_id` int(11) NOT NULL,
   `content_id` int(11) NOT NULL,
-  `content_type` enum('movie','tv') NOT NULL,
+  `content_type` enum('movie','tv','anime') NOT NULL,
   `added_at` timestamp NULL DEFAULT current_timestamp()
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
@@ -77,6 +77,27 @@ CREATE TABLE `perfiles` (
   `name` varchar(100) NOT NULL,
   `avatar_url` varchar(500) NOT NULL,
   `is_kids` tinyint(1) NOT NULL DEFAULT 0,
+  `created_at` timestamp NULL DEFAULT current_timestamp()
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- --------------------------------------------------------
+
+--
+-- Estructura de tabla para la tabla `imagenes`
+--
+
+CREATE TABLE `imagenes` (
+  `id` int(11) NOT NULL,
+  `filename` varchar(255) NOT NULL,
+  `original_name` varchar(255) NOT NULL,
+  `mime_type` varchar(100) NOT NULL,
+  `size` int(11) NOT NULL,
+  `width` int(11) DEFAULT NULL,
+  `height` int(11) DEFAULT NULL,
+  `url` varchar(500) NOT NULL,
+  `type` enum('poster','backdrop','avatar','thumbnail') NOT NULL,
+  `entity_id` int(11) DEFAULT NULL,
+  `entity_type` enum('contenido','perfil') DEFAULT NULL,
   `created_at` timestamp NULL DEFAULT current_timestamp()
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
@@ -127,6 +148,14 @@ ALTER TABLE `perfiles`
   ADD KEY `idx_perfiles_usuario_id` (`usuario_id`);
 
 --
+-- Indices de la tabla `imagenes`
+--
+ALTER TABLE `imagenes`
+  ADD PRIMARY KEY (`id`),
+  ADD KEY `idx_imagenes_type` (`type`),
+  ADD KEY `idx_imagenes_entity` (`entity_type`, `entity_id`);
+
+--
 -- Indices de la tabla `usuarios`
 --
 ALTER TABLE `usuarios`
@@ -159,6 +188,12 @@ ALTER TABLE `lista_items`
 -- AUTO_INCREMENT de la tabla `perfiles`
 --
 ALTER TABLE `perfiles`
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT;
+
+--
+-- AUTO_INCREMENT de la tabla `imagenes`
+--
+ALTER TABLE `imagenes`
   MODIFY `id` int(11) NOT NULL AUTO_INCREMENT;
 
 --

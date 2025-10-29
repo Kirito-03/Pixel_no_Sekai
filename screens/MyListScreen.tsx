@@ -14,9 +14,11 @@ import { RootStackParamList } from '../types';
 import { useProfile } from '../contexts/ProfileContext';
 import { useMyList } from '../contexts/MyListContext';
 import MovieCard from '../components/MovieCard';
+import MovieModal from '../components/MovieModal';
 import { colors, spacing } from '../theme';
 import databaseService from '../services/databaseService';
 import { getMovieDetails } from '../services/api';
+import { ContentItem } from '../types';
 
 // Definir interfaz Movie localmente
 interface Movie {
@@ -39,6 +41,8 @@ export default function MyListScreen({ navigation }: Props) {
   const [movies, setMovies] = useState<Movie[]>([]);
   const [loading, setLoading] = useState(true);
   const [profileName, setProfileName] = useState<string>('');
+  const [selectedContent, setSelectedContent] = useState<ContentItem | null>(null);
+  const [modalVisible, setModalVisible] = useState(false);
 
   useFocusEffect(
     useCallback(() => {
@@ -126,6 +130,24 @@ export default function MyListScreen({ navigation }: Props) {
     );
   };
 
+  const handleContentPress = (item: Movie) => {
+    // Convertir Movie a ContentItem para el modal
+    const contentItem: ContentItem = {
+      id: item.id!,
+      type: 'movie', // Asumimos que son películas por ahora
+      title: item.title,
+      overview: item.description || '',
+      poster_path: item.posterUrl || '',
+      backdrop_path: item.backdropUrl || '',
+      release_date: item.releaseYear?.toString() || '',
+      vote_average: item.rating || 0,
+      source: 'tmdb',
+    };
+    
+    setSelectedContent(contentItem);
+    setModalVisible(true);
+  };
+
   const renderMovie = ({ item }: { item: Movie }) => (
     <View style={styles.movieContainer}>
       <MovieCard
@@ -138,7 +160,7 @@ export default function MyListScreen({ navigation }: Props) {
           release_date: item.releaseYear?.toString() || '',
           vote_average: item.rating || 0,
         }}
-        onPress={() => navigation.navigate('MovieDetail', { movieId: item.id! })}
+        onPress={() => handleContentPress(item)}
       />
       <TouchableOpacity
         style={styles.removeButton}
@@ -191,6 +213,16 @@ export default function MyListScreen({ navigation }: Props) {
         contentContainerStyle={styles.listContainer}
         ListEmptyComponent={renderEmptyList}
         showsVerticalScrollIndicator={false}
+      />
+
+      {/* Modal de detalles */}
+      <MovieModal
+        content={selectedContent}
+        visible={modalVisible}
+        onClose={() => {
+          setModalVisible(false);
+          setSelectedContent(null);
+        }}
       />
     </View>
   );

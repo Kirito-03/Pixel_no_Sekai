@@ -156,6 +156,7 @@ export default function CategoryScreen({ navigation, route }: Props) {
         backdrop_path: item.backdrop_path,
         release_date: type === 'movie' ? item.release_date : item.first_air_date,
         vote_average: item.vote_average,
+        source: 'tmdb',
       };
       
       setSelectedContent(contentItem);

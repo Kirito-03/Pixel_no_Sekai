@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { View, TextInput, FlatList, StyleSheet, Text } from 'react-native';
-import { searchMovies, getMovieDetails } from '../services/api';
+import { searchAllContent, getMovieDetails } from '../services/api';
 import MovieCard from '../components/MovieCard';
 import MovieModal from '../components/MovieModal';
 import { colors, spacing } from '../theme';
@@ -8,40 +8,35 @@ import { MovieDetail, ContentItem } from '../types';
 
 export default function SearchScreen() {
   const [query, setQuery] = useState('');
-  const [results, setResults] = useState<any[]>([]);
+  const [results, setResults] = useState<ContentItem[]>([]);
   const [selectedContent, setSelectedContent] = useState<ContentItem | null>(null);
   const [modalVisible, setModalVisible] = useState(false);
+  const [loading, setLoading] = useState(false);
 
   const handleSearch = async (text: string) => {
     setQuery(text);
     if (text.length > 2) {
-      const movies = await searchMovies(text);
-      setResults(movies);
+      setLoading(true);
+      try {
+        const allContent = await searchAllContent(text);
+        setResults(allContent);
+      } catch (error) {
+        console.error('Error searching content:', error);
+        setResults([]);
+      } finally {
+        setLoading(false);
+      }
     } else {
       setResults([]);
     }
   };
 
-  const handleMoviePress = async (id: number) => {
-    try {
-      const movieDetails = await getMovieDetails(id);
-      
-      // Crear ContentItem para el modal
-      const content: ContentItem = {
-        id: movieDetails.id,
-        type: 'movie',
-        title: movieDetails.title,
-        overview: movieDetails.overview,
-        poster_path: movieDetails.poster_path,
-        backdrop_path: movieDetails.backdrop_path,
-        release_date: movieDetails.release_date,
-        vote_average: movieDetails.vote_average,
-      };
-      
-      setSelectedContent(content);
+  const handleMoviePress = (id: number) => {
+    // Buscar el item en los resultados actuales
+    const contentItem = results.find(item => item.id === id);
+    if (contentItem) {
+      setSelectedContent(contentItem);
       setModalVisible(true);
-    } catch (error) {
-      console.error('Error loading movie details:', error);
     }
   };
 

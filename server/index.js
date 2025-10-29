@@ -6,8 +6,24 @@ import mysql from 'mysql2/promise';
 dotenv.config({ path: new URL('../.env', import.meta.url).pathname });
 
 const app = express();
-app.use(cors());
+
+// Configuración de CORS más permisiva para desarrollo
+app.use(cors({
+  origin: true, // Permitir cualquier origen en desarrollo
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'Accept']
+}));
+
 app.use(express.json());
+
+// Middleware de logging para desarrollo
+if (process.env.NODE_ENV !== 'production') {
+  app.use((req, res, next) => {
+    console.log(`${new Date().toISOString()} - ${req.method} ${req.url}`);
+    next();
+  });
+}
 
 // DB pool
 const pool = mysql.createPool({
@@ -167,7 +183,84 @@ app.delete('/my-list/:perfilId/items/:contentId/:type', async (req, res) => {
   }
 });
 
+// Content: get all content
+app.get('/content', async (req, res) => {
+  try {
+    const [rows] = await pool.query('SELECT * FROM contenido ORDER BY created_at DESC');
+    res.json(rows);
+  } catch (e) {
+    res.status(500).json({ message: 'Error al obtener contenido', error: e.message });
+  }
+});
+
+// Content: get content by type
+app.get('/content/:type', async (req, res) => {
+  const type = req.params.type;
+  if (!['movie', 'tv', 'anime'].includes(type)) return res.status(400).json({ message: 'Tipo de contenido inválido' });
+  try {
+    const [rows] = await pool.query('SELECT * FROM contenido WHERE type = ? ORDER BY created_at DESC', [type]);
+    res.json(rows);
+  } catch (e) {
+    res.status(500).json({ message: 'Error al obtener contenido', error: e.message });
+  }
+});
+
+// Content: add new content
+app.post('/content', async (req, res) => {
+  const { title, type, overview, poster_url, backdrop_url } = req.body || {};
+  if (!title || !type || !['movie', 'tv', 'anime'].includes(type)) {
+    return res.status(400).json({ message: 'Datos de contenido incompletos o inválidos' });
+  }
+  try {
+    const [result] = await pool.query(
+      'INSERT INTO contenido (title, type, overview, poster_url, backdrop_url) VALUES (?, ?, ?, ?, ?)',
+      [title, type, overview, poster_url, backdrop_url]
+    );
+    res.status(201).json({ id: result.insertId });
+  } catch (e) {
+    res.status(500).json({ message: 'Error al crear contenido', error: e.message });
+  }
+});
+
+// Images: upload image metadata
+app.post('/images', async (req, res) => {
+  const { filename, original_name, mime_type, size, width, height, url, type, entity_id, entity_type } = req.body || {};
+  if (!filename || !url || !type || !['poster', 'backdrop', 'avatar', 'thumbnail'].includes(type)) {
+    return res.status(400).json({ message: 'Datos de imagen incompletos o inválidos' });
+  }
+  try {
+    const [result] = await pool.query(
+      'INSERT INTO imagenes (filename, original_name, mime_type, size, width, height, url, type, entity_id, entity_type) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [filename, original_name, mime_type, size, width, height, url, type, entity_id, entity_type]
+    );
+    res.status(201).json({ id: result.insertId });
+  } catch (e) {
+    res.status(500).json({ message: 'Error al guardar imagen', error: e.message });
+  }
+});
+
+// Images: get images by entity
+app.get('/images/:entity_type/:entity_id', async (req, res) => {
+  const { entity_type, entity_id } = req.params;
+  if (!['contenido', 'perfil'].includes(entity_type)) {
+    return res.status(400).json({ message: 'Tipo de entidad inválido' });
+  }
+  try {
+    const [rows] = await pool.query(
+      'SELECT * FROM imagenes WHERE entity_type = ? AND entity_id = ? ORDER BY created_at DESC',
+      [entity_type, entity_id]
+    );
+    res.json(rows);
+  } catch (e) {
+    res.status(500).json({ message: 'Error al obtener imágenes', error: e.message });
+  }
+});
+
 const PORT = process.env.PORT || 3001;
-app.listen(PORT, () => {
-  console.log(`Backend escuchando en http://localhost:${PORT}`);
+const HOST = process.env.HOST || '0.0.0.0'; // Escuchar en todas las interfaces
+
+app.listen(PORT, HOST, () => {
+  console.log(`Backend escuchando en http://${HOST}:${PORT}`);
+  console.log(`Acceso local: http://localhost:${PORT}`);
+  console.log(`Acceso desde emulador Android: http://10.0.2.2:${PORT}`);
 });

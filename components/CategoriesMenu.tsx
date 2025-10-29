@@ -9,22 +9,18 @@ interface CategoriesMenuProps {
   currentCategoryId?: string;
 }
 
-// Categorías con contenido disponible
+// Categorías con contenido disponible (sincronizadas con ENHANCED_CATEGORIES)
 const categories = [
   { id: 'inicio', label: 'Inicio' },
   { id: 'mi-lista', label: 'Mi lista' },
-  { id: 'action', label: 'Acción' },
-  { id: 'anime', label: 'Animes' },
-  { id: 'comedy', label: 'Comedias' },
-  { id: 'documentaries', label: 'Documentales' },
-  { id: 'drama', label: 'Dramas' },
-  { id: 'fantasy', label: 'Fantasía' },
-  { id: 'family', label: 'Para ver en familia' },
-  { id: 'music', label: 'Música y musicales' },
-  { id: 'romance', label: 'Romances' },
-  { id: 'scifi', label: 'Sci-fi' },
-  { id: 'horror', label: 'Terror' },
-  { id: 'thriller', label: 'Thrillers' },
+  { id: 'popular_all', label: 'Popular Ahora' },
+  { id: 'top_rated_all', label: 'Mejor Valorado' },
+  { id: 'current_all', label: 'En Emisión/Cartelera' },
+  { id: 'popular_anime', label: 'Anime Popular' },
+  { id: 'airing_anime', label: 'Anime en Emisión' },
+  { id: 'top_anime', label: 'Mejor Anime' },
+  { id: 'popular_movies', label: 'Películas Populares' },
+  { id: 'popular_tv', label: 'Series Populares' },
 ];
 
 export default function CategoriesMenu({ visible, onClose, onSelectCategory, currentCategoryId }: CategoriesMenuProps) {

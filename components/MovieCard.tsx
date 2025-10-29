@@ -6,11 +6,11 @@ import {
   useWindowDimensions, 
   Animated 
 } from 'react-native';
-import { Movie } from '../types';
+import { Movie, TVShow, ContentItem } from '../types';
 import { getImageUrl } from '../services/api';
 
 interface Props {
-  movie: Movie;
+  movie: Movie | TVShow | ContentItem;
   onPress: () => void;
 }
 
@@ -20,6 +20,22 @@ export default function MovieCard({ movie, onPress }: Props) {
   // Aumentamos el tamaño de las tarjetas para que se vean mejor
   const CARD_WIDTH = isSmallScreen ? width * 0.32 : 130;
   const CARD_HEIGHT = CARD_WIDTH * 1.5; // Relación de aspecto 2:3 para posters
+  
+  // Función para obtener la URL de la imagen según la fuente
+  const getImageSource = () => {
+    // Si es ContentItem (unificado)
+    if ('source' in movie) {
+      if (movie.source === 'anilist') {
+        // Para AniList, usar la URL directa
+        return movie.poster_path;
+      } else {
+        // Para TMDB, usar la función getImageUrl
+        return getImageUrl(movie.poster_path, 'w500');
+      }
+    }
+    // Si es Movie/TVShow (legacy), usar TMDB
+    return getImageUrl(movie.poster_path, 'w500');
+  };
   
   const scaleAnim = useRef(new Animated.Value(1)).current;
 
@@ -76,7 +92,7 @@ export default function MovieCard({ movie, onPress }: Props) {
         activeOpacity={0.9}
       >
         <Image
-          source={{ uri: getImageUrl(movie.poster_path, 'w500') }}
+          source={{ uri: getImageSource() }}
           style={dynamicStyles.image}
           resizeMode="cover"
         />

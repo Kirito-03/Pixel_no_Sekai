@@ -53,20 +53,75 @@ export interface TVShowDetail extends TVShow {
   };
 }
 
-// Tipos unificados para contenido (película o serie)
-export type Content = Movie | TVShow;
-export type ContentDetail = MovieDetail | TVShowDetail;
+// Tipos para Anime (AniList)
+export interface Anime {
+  id: number;
+  title: {
+    romaji: string;
+    english?: string;
+    native: string;
+  };
+  description: string;
+  coverImage: {
+    large: string;
+    medium: string;
+  };
+  bannerImage?: string;
+  startDate: {
+    year: number;
+    month?: number;
+    day?: number;
+  };
+  averageScore: number;
+  episodes?: number;
+  status: string;
+  genres: string[];
+  format: string; // TV, MOVIE, OVA, etc.
+  source: 'anilist';
+}
 
-// Tipo discriminador para saber si es película o serie
+export interface AnimeDetail extends Anime {
+  duration?: number;
+  studios: {
+    nodes: { name: string }[];
+  };
+  trailer?: {
+    id: string;
+    site: string;
+  };
+  characters: {
+    nodes: {
+      id: number;
+      name: {
+        full: string;
+      };
+      image: {
+        medium: string;
+      };
+    }[];
+  };
+  recommendations: {
+    nodes: {
+      mediaRecommendation: Anime;
+    }[];
+  };
+}
+
+// Tipos unificados para contenido (película, serie o anime)
+export type Content = Movie | TVShow | Anime;
+export type ContentDetail = MovieDetail | TVShowDetail | AnimeDetail;
+
+// Tipo discriminador para saber si es película, serie o anime
 export interface ContentItem {
   id: number;
-  type: 'movie' | 'tv';
+  type: 'movie' | 'tv' | 'anime';
   title: string;
   overview: string;
   poster_path: string;
   backdrop_path: string;
   release_date: string;
   vote_average: number;
+  source: 'tmdb' | 'anilist';
 }
 
 // Navegación
@@ -85,8 +140,8 @@ export type TabParamList = {
 
 export type HomeStackParamList = {
   HomeScreen: undefined;
-  MovieDetail: { movieId: number };
-  Category: { categoryId: string; categoryName: string };
+  MovieDetail: { movieId: number; type?: 'movie' | 'tv' | 'anime'; source?: 'tmdb' | 'anilist' };
+  Category: { categoryId: string; categoryName: string; source?: 'tmdb' | 'anilist' };
   MyList: undefined;
 };
 

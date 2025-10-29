@@ -10,13 +10,13 @@ import {
   GestureResponderHandlers
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { Movie } from '../types';
+import { Movie, TVShow, ContentItem } from '../types';
 import MovieCard from './MovieCard';
 import { colors, spacing } from '../theme';
 
 interface Props {
   title: string;
-  movies: Movie[];
+  movies: (Movie | TVShow | ContentItem)[];
   onMoviePress: (id: number) => void;
 }
 
@@ -29,7 +29,7 @@ export default function MovieRow({ title, movies, onMoviePress }: Props) {
   const CARDS_PER_SCREEN = Math.floor(width / TOTAL_CARD_WIDTH);
   const SCROLL_AMOUNT = TOTAL_CARD_WIDTH * CARDS_PER_SCREEN;
   
-  const flatListRef = useRef<FlatList<Movie>>(null);
+  const flatListRef = useRef<FlatList<Movie | TVShow | ContentItem>>(null);
   const [scrollX, setScrollX] = useState(0);
   const [showLeftArrow, setShowLeftArrow] = useState(false);
   const [showRightArrow, setShowRightArrow] = useState(true);
@@ -104,7 +104,6 @@ export default function MovieRow({ title, movies, onMoviePress }: Props) {
     },
     listContainer: {
       position: 'relative' as const,
-      cursor: Platform.OS === 'web' ? 'grab' : 'auto',
     },
     list: {
       paddingHorizontal: isSmallScreen ? spacing.sm : spacing.md,
@@ -120,7 +119,6 @@ export default function MovieRow({ title, movies, onMoviePress }: Props) {
       justifyContent: 'center' as const,
       alignItems: 'center' as const,
       zIndex: 99,
-      cursor: 'pointer' as const,
     },
     leftArrow: {
       left: 0,
@@ -138,10 +136,20 @@ export default function MovieRow({ title, movies, onMoviePress }: Props) {
     <View style={dynamicStyles.container}>
       <Text style={dynamicStyles.title}>{title}</Text>
       
-      <View style={dynamicStyles.listContainer} {...(panResponder.panHandlers as GestureResponderHandlers)}>
+      <View 
+        style={[
+          dynamicStyles.listContainer,
+          Platform.OS === 'web' && ({ cursor: 'grab' } as any)
+        ]} 
+        {...(panResponder.panHandlers as GestureResponderHandlers)}
+      >
         {showLeftArrow && !isSmallScreen && (
           <TouchableOpacity 
-            style={[dynamicStyles.arrow, dynamicStyles.leftArrow]}
+            style={[
+              dynamicStyles.arrow, 
+              dynamicStyles.leftArrow,
+              Platform.OS === 'web' && ({ cursor: 'pointer' } as any)
+            ]}
             onPress={handleLeftArrow}
             activeOpacity={0.8}
           >
@@ -166,7 +174,11 @@ export default function MovieRow({ title, movies, onMoviePress }: Props) {
 
         {showRightArrow && !isSmallScreen && (
           <TouchableOpacity 
-            style={[dynamicStyles.arrow, dynamicStyles.rightArrow]}
+            style={[
+              dynamicStyles.arrow, 
+              dynamicStyles.rightArrow,
+              Platform.OS === 'web' && ({ cursor: 'pointer' } as any)
+            ]}
             onPress={handleRightArrow}
             activeOpacity={0.8}
           >

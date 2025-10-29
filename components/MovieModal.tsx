@@ -13,6 +13,7 @@ import {
   Platform,
   FlatList,
   Alert,
+  StatusBar,
 } from 'react-native';
 import { WebView } from 'react-native-webview';
 import { Ionicons } from '@expo/vector-icons';
@@ -30,6 +31,7 @@ import {
 import { colors, spacing } from '../theme';
 import { useProfile } from '../contexts/ProfileContext';
 import { useMyList } from '../contexts/MyListContext';
+import AnimeSeriesModal from './AnimeSeriesModal';
 
 interface MovieModalProps {
   content: ContentItem | null;
@@ -56,7 +58,9 @@ export default function MovieModal({
   const [loading, setLoading] = useState(true);
   const [relatedContent, setRelatedContent] = useState<(Movie | TVShow)[]>([]);
   const [loadingRelated, setLoadingRelated] = useState(false);
-  const [activeTab, setActiveTab] = useState<'similar'>('similar');
+  const [showTrailer, setShowTrailer] = useState(false);
+  const [trailerDelay, setTrailerDelay] = useState(false);
+  const [trailerFinished, setTrailerFinished] = useState(false);
   
   const { currentProfile } = useProfile();
   const { isInMyList, toggleMyList } = useMyList();
@@ -65,7 +69,7 @@ export default function MovieModal({
   const isSmallScreen = width < 768;
   
   const fadeAnim = useRef(new Animated.Value(0)).current;
-  const slideAnim = useRef(new Animated.Value(50)).current;
+  const slideAnim = useRef(new Animated.Value(height)).current;
 
   // Verificar si el contenido actual está en Mi Lista
   const currentInMyList = currentContent ? isInMyList(currentContent.id, currentContent.type) : false;
@@ -79,7 +83,12 @@ export default function MovieModal({
 
   useEffect(() => {
     if (visible && currentContent) {
-      // Animación de entrada
+      // Si es anime o serie, no ejecutar la lógica de MovieModal
+      if (currentContent.type === 'anime' || currentContent.type === 'tv') {
+        return;
+      }
+      
+      // Animación de entrada estilo Netflix
       Animated.parallel([
         Animated.timing(fadeAnim, {
           toValue: 1,
@@ -88,7 +97,7 @@ export default function MovieModal({
         }),
         Animated.timing(slideAnim, {
           toValue: 0,
-          duration: 300,
+          duration: 400,
           useNativeDriver: true,
         }),
       ]).start();
@@ -96,13 +105,32 @@ export default function MovieModal({
       // Cargar detalles del contenido
       loadContentDetails();
       loadRelatedContent();
+      
+      // Delay de 3 segundos para mostrar el trailer en el fondo
+      const trailerTimer = setTimeout(() => {
+        if (trailerKey && !trailerFinished) {
+          setTrailerDelay(true);
+          // El trailer se reproducirá hasta el final natural del video
+          // No limitamos artificialmente el tiempo
+        }
+      }, 3000);
+      
+      return () => {
+        clearTimeout(trailerTimer);
+        // Solo resetear si el modal se cierra completamente
+        if (!visible) {
+          setTrailerDelay(false);
+          setTrailerFinished(false);
+        }
+      };
     } else {
       // Reset animaciones y estado
       fadeAnim.setValue(0);
-      slideAnim.setValue(50);
-      setActiveTab('similar');
+      slideAnim.setValue(height);
+      setShowTrailer(false);
+      setTrailerDelay(false);
     }
-  }, [visible, currentContent]);
+  }, [visible, currentContent, trailerKey]);
 
   const loadContentDetails = async () => {
     if (!currentContent) return;
@@ -112,8 +140,14 @@ export default function MovieModal({
       let details;
       if (currentContent.type === 'movie') {
         details = await getMovieDetails(currentContent.id);
-      } else {
+      } else if (currentContent.type === 'tv') {
         details = await getTVShowDetails(currentContent.id);
+      } else if (currentContent.type === 'anime') {
+        // Para anime, usar getMovieDetails ya que muchos animes están en TMDB como películas
+        details = await getMovieDetails(currentContent.id);
+      } else {
+        // Fallback
+        details = await getMovieDetails(currentContent.id);
       }
       
       setDetailData(details);
@@ -151,15 +185,33 @@ export default function MovieModal({
       let recommended = [];
       
       if (currentContent.type === 'movie') {
+        try {
         [similar, recommended] = await Promise.all([
           getSimilarMovies(currentContent.id),
           getRecommendedMovies(currentContent.id),
         ]);
-      } else {
+        } catch (error) {
+          console.log('Error loading movie related content, using fallback');
+          similar = await getMoviesByGenre(detailData?.genres?.[0]?.id || 28, 1);
+        }
+      } else if (currentContent.type === 'tv') {
+        try {
         [similar, recommended] = await Promise.all([
           getSimilarTVShows(currentContent.id),
           getRecommendedTVShows(currentContent.id),
         ]);
+        } catch (error) {
+          console.log('Error loading TV related content, using fallback');
+          similar = await getTVShowsByGenre(detailData?.genres?.[0]?.id || 10759, 1);
+        }
+      } else if (currentContent.type === 'anime') {
+        // Para anime, usar películas de animación como similares
+        similar = await getMoviesByGenre(16, 1); // Género animación
+        recommended = await getMoviesByGenre(16, 2); // Más animación
+      } else {
+        // Fallback
+        similar = await getAllPopularContent();
+        recommended = [];
       }
       
       // Combinar y eliminar duplicados
@@ -168,10 +220,20 @@ export default function MovieModal({
         index === self.findIndex((t) => t.id === item.id)
       );
       
-      setRelatedContent(uniqueContent.slice(0, 30));
+      setRelatedContent(uniqueContent.slice(0, 20));
     } catch (error) {
       console.error('Error loading related content:', error);
+      // Fallback: cargar contenido popular
+      try {
+        const fallbackContent = await getAllPopularContent();
+        const filteredFallback = fallbackContent
+          .filter(item => item.id !== currentContent.id)
+          .slice(0, 10);
+        setRelatedContent(filteredFallback);
+      } catch (fallbackError) {
+        console.error('Fallback also failed:', fallbackError);
       setRelatedContent([]);
+      }
     } finally {
       setLoadingRelated(false);
     }
@@ -189,6 +251,7 @@ export default function MovieModal({
       backdrop_path: item.backdrop_path,
       release_date: isMovie ? (item as Movie).release_date : (item as TVShow).first_air_date,
       vote_average: item.vote_average,
+      source: 'tmdb',
     };
     
     // Actualizar el contenido actual - esto recargará el modal con el nuevo contenido
@@ -292,7 +355,7 @@ export default function MovieModal({
   };
 
   const handleClose = () => {
-    // Animación de salida
+    // Animación de salida estilo Netflix
     Animated.parallel([
       Animated.timing(fadeAnim, {
         toValue: 0,
@@ -300,8 +363,8 @@ export default function MovieModal({
         useNativeDriver: true,
       }),
       Animated.timing(slideAnim, {
-        toValue: 50,
-        duration: 200,
+        toValue: height,
+        duration: 300,
         useNativeDriver: true,
       }),
     ]).start(() => {
@@ -311,54 +374,22 @@ export default function MovieModal({
       setDetailData(null);
       setTrailerKey(null);
       setRelatedContent([]);
+      setShowTrailer(false);
     });
   };
 
   if (!currentContent && !movie) return null;
 
-  // Estilos dinámicos basados en el tamaño de pantalla actual
-  const dynamicStyles = StyleSheet.create({
-    background: {
-      flex: 1,
-      backgroundColor: 'rgba(0, 0, 0, 0.95)',
-      justifyContent: isSmallScreen ? 'flex-start' : 'center',
-      alignItems: 'center',
-    } as any,
-    backgroundTouchable: {
-      flex: 1,
-      width: '100%',
-      justifyContent: isSmallScreen ? 'flex-start' : 'center',
-      alignItems: 'center',
-    } as any,
-    content: {
-      backgroundColor: '#181818',
-      width: isSmallScreen ? '100%' : width * 0.95,
-      maxWidth: isSmallScreen ? width : 900,
-      height: isSmallScreen ? '100%' : undefined,
-      maxHeight: isSmallScreen ? height : height * 0.95,
-      borderRadius: isSmallScreen ? 0 : 12,
-      overflow: 'hidden',
-    } as any,
-    closeButton: {
-      position: 'absolute',
-      top: isSmallScreen ? 10 : 15,
-      right: isSmallScreen ? 10 : 15,
-      backgroundColor: 'rgba(20, 20, 20, 0.9)',
-      borderRadius: 25,
-      width: isSmallScreen ? 40 : 45,
-      height: isSmallScreen ? 40 : 45,
-      justifyContent: 'center',
-      alignItems: 'center',
-      zIndex: 10000,
-    } as any,
-    videoContainer: {
-      width: '100%',
-      height: isSmallScreen ? width * 0.56 : 400,
-      backgroundColor: '#000',
-      justifyContent: 'center',
-      alignItems: 'center',
-    } as any,
-  });
+  // Si es anime o serie, usar el componente específico
+  if (currentContent && (currentContent.type === 'anime' || currentContent.type === 'tv')) {
+    return (
+      <AnimeSeriesModal
+        content={currentContent}
+        visible={visible}
+        onClose={onClose}
+      />
+    );
+  }
 
   return (
     <Modal
@@ -366,16 +397,18 @@ export default function MovieModal({
       transparent
       animationType="none"
       onRequestClose={handleClose}
+      statusBarTranslucent
     >
-      <Animated.View style={[dynamicStyles.background, { opacity: fadeAnim }]}>
+      <StatusBar backgroundColor="rgba(0,0,0,0.9)" barStyle="light-content" />
+      <Animated.View style={[styles.background, { opacity: fadeAnim }]}>
         <TouchableOpacity
-          style={dynamicStyles.backgroundTouchable}
+          style={styles.backgroundTouchable}
           activeOpacity={1}
           onPress={handleClose}
         >
           <Animated.View
             style={[
-              dynamicStyles.content,
+              styles.content,
               {
                 transform: [{ translateY: slideAnim }],
                 opacity: fadeAnim,
@@ -383,183 +416,229 @@ export default function MovieModal({
             ]}
             onStartShouldSetResponder={() => true}
           >
-            {/* Botón cerrar */}
-            <TouchableOpacity style={dynamicStyles.closeButton} onPress={handleClose}>
-              <Ionicons name="close" size={isSmallScreen ? 22 : 25} color={colors.text} />
+            {/* Botón cerrar estilo Netflix */}
+            <TouchableOpacity style={styles.closeButton} onPress={handleClose}>
+              <Ionicons name="close" size={28} color="#FFFFFF" />
             </TouchableOpacity>
 
-            <ScrollView showsVerticalScrollIndicator={false}>
-              {/* Video del trailer */}
-              <View style={dynamicStyles.videoContainer}>
-                {loading && (
-                  <View style={styles.loadingContainer}>
-                    <ActivityIndicator size="large" color={colors.primary} />
-                    <Text style={styles.loadingText}>Cargando trailer...</Text>
-                  </View>
-                )}
-
-                {!loading && trailerKey && (
-                  Platform.OS === 'web' ? (
-                    // Para Web: usar iframe estándar
+            <ScrollView showsVerticalScrollIndicator={false} style={styles.scrollView}>
+              {/* Hero Section con backdrop */}
+              <View style={styles.heroSection}>
+                {/* Imagen de fondo o trailer */}
+                {trailerDelay && trailerKey && !trailerFinished ? (
+                  <View style={styles.trailerBackground}>
+                    {Platform.OS === 'web' ? (
                     <iframe
                       style={{
                         width: '100%',
                         height: '100%',
                         border: 'none',
+                          position: 'absolute',
+                          top: 0,
+                          left: 0,
                       }}
-                      src={`https://www.youtube.com/embed/${trailerKey}?autoplay=0&controls=1&modestbranding=1`}
+                        src={`https://www.youtube.com/embed/${trailerKey}?autoplay=1&controls=0&modestbranding=1&loop=0&playlist=${trailerKey}&rel=0&showinfo=0`}
                       allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
                       allowFullScreen
+                        onLoad={() => {
+                          // Cuando el iframe carga, configuramos un listener para el final del video
+                          setTimeout(() => {
+                            setTrailerDelay(false);
+                            setTrailerFinished(true);
+                            // Mostrar imagen de fondo cuando termine el trailer
+                          }, 120000); // 2 minutos máximo como fallback
+                        }}
                     />
                   ) : (
-                    // Para iOS/Android: usar WebView
                     <WebView
-                      style={styles.video}
+                        style={styles.trailerBackgroundVideo}
                       source={{
-                        uri: `https://www.youtube.com/embed/${trailerKey}?autoplay=0&controls=1&modestbranding=1`,
+                          uri: `https://www.youtube.com/embed/${trailerKey}?autoplay=1&controls=0&modestbranding=1&loop=0&playlist=${trailerKey}&rel=0&showinfo=0`,
                       }}
                       allowsFullscreenVideo
                       javaScriptEnabled
                       domStorageEnabled
-                    />
-                  )
-                )}
-
-                {!loading && !trailerKey && (
-                  <View style={styles.noTrailerContainer}>
-                    <Ionicons name="film-outline" size={50} color={colors.textGray} />
-                    <Text style={styles.noTrailerText}>
-                      No hay trailer disponible
-                    </Text>
+                        mediaPlaybackRequiresUserAction={false}
+                        scalesPageToFit={true}
+                        onLoadEnd={() => {
+                          // Fallback para móvil: después de 2 minutos vuelve a imagen
+                          setTimeout(() => {
+                            setTrailerDelay(false);
+                            setTrailerFinished(true);
+                            // Mostrar imagen de fondo cuando termine el trailer
+                          }, 120000);
+                        }}
+                      />
+                    )}
                   </View>
+                ) : (
+                  <>
+                    {currentContent?.backdrop_path && (
+                      <Image
+                        source={{ uri: getImageUrl(currentContent.backdrop_path, 'original') }}
+                        style={styles.backdropImage}
+                        resizeMode="cover"
+                      />
+                    )}
+                    <View style={styles.backdropOverlay} />
+                  </>
                 )}
+                
+                {/* Contenido sobre el backdrop - se oculta durante el trailer */}
+                {!trailerDelay && (
+                  <View style={styles.heroContent}>
+                    <View style={[styles.heroInfo, { maxWidth: isSmallScreen ? '90%' : '85%' }]}>
+                      <Text style={[styles.heroTitle, { fontSize: isSmallScreen ? 20 : 24 }]}>{getTitle()}</Text>
+                      
+                      {/* Metadata en línea horizontal */}
+                      <View style={styles.heroMetadata}>
+                        <Text style={styles.heroYear}>
+                          {getReleaseDate() ? new Date(getReleaseDate()).getFullYear() : ''}
+                        </Text>
+                        <Text style={styles.heroSeparator}>•</Text>
+                        <Text style={styles.heroRuntime}>
+                          {getRuntime() !== 0 ? formatRuntime(getRuntime()) : ''}
+                        </Text>
+                        <Text style={styles.heroSeparator}>•</Text>
+                        <Text style={styles.heroAgeRating}>{getAgeRating()}</Text>
+                        <Text style={styles.heroSeparator}>•</Text>
+                        <Text style={styles.heroRating}>
+                          ⭐ {currentContent?.vote_average.toFixed(1)}
+                        </Text>
               </View>
 
-              {/* Información del contenido */}
-              <View style={styles.info}>
-                <View style={styles.titleRow}>
-                  <Text style={styles.title}>
-                    {getTitle() || 'Sin título'}
+                      {/* Botones de acción estilo Netflix */}
+                      <View style={styles.actionButtons}>
+                        <TouchableOpacity style={styles.playButton}>
+                          <Ionicons name="play" size={20} color="#000" />
+                          <Text style={styles.playButtonText}>Ver ahora</Text>
+                        </TouchableOpacity>
+                        
+                        <TouchableOpacity 
+                          style={styles.myListButton}
+                          onPress={handleToggleList}
+                        >
+                          <Ionicons 
+                            name={currentInMyList ? "checkmark" : "add"} 
+                            size={20} 
+                            color="#FFFFFF" 
+                          />
+                          <Text style={styles.myListButtonText}>
+                            {currentInMyList ? "En mi lista" : "Mi lista"}
+                          </Text>
+                        </TouchableOpacity>
+
+                        {/* Botón de trailer invisible */}
+                        <TouchableOpacity 
+                          style={[styles.trailerButton, { opacity: 0 }]}
+                          onPress={() => setTrailerDelay(!trailerDelay)}
+                        >
+                          <Ionicons name={trailerDelay ? "pause-circle-outline" : "play-circle-outline"} size={20} color="#FFFFFF" />
+                          <Text style={styles.trailerButtonText}>
+                            {trailerDelay ? "Pausar Trailer" : "Ver Trailer"}
                   </Text>
-                  {currentContent && (
-                    <View style={styles.typeBadge}>
-                      <Text style={styles.typeText}>
-                        {currentContent.type === 'movie' ? '🎬 Película' : '📺 Serie'}
+                        </TouchableOpacity>
+                      </View>
+
+                      {/* Descripción después de los botones */}
+                      <Text style={styles.heroOverview} numberOfLines={6}>
+                        {currentContent?.overview || 'Sin descripción disponible'}
                       </Text>
+                    </View>
                     </View>
                   )}
                 </View>
 
-                {/* Metadata en una línea */}
-                {currentContent && (
-                  <View style={styles.metadataRow}>
-                    <View style={styles.ratingBadge}>
-                      <Text style={styles.ratingText}>⭐ {currentContent.vote_average.toFixed(1)}</Text>
-                    </View>
-                    {getRuntime() !== 0 && (
-                      <View style={styles.infoBadge}>
-                        <Text style={styles.badgeText}>{formatRuntime(getRuntime())}</Text>
-                      </View>
-                    )}
-                    <View style={styles.ageBadge}>
-                      <Text style={styles.ageText}>{getAgeRating()}</Text>
-                    </View>
+              {/* Información detallada */}
+              <View style={styles.detailsSection}>
+                {/* Géneros */}
+                {detailData?.genres && detailData.genres.length > 0 && (
+                  <View style={styles.detailRow}>
+                    <Text style={styles.detailLabel}>Géneros:</Text>
+                    <Text style={styles.detailValue}>
+                      {detailData.genres.map(g => g.name).join(', ')}
+                    </Text>
                   </View>
                 )}
 
-                {/* Información adicional de series */}
+                {/* Información específica según el tipo */}
                 {currentContent?.type === 'tv' && detailData && 'number_of_seasons' in detailData && (
-                  <View style={styles.infoRow}>
-                    <Ionicons name="list-outline" size={18} color={colors.textGray} />
-                    <Text style={styles.infoLabel}>Temporadas:</Text>
-                    <Text style={styles.infoValue}>
-                      {(detailData as TVShowDetail).number_of_seasons} temporadas, {(detailData as TVShowDetail).number_of_episodes} episodios
+                  <View style={styles.detailRow}>
+                    <Text style={styles.detailLabel}>Temporadas:</Text>
+                    <Text style={styles.detailValue}>
+                      {(detailData as TVShowDetail).number_of_seasons} temporada{(detailData as TVShowDetail).number_of_seasons !== 1 ? 's' : ''}
+                    </Text>
+                  </View>
+                )}
+
+                {/* Información de anime */}
+                {currentContent?.type === 'anime' && detailData && 'episodes' in detailData && (
+                  <View style={styles.detailRow}>
+                    <Text style={styles.detailLabel}>Episodios:</Text>
+                    <Text style={styles.detailValue}>
+                      {(detailData as any).episodes || 'En emisión'}
                     </Text>
                   </View>
                 )}
 
                 {/* Fecha de estreno */}
                 {getReleaseDate() && (
-                  <View style={styles.infoRow}>
-                    <Ionicons name="calendar-outline" size={18} color={colors.textGray} />
-                    <Text style={styles.infoLabel}>
-                      {currentContent?.type === 'movie' ? 'Estreno:' : 'Primera emisión:'}
+                  <View style={styles.detailRow}>
+                    <Text style={styles.detailLabel}>
+                      {currentContent?.type === 'movie' ? 'Estreno:' : 
+                       currentContent?.type === 'tv' ? 'Primera emisión:' : 
+                       currentContent?.type === 'anime' ? 'Estreno:' : 'Estreno:'}
                     </Text>
-                    <Text style={styles.infoValue}>{formatDate(getReleaseDate())}</Text>
+                    <Text style={styles.detailValue}>{formatDate(getReleaseDate())}</Text>
                   </View>
                 )}
-
-                {/* Géneros */}
-                {detailData?.genres && detailData.genres.length > 0 && (
-                  <View style={styles.infoRow}>
-                    <Ionicons name="pricetags-outline" size={18} color={colors.textGray} />
-                    <Text style={styles.infoLabel}>Géneros:</Text>
-                    <Text style={styles.infoValue}>
-                      {detailData.genres.map(g => g.name).join(', ')}
-                    </Text>
-                  </View>
-                )}
-
-                {/* Botón Mi Lista */}
-                <View style={styles.actionButtons}>
-                  <TouchableOpacity 
-                    style={styles.myListButton}
-                    onPress={handleToggleList}
-                  >
-                    <Ionicons 
-                      name={currentInMyList ? "checkmark" : "add"} 
-                      size={20} 
-                      color={colors.text} 
-                    />
-                    <Text style={styles.myListButtonText}>
-                      {currentInMyList ? "En mi lista" : "Mi lista"}
-                    </Text>
-                  </TouchableOpacity>
-                </View>
-
-                {/* Descripción */}
-                <View style={styles.overviewSection}>
-                  <Text style={styles.overviewTitle}>Sinopsis</Text>
-                  <Text style={styles.overview}>
-                    {currentContent?.overview || 'Sin descripción disponible'}
-                  </Text>
                 </View>
 
                 {/* Contenido relacionado */}
-                <View style={styles.similarSection}>
-                  <Text style={styles.similarTitle}>Más títulos similares</Text>
+              <View style={styles.relatedSection}>
+                <Text style={styles.relatedTitle}>
+                  {currentContent?.type === 'movie' ? 'Más películas similares' :
+                   currentContent?.type === 'tv' ? 'Más series similares' :
+                   currentContent?.type === 'anime' ? 'Más anime similar' :
+                   'Más títulos similares'}
+                </Text>
                   
                   {loadingRelated ? (
-                    <View style={styles.similarLoading}>
-                      <ActivityIndicator size="small" color={colors.primary} />
+                  <View style={styles.relatedLoading}>
+                    <ActivityIndicator size="small" color="#E50914" />
                     </View>
                   ) : relatedContent.length > 0 ? (
-                    <View style={styles.gridContainer}>
-                      {relatedContent.map((item) => {
+                  <FlatList
+                    data={relatedContent}
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    keyExtractor={(item) => item.id.toString()}
+                    renderItem={({ item }) => {
                         const isMovie = 'title' in item;
                         const title = isMovie ? (item as Movie).title : (item as TVShow).name;
                         
                         return (
                           <TouchableOpacity
-                            key={item.id}
-                            style={styles.gridCard}
+                          style={styles.relatedCard}
                             onPress={() => handleRelatedContentPress(item)}
                           >
                             <Image
                               source={{ uri: getImageUrl(item.poster_path, 'w500') }}
-                              style={styles.gridPoster}
+                            style={styles.relatedPoster}
                               resizeMode="cover"
                             />
+                          <Text style={styles.relatedTitle} numberOfLines={2}>
+                            {title}
+                          </Text>
                           </TouchableOpacity>
                         );
-                      })}
-                    </View>
+                    }}
+                  />
                   ) : (
-                    <Text style={styles.noSimilarText}>
+                  <Text style={styles.noRelatedText}>
                       No hay contenido relacionado disponible
                     </Text>
                   )}
-                </View>
               </View>
             </ScrollView>
           </Animated.View>
@@ -569,209 +648,239 @@ export default function MovieModal({
   );
 }
 
-// Estilos estáticos que no dependen del tamaño de pantalla
+// Estilos estilo Netflix
 const styles = StyleSheet.create({
-  info: {
-    padding: 24,
-  },
-  titleRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: 16,
-    gap: 12,
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: colors.text,
+  background: {
     flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.95)',
   },
-  typeBadge: {
-    backgroundColor: 'rgba(229, 9, 20, 0.15)',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 6,
-    borderWidth: 1,
-    borderColor: 'rgba(229, 9, 20, 0.4)',
+  backgroundTouchable: {
+    flex: 1,
+    width: '100%',
   },
-  typeText: {
-    color: colors.text,
-    fontSize: 12,
+  content: {
+    flex: 1,
+    backgroundColor: '#000000',
+    width: '100%',
+    height: '100%',
+    marginTop: 0,
+    marginBottom: 0,
+    paddingTop: 0,
+    paddingBottom: 0,
+  },
+  closeButton: {
+    position: 'absolute',
+    top: 20,
+    right: 20,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    borderRadius: 20,
+    width: 40,
+    height: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 1000,
+  },
+  scrollView: {
+    flex: 1,
+    height: '100%',
+  },
+  heroSection: {
+    height: '120%',
+    position: 'relative',
+    justifyContent: 'flex-end',
+    paddingBottom: 0,
+  },
+  trailerBackground: {
+    width: '100%',
+    height: '100%',
+    position: 'absolute',
+  },
+  trailerBackgroundVideo: {
+    width: '100%',
+    height: '100%',
+    position: 'absolute',
+    top: 0,
+    left: 0,
+  },
+  backdropImage: {
+    width: '100%',
+    height: '100%',
+    position: 'absolute',
+  },
+  backdropOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.4)',
+  },
+  heroContent: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    paddingHorizontal: 20,
+    paddingBottom: 20,
+    zIndex: 10,
+  },
+  heroInfo: {
+    maxWidth: '85%',
+  },
+  heroTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#FFFFFF',
+    marginBottom: 8,
+    textShadowColor: 'rgba(0, 0, 0, 0.8)',
+    textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 4,
+  },
+  heroMetadata: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 16,
+    flexWrap: 'wrap',
+  },
+  heroYear: {
+    color: '#FFFFFF',
+    fontSize: 16,
     fontWeight: '600',
+  },
+  heroSeparator: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    marginHorizontal: 8,
+    opacity: 0.7,
+  },
+  heroRuntime: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  heroAgeRating: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '600',
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  heroRating: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  heroOverview: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    lineHeight: 26,
+    marginTop: 0,
+    marginBottom: 16,
+    textShadowColor: 'rgba(0, 0, 0, 0.9)',
+    textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 4,
+    fontWeight: '400',
   },
   actionButtons: {
     flexDirection: 'row',
-    marginTop: 16,
-    marginBottom: 4,
+    alignItems: 'center',
     gap: 12,
+    marginTop: 12,
+    marginBottom: 16,
+  },
+  playButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 6,
+    gap: 8,
+  },
+  playButtonText: {
+    color: '#000000',
+    fontSize: 16,
+    fontWeight: 'bold',
   },
   myListButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    backgroundColor: 'rgba(109, 109, 110, 0.7)',
     paddingHorizontal: 20,
-    paddingVertical: 10,
+    paddingVertical: 12,
     borderRadius: 6,
-    borderWidth: 2,
-    borderColor: 'rgba(255, 255, 255, 0.4)',
     gap: 8,
   },
   myListButtonText: {
-    color: colors.text,
-    fontSize: 15,
+    color: '#FFFFFF',
+    fontSize: 16,
     fontWeight: '600',
   },
-  metadataRow: {
+  trailerButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 20,
-    flexWrap: 'wrap',
-    gap: 10,
-  },
-  ratingBadge: {
-    backgroundColor: '#ffd700',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 5,
-  },
-  ratingText: {
-    color: '#000',
-    fontSize: 14,
-    fontWeight: 'bold',
-  },
-  infoBadge: {
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 5,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.2)',
-  },
-  badgeText: {
-    color: colors.text,
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  ageBadge: {
-    backgroundColor: 'rgba(229, 9, 20, 0.2)',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 5,
-    borderWidth: 1,
-    borderColor: colors.primary,
-  },
-  ageText: {
-    color: colors.text,
-    fontSize: 14,
-    fontWeight: 'bold',
-  },
-  infoRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    marginBottom: 12,
+    backgroundColor: 'rgba(109, 109, 110, 0.7)',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 6,
     gap: 8,
   },
-  infoLabel: {
-    fontSize: 15,
-    color: colors.textGray,
+  trailerButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
     fontWeight: '600',
-    minWidth: 70,
   },
-  infoValue: {
-    fontSize: 15,
-    color: colors.text,
-    flex: 1,
-    flexWrap: 'wrap',
-  },
-  overviewSection: {
-    marginTop: 20,
-    paddingTop: 20,
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(255, 255, 255, 0.1)',
-  },
-  overviewTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: colors.text,
-    marginBottom: 10,
-  },
-  overview: {
-    fontSize: 15,
-    color: '#b3b3b3',
-    lineHeight: 24,
-  },
-  video: {
-    width: '100%',
-    height: '100%',
-  },
-  loadingContainer: {
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  loadingText: {
-    color: colors.text,
-    fontSize: 16,
-    marginTop: spacing.md,
-  },
-  noTrailerContainer: {
-    justifyContent: 'center',
-    alignItems: 'center',
+  detailsSection: {
     padding: 20,
+    backgroundColor: '#141414',
+    marginTop: 0,
   },
-  noTrailerText: {
-    fontSize: 16,
-    color: '#999',
-    textAlign: 'center',
-    marginTop: spacing.md,
+  detailRow: {
+    flexDirection: 'row',
+    marginBottom: 12,
+    alignItems: 'flex-start',
   },
-  similarSection: {
-    marginTop: 30,
-    paddingTop: 20,
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(255, 255, 255, 0.1)',
+  detailLabel: {
+    fontSize: 14,
+    color: '#777',
+    fontWeight: '600',
+    minWidth: 80,
+    marginRight: 12,
   },
-  similarTitle: {
+  detailValue: {
+    fontSize: 14,
+    color: '#FFFFFF',
+    flex: 1,
+  },
+  relatedSection: {
+    padding: 20,
+    backgroundColor: '#141414',
+  },
+  relatedTitle: {
     fontSize: 20,
     fontWeight: 'bold',
-    color: colors.text,
+    color: '#FFFFFF',
     marginBottom: 16,
   },
-  similarLoading: {
+  relatedLoading: {
     paddingVertical: 30,
     alignItems: 'center',
   },
-  gridContainer: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'flex-start',
-    gap: 6,
+  relatedCard: {
+    width: 120,
+    marginRight: 12,
   },
-  gridCard: {
-    width: '32%',
-    marginBottom: 6,
-  },
-  gridPoster: {
+  relatedPoster: {
     width: '100%',
-    aspectRatio: 2/3,
-    borderRadius: 4,
+    height: 180,
+    borderRadius: 6,
     backgroundColor: '#2a2a2a',
   },
-  trailersContainer: {
-    marginTop: 10,
-  },
-  trailerItem: {
-    marginBottom: 20,
-  },
-  trailerTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: colors.text,
-    marginBottom: 12,
-  },
-  noSimilarText: {
+  noRelatedText: {
     fontSize: 14,
-    color: colors.textGray,
+    color: '#777',
     textAlign: 'center',
     paddingVertical: 20,
   },

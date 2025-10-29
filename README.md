@@ -84,6 +84,9 @@ DB_NAME=bd_netflix
 
 # Backend
 BACKEND_URL=http://localhost:3001
+# Para dispositivos/emuladores usar IP local:
+# Android: http://10.0.2.2:3001
+# iOS: http://192.168.107.105:3001
 
 # TMDB API (opcional - para contenido actualizado)
 TMDB_API_KEY=tu_api_key_de_tmdb

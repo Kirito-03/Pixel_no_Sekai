@@ -10,7 +10,6 @@ import ProfileSelectionScreen from '../screens/ProfileSelectionScreen';
 import HomeScreen from '../screens/HomeScreen';
 import SearchScreen from '../screens/SearchScreen';
 import ProfileScreen from '../screens/ProfileScreen';
-import MovieDetailScreen from '../screens/MovieDetailScreen';
 import CategoryScreen from '../screens/CategoryScreen';
 import MyListScreen from '../screens/MyListScreen';
 import { colors } from '../theme';
@@ -23,7 +22,6 @@ function HomeNavigator() {
   return (
     <HomeStack.Navigator screenOptions={{ headerShown: false }}>
       <HomeStack.Screen name="HomeScreen" component={HomeScreen as any} />
-      <HomeStack.Screen name="MovieDetail" component={MovieDetailScreen as any} />
       <HomeStack.Screen name="Category" component={CategoryScreen as any} />
       <HomeStack.Screen name="MyList" component={MyListScreen as any} />
     </HomeStack.Navigator>

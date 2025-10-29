@@ -11,7 +11,6 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
-  // MEJORA: Importar los tipos de estilo para TypeScript
   ViewStyle,
   TextStyle,
 } from 'react-native';
@@ -20,7 +19,6 @@ import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../theme';
 import databaseService from '../services/databaseService';
 
-// MEJORA: Definir un tipo para la estructura de los estilos dinámicos
 type DynamicStyles = {
   scrollContent: ViewStyle;
   logoContainer: ViewStyle;
@@ -93,11 +91,10 @@ export default function LoginScreen({ navigation }: any) {
     logo: {
       fontSize: isSmallScreen ? 40 : 56,
       fontWeight: 'bold',
-      color: colors.primary,
+      color: '#E50914', // Rojo Netflix
       letterSpacing: 2,
     },
     formContainer: {
-      // TypeScript ahora entiende que este 'width' es para un estilo y lo acepta
       width: isSmallScreen ? '90%' : 450,
       alignSelf: 'center',
       backgroundColor: 'rgba(0,0,0,0.75)',
@@ -107,7 +104,7 @@ export default function LoginScreen({ navigation }: any) {
     title: {
       fontSize: isSmallScreen ? 28 : 32,
       fontWeight: 'bold',
-      color: colors.text,
+      color: '#FFFFFF',
       marginBottom: isSmallScreen ? 24 : 28,
     },
   }), [isSmallScreen]);
@@ -115,9 +112,7 @@ export default function LoginScreen({ navigation }: any) {
   return (
     <View style={styles.container}>
       <ImageBackground
-        source={{
-          uri: 'https://images.unsplash.com/photo-1517602302552-471fe67f1d36?q=80&w=1920&auto=format&fit=crop',
-        }}
+        source={require('../assets/fondo login.jpg')}
         style={styles.backgroundImage}
         blurRadius={2}
       >
@@ -135,7 +130,7 @@ export default function LoginScreen({ navigation }: any) {
               keyboardShouldPersistTaps="handled"
             >
               <View style={dynamicStyles.logoContainer}>
-                <Text style={dynamicStyles.logo}>DSIVIEW</Text>
+                <Text style={dynamicStyles.logo}>Pixel No Sekai</Text>
               </View>
 
               <View style={dynamicStyles.formContainer}>
@@ -229,7 +224,7 @@ export default function LoginScreen({ navigation }: any) {
                 </View>
 
                 <View style={styles.signupContainer}>
-                  <Text style={styles.signupText}>¿Primera vez en DSIView?</Text>
+                  <Text style={styles.signupText}>¿Primera vez en Pixel No Sekai?</Text>
                   <TouchableOpacity onPress={() => navigation.navigate('Register')}>
                     <Text style={styles.signupLink}>Regístrate aquí.</Text>
                   </TouchableOpacity>
@@ -239,13 +234,6 @@ export default function LoginScreen({ navigation }: any) {
                   Esta página está protegida por Google reCAPTCHA para comprobar que
                   no eres un robot.{' '}
                   <Text style={styles.infoLink}>Más info.</Text>
-                </Text>
-              </View>
-
-              <View style={styles.testCredentials}>
-                <Ionicons name="information-circle" size={18} color="#46d369" />
-                <Text style={styles.testCredentialsText}>
-                  Prueba con: admin / admin
                 </Text>
               </View>
             </ScrollView>
@@ -259,7 +247,7 @@ export default function LoginScreen({ navigation }: any) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor: '#000000', // Fondo negro como Netflix
   },
   backgroundImage: {
     flex: 1,
@@ -277,13 +265,13 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   input: {
-    backgroundColor: '#333',
+    backgroundColor: '#333333', // Gris oscuro como Netflix
     borderRadius: 4,
     padding: 16,
     fontSize: 16,
-    color: colors.text,
+    color: '#FFFFFF', // Texto blanco
     borderWidth: 1,
-    borderColor: '#333',
+    borderColor: '#333333',
   },
   eyeIcon: {
     position: 'absolute',
@@ -291,7 +279,7 @@ const styles = StyleSheet.create({
     top: 16,
   },
   loginButton: {
-    backgroundColor: colors.primary,
+    backgroundColor: '#E50914', // Rojo Netflix
     borderRadius: 4,
     padding: 16,
     alignItems: 'center',
@@ -299,7 +287,7 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   loginButtonText: {
-    color: colors.text,
+    color: '#FFFFFF', // Texto blanco
     fontSize: 16,
     fontWeight: 'bold',
   },
@@ -311,7 +299,7 @@ const styles = StyleSheet.create({
   separator: {
     flex: 1,
     height: 1,
-    backgroundColor: '#333',
+    backgroundColor: '#333333',
   },
   separatorText: {
     color: '#8c8c8c',
@@ -319,14 +307,14 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
   codeButton: {
-    backgroundColor: '#333',
+    backgroundColor: '#333333',
     borderRadius: 4,
     padding: 16,
     alignItems: 'center',
     marginBottom: 12,
   },
   codeButtonText: {
-    color: colors.text,
+    color: '#FFFFFF',
     fontSize: 14,
   },
   forgotPassword: {
@@ -356,8 +344,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   checkboxBoxChecked: {
-    backgroundColor: colors.text,
-    borderColor: colors.text,
+    backgroundColor: '#FFFFFF',
+    borderColor: '#FFFFFF',
   },
   rememberText: {
     color: '#b3b3b3',
@@ -374,7 +362,7 @@ const styles = StyleSheet.create({
     marginRight: 6,
   },
   signupLink: {
-    color: colors.text,
+    color: '#FFFFFF',
     fontSize: 16,
     fontWeight: 'bold',
   },

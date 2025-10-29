@@ -8,7 +8,7 @@ interface HeaderProps {
   black?: boolean;
   onProfilePress?: () => void;
   onSearchPress?: () => void;
-  onFilterChange?: (filter: 'series' | 'peliculas' | 'categorias') => void;
+  onFilterChange?: (filter: 'series' | 'movies' | 'all' | 'anime') => void;
   onCategorySelect?: (categoryId: string, categoryName: string) => void;
   currentCategoryId?: string;
 }
@@ -16,7 +16,7 @@ interface HeaderProps {
 export default function Header({ black = false, onProfilePress, onSearchPress, onFilterChange, onCategorySelect, currentCategoryId }: HeaderProps) {
   const { width } = useWindowDimensions();
   const isSmallScreen = width < 768;
-  const [selectedFilter, setSelectedFilter] = useState<'series' | 'peliculas' | 'categorias' | null>(null);
+  const [selectedFilter, setSelectedFilter] = useState<'series' | 'movies' | 'anime' | 'all' | null>(null);
   const [showCategoriesMenu, setShowCategoriesMenu] = useState(false);
   
   const backgroundOpacity = useRef(new Animated.Value(0)).current;
@@ -34,14 +34,13 @@ export default function Header({ black = false, onProfilePress, onSearchPress, o
     outputRange: ['rgba(0, 0, 0, 0)', 'rgba(20, 20, 20, 1)'],
   });
 
-  const handleFilterPress = (filter: 'series' | 'peliculas' | 'categorias') => {
-    if (filter === 'categorias') {
-      setShowCategoriesMenu(true);
-      setSelectedFilter('categorias');
-    } else {
-      setSelectedFilter(filter === selectedFilter ? null : filter);
-      onFilterChange?.(filter);
-    }
+  const handleFilterPress = (filter: 'series' | 'movies' | 'anime' | 'all') => {
+    setSelectedFilter(filter === selectedFilter ? null : filter);
+    onFilterChange?.(filter);
+  };
+
+  const handleCategoriesPress = () => {
+    setShowCategoriesMenu(true);
   };
 
   const handleCategorySelect = (categoryId: string, categoryName: string) => {
@@ -123,8 +122,26 @@ export default function Header({ black = false, onProfilePress, onSearchPress, o
           </View>
         </View>
 
-        {/* Filtros: Series, Películas, Categorías */}
+        {/* Filtros: Todo, Películas, Series, Anime, Categorías */}
         <View style={styles.filtersContainer}>
+          <TouchableOpacity 
+            style={[styles.filterButton, selectedFilter === 'all' && styles.filterButtonActive]}
+            onPress={() => handleFilterPress('all')}
+          >
+            <Text style={[styles.filterText, selectedFilter === 'all' && styles.filterTextActive]}>
+              Todo
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity 
+            style={[styles.filterButton, selectedFilter === 'movies' && styles.filterButtonActive]}
+            onPress={() => handleFilterPress('movies')}
+          >
+            <Text style={[styles.filterText, selectedFilter === 'movies' && styles.filterTextActive]}>
+              Películas
+            </Text>
+          </TouchableOpacity>
+
           <TouchableOpacity 
             style={[styles.filterButton, selectedFilter === 'series' && styles.filterButtonActive]}
             onPress={() => handleFilterPress('series')}
@@ -135,25 +152,25 @@ export default function Header({ black = false, onProfilePress, onSearchPress, o
           </TouchableOpacity>
 
           <TouchableOpacity 
-            style={[styles.filterButton, selectedFilter === 'peliculas' && styles.filterButtonActive]}
-            onPress={() => handleFilterPress('peliculas')}
+            style={[styles.filterButton, selectedFilter === 'anime' && styles.filterButtonActive]}
+            onPress={() => handleFilterPress('anime')}
           >
-            <Text style={[styles.filterText, selectedFilter === 'peliculas' && styles.filterTextActive]}>
-              Películas
+            <Text style={[styles.filterText, selectedFilter === 'anime' && styles.filterTextActive]}>
+              Anime
             </Text>
           </TouchableOpacity>
 
           <TouchableOpacity 
-            style={[styles.filterButton, selectedFilter === 'categorias' && styles.filterButtonActive]}
-            onPress={() => handleFilterPress('categorias')}
+            style={styles.filterButton}
+            onPress={handleCategoriesPress}
           >
-            <Text style={[styles.filterText, selectedFilter === 'categorias' && styles.filterTextActive]}>
+            <Text style={styles.filterText}>
               Categorías
             </Text>
             <Ionicons 
               name="chevron-down" 
               size={14} 
-              color={selectedFilter === 'categorias' ? colors.text : colors.textGray} 
+              color={colors.textGray} 
               style={{ marginLeft: 4 }}
             />
           </TouchableOpacity>

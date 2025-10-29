@@ -14,7 +14,11 @@ import {
     getAiringTodayTVShows,
     getTVShowsByGenre,
     getMovieDetails,
-    GENRES
+    GENRES,
+    ENHANCED_CATEGORIES,
+    getAllPopularContent,
+    getAllTopRatedContent,
+    getCurrentContent
 } from '../services/api';
 import { colors } from '../theme';
 import Header from '../components/Header';
@@ -29,27 +33,8 @@ type Props = NativeStackScreenProps<HomeStackParamList, 'HomeScreen'>;
 export default function HomeScreen({ navigation }: Props) {
     const { currentProfile } = useProfile();
 
-    // Estados para Películas
-    const [popularMovies, setPopularMovies] = useState<Movie[]>([]);
-    const [topRatedMovies, setTopRatedMovies] = useState<Movie[]>([]);
-    const [nowPlayingMovies, setNowPlayingMovies] = useState<Movie[]>([]);
-    const [upcomingMovies, setUpcomingMovies] = useState<Movie[]>([]);
-    const [actionMovies, setActionMovies] = useState<Movie[]>([]);
-    const [comedyMovies, setComedyMovies] = useState<Movie[]>([]);
-    const [horrorMovies, setHorrorMovies] = useState<Movie[]>([]);
-    const [sciFiMovies, setSciFiMovies] = useState<Movie[]>([]);
-    const [romanceMovies, setRomanceMovies] = useState<Movie[]>([]);
-    const [animationMovies, setAnimationMovies] = useState<Movie[]>([]);
-
-    // Estados para Series
-    const [popularTVShows, setPopularTVShows] = useState<TVShow[]>([]);
-    const [topRatedTVShows, setTopRatedTVShows] = useState<TVShow[]>([]);
-    const [onTheAirTVShows, setOnTheAirTVShows] = useState<TVShow[]>([]);
-    const [airingTodayTVShows, setAiringTodayTVShows] = useState<TVShow[]>([]);
-    const [dramaTVShows, setDramaTVShows] = useState<TVShow[]>([]);
-    const [comedyTVShows, setComedyTVShows] = useState<TVShow[]>([]);
-    const [crimeTVShows, setCrimeTVShows] = useState<TVShow[]>([]);
-    const [sciFiTVShows, setSciFiTVShows] = useState<TVShow[]>([]);
+    // Estado unificado para contenido (TMDB + AniList)
+    const [contentSections, setContentSections] = useState<{[key: string]: ContentItem[]}>({});
 
     // Estados de la UI
     const [featuredMovie, setFeaturedMovie] = useState<MovieDetail | null>(null);
@@ -57,7 +42,7 @@ export default function HomeScreen({ navigation }: Props) {
     const [modalVisible, setModalVisible] = useState(false);
     const [loading, setLoading] = useState(true);
     const [blackHeader, setBlackHeader] = useState(false);
-    const [contentFilter, setContentFilter] = useState<'all' | 'movies' | 'series'>('all');
+    const [contentFilter, setContentFilter] = useState<'all' | 'movies' | 'series' | 'anime'>('all');
     
     // NOTA: 'selectedCategory' parecía no usarse correctamente.
     // La lógica actual se basa en el filtro principal (todo, películas, series).
@@ -75,65 +60,40 @@ export default function HomeScreen({ navigation }: Props) {
         try {
             setLoading(true);
 
-            // CORRECCIÓN: Usar Promise.allSettled para evitar que un fallo bloquee toda la carga.
-            const results = await Promise.allSettled([
-                // Películas
-                getPopularMovies(),
-                getTopRatedMovies(),
-                getNowPlayingMovies(),
-                getUpcomingMovies(),
-                getMoviesByGenre(GENRES.ACTION),
-                getMoviesByGenre(GENRES.COMEDY),
-                getMoviesByGenre(GENRES.HORROR),
-                getMoviesByGenre(GENRES.SCIENCE_FICTION),
-                getMoviesByGenre(GENRES.ROMANCE),
-                getMoviesByGenre(GENRES.ANIMATION),
-                // Series
-                getPopularTVShows(),
-                getTopRatedTVShows(),
-                getOnTheAirTVShows(),
-                getAiringTodayTVShows(),
-                getTVShowsByGenre(GENRES.DRAMA),
-                getTVShowsByGenre(GENRES.COMEDY),
-                getTVShowsByGenre(GENRES.CRIME),
-                getTVShowsByGenre(GENRES.SCIENCE_FICTION),
-            ]);
-
-            // Función auxiliar para asignar el estado si la promesa se cumplió
-            const handleResult = (result: PromiseSettledResult<any>, setter: (data: any) => void) => {
-                if (result.status === 'fulfilled') {
-                    setter(result.value);
-                } else {
-                    console.error('Error loading a content section:', result.reason);
-                    setter([]); // Poner un array vacío en caso de error para no romper la UI
+            // Cargar todas las categorías de contenido unificado (TMDB + AniList)
+            const categoryPromises = ENHANCED_CATEGORIES.map(async (category) => {
+                try {
+                    const content = await category.fetcher();
+                    return { id: category.id, content };
+                } catch (error) {
+                    console.error(`Error loading category ${category.name}:`, error);
+                    return { id: category.id, content: [] };
                 }
-            };
-            
-            // Asignar resultados a los estados
-            handleResult(results[0], setPopularMovies);
-            handleResult(results[1], setTopRatedMovies);
-            handleResult(results[2], setNowPlayingMovies);
-            handleResult(results[3], setUpcomingMovies);
-            handleResult(results[4], setActionMovies);
-            handleResult(results[5], setComedyMovies);
-            handleResult(results[6], setHorrorMovies);
-            handleResult(results[7], setSciFiMovies);
-            handleResult(results[8], setRomanceMovies);
-            handleResult(results[9], setAnimationMovies);
-            handleResult(results[10], setPopularTVShows);
-            handleResult(results[11], setTopRatedTVShows);
-            handleResult(results[12], setOnTheAirTVShows);
-            handleResult(results[13], setAiringTodayTVShows);
-            handleResult(results[14], setDramaTVShows);
-            handleResult(results[15], setComedyTVShows);
-            handleResult(results[16], setCrimeTVShows);
-            handleResult(results[17], setSciFiTVShows);
+            });
 
-            // Cargar película destacada si la primera llamada tuvo éxito
-            const popularMoviesResult = results[0];
-            if (popularMoviesResult.status === 'fulfilled' && popularMoviesResult.value.length > 0) {
-                const featured = await getMovieDetails(popularMoviesResult.value[0].id);
-                setFeaturedMovie(featured);
+            const categoryResults = await Promise.allSettled(categoryPromises);
+            const newContentSections: {[key: string]: ContentItem[]} = {};
+
+            categoryResults.forEach((result) => {
+                if (result.status === 'fulfilled') {
+                    newContentSections[result.value.id] = result.value.content;
+                }
+            });
+
+            setContentSections(newContentSections);
+
+            // Cargar película destacada del contenido popular
+            const popularContent = newContentSections['popular_all'];
+            if (popularContent && popularContent.length > 0) {
+                const firstMovie = popularContent.find(item => item.type === 'movie');
+                if (firstMovie) {
+                    try {
+                        const featured = await getMovieDetails(firstMovie.id);
+                        setFeaturedMovie(featured);
+                    } catch (error) {
+                        console.error('Error loading featured movie:', error);
+                    }
+                }
             }
         } catch (error) {
             console.error('Critical error loading content:', error);
@@ -152,10 +112,10 @@ export default function HomeScreen({ navigation }: Props) {
             // Usar el servicio de base de datos en lugar de AsyncStorage
             await databaseService.addToMyList(currentProfile.id, contentId, 'movie');
             Alert.alert('Éxito', 'Agregado a "Mi Lista".');
-        } catch (error) {
+        } catch (error: any) {
             console.error('Error adding to my list:', error);
             // Verificar si es un error de duplicado
-            if (error.response?.status === 409 || error.message?.includes('duplicate')) {
+            if (error?.response?.status === 409 || error?.message?.includes('duplicate')) {
                 Alert.alert('Información', 'Este título ya está en tu lista.');
             } else {
                 Alert.alert('Error', 'No se pudo agregar a "Mi Lista".');
@@ -176,7 +136,7 @@ export default function HomeScreen({ navigation }: Props) {
     const handleProfilePress = () => navigation.getParent()?.navigate('Profile' as never);
     const handleSearchPress = () => navigation.getParent()?.navigate('Search' as never);
     
-    const handleFilterChange = (filter: 'series' | 'movies' | 'all') => {
+    const handleFilterChange = (filter: 'series' | 'movies' | 'all' | 'anime') => {
         setContentFilter(filter);
         setSelectedCategory(null); // Resetear categoría al cambiar el filtro principal
     };
@@ -185,10 +145,40 @@ export default function HomeScreen({ navigation }: Props) {
         navigation.navigate('Category', { categoryId, categoryName });
     };
 
-    // CORRECCIÓN: Lógica de renderizado simplificada
-    const shouldShowRow = (type: 'movie' | 'tv') => {
+    // Lógica de renderizado actualizada para incluir anime
+    const shouldShowCategory = (categoryId: string) => {
         if (contentFilter === 'all') return true;
-        return contentFilter === 'movies' && type === 'movie' || contentFilter === 'series' && type === 'tv';
+        
+        // Filtros específicos por tipo de contenido
+        if (contentFilter === 'movies') {
+            return categoryId.includes('movie') || categoryId === 'popular_all' || categoryId === 'top_rated_all' || categoryId === 'current_all';
+        }
+        if (contentFilter === 'series') {
+            return categoryId.includes('tv') || categoryId === 'popular_all' || categoryId === 'top_rated_all' || categoryId === 'current_all';
+        }
+        if (contentFilter === 'anime') {
+            return categoryId.includes('anime') || categoryId === 'popular_all' || categoryId === 'top_rated_all' || categoryId === 'current_all';
+        }
+        
+        return false;
+    };
+
+    // Función para filtrar contenido basado en el filtro actual
+    const filterContent = (content: ContentItem[]): ContentItem[] => {
+        if (contentFilter === 'all') return content;
+        
+        return content.filter(item => {
+            switch (contentFilter) {
+                case 'movies':
+                    return item.type === 'movie';
+                case 'series':
+                    return item.type === 'tv';
+                case 'anime':
+                    return item.type === 'anime';
+                default:
+                    return true;
+            }
+        });
     };
 
     if (loading) {
@@ -199,24 +189,14 @@ export default function HomeScreen({ navigation }: Props) {
         );
     }
     
-    // Función auxiliar para evitar código repetido y añadir la verificación de seguridad.
-    const createContentPressHandler = (id: number, type: 'movie' | 'tv', contentList: (Movie | TVShow)[]) => {
-        // CORRECCIÓN CRÍTICA: Verificar si el item existe antes de pasarlo.
-        const item = contentList.find(content => content.id === id);
-        if (item) {
-            handleContentPress({
-                id,
-                type,
-                title: type === 'movie' ? (item as Movie).title : (item as TVShow).name,
-                overview: item.overview,
-                poster_path: item.poster_path,
-                backdrop_path: item.backdrop_path,
-                release_date: type === 'movie' ? (item as Movie).release_date : (item as TVShow).first_air_date,
-                vote_average: item.vote_average,
-            });
-        } else {
-            console.warn(`Content with id ${id} not found in the provided list.`);
-        }
+    // Función simplificada para manejar la selección de contenido
+    const handleContentSelection = (contentItem: ContentItem) => {
+        handleContentPress(contentItem);
+    };
+
+    // Función para navegar a detalles de contenido
+    const handleContentNavigation = (contentItem: ContentItem) => {
+        handleContentPress(contentItem);
     };
 
     return (
@@ -236,69 +216,47 @@ export default function HomeScreen({ navigation }: Props) {
                 scrollEventThrottle={16}
                 showsVerticalScrollIndicator={false}
             >
-                {contentFilter !== 'series' && featuredMovie && (
+                {contentFilter !== 'series' && contentFilter !== 'anime' && featuredMovie && (
                     <FeaturedMovie
                         movie={featuredMovie}
-                        onWatch={() => createContentPressHandler(featuredMovie.id, 'movie', [featuredMovie])}
+                        onWatch={() => handleContentNavigation({
+                            id: featuredMovie.id,
+                            type: 'movie',
+                            title: featuredMovie.title,
+                            overview: featuredMovie.overview,
+                            poster_path: featuredMovie.poster_path,
+                            backdrop_path: featuredMovie.backdrop_path,
+                            release_date: featuredMovie.release_date,
+                            vote_average: featuredMovie.vote_average,
+                            source: 'tmdb'
+                        })}
                         onAddList={() => addToMyList(featuredMovie.id)}
                     />
                 )}
 
-                {shouldShowRow('movie') && popularMovies.length > 0 && (
-                    <MovieRow title="Películas Populares" movies={popularMovies} onMoviePress={(id) => createContentPressHandler(id, 'movie', popularMovies)} />
-                )}
-                {shouldShowRow('tv') && popularTVShows.length > 0 && (
-                     <MovieRow title="Series Populares" movies={popularTVShows} onMoviePress={(id) => createContentPressHandler(id, 'tv', popularTVShows)} />
-                )}
-                {shouldShowRow('movie') && nowPlayingMovies.length > 0 && (
-                    <MovieRow title="En Cartelera" movies={nowPlayingMovies} onMoviePress={(id) => createContentPressHandler(id, 'movie', nowPlayingMovies)} />
-                )}
-                {shouldShowRow('tv') && airingTodayTVShows.length > 0 && (
-                    <MovieRow title="Series en Emisión Hoy" movies={airingTodayTVShows} onMoviePress={(id) => createContentPressHandler(id, 'tv', airingTodayTVShows)} />
-                )}
-                {shouldShowRow('movie') && actionMovies.length > 0 && (
-                    <MovieRow title="Películas de Acción" movies={actionMovies} onMoviePress={(id) => createContentPressHandler(id, 'movie', actionMovies)} />
-                )}
-                {shouldShowRow('tv') && dramaTVShows.length > 0 && (
-                    <MovieRow title="Series de Drama" movies={dramaTVShows} onMoviePress={(id) => createContentPressHandler(id, 'tv', dramaTVShows)} />
-                )}
-                {shouldShowRow('movie') && comedyMovies.length > 0 && (
-                    <MovieRow title="Películas de Comedia" movies={comedyMovies} onMoviePress={(id) => createContentPressHandler(id, 'movie', comedyMovies)} />
-                )}
-                {shouldShowRow('tv') && comedyTVShows.length > 0 && (
-                    <MovieRow title="Series de Comedia" movies={comedyTVShows} onMoviePress={(id) => createContentPressHandler(id, 'tv', comedyTVShows)} />
-                )}
-                {shouldShowRow('movie') && horrorMovies.length > 0 && (
-                    <MovieRow title="Películas de Terror" movies={horrorMovies} onMoviePress={(id) => createContentPressHandler(id, 'movie', horrorMovies)} />
-                )}
-                {shouldShowRow('movie') && topRatedMovies.length > 0 && (
-                    <MovieRow title="Películas Mejor Valoradas" movies={topRatedMovies} onMoviePress={(id) => createContentPressHandler(id, 'movie', topRatedMovies)} />
-                )}
-                {shouldShowRow('tv') && topRatedTVShows.length > 0 && (
-                    <MovieRow title="Series Mejor Valoradas" movies={topRatedTVShows} onMoviePress={(id) => createContentPressHandler(id, 'tv', topRatedTVShows)} />
-                )}
-                {shouldShowRow('movie') && sciFiMovies.length > 0 && (
-                    <MovieRow title="Ciencia Ficción - Películas" movies={sciFiMovies} onMoviePress={(id) => createContentPressHandler(id, 'movie', sciFiMovies)} />
-                )}
-                {shouldShowRow('tv') && sciFiTVShows.length > 0 && (
-                    <MovieRow title="Ciencia Ficción - Series" movies={sciFiTVShows} onMoviePress={(id) => createContentPressHandler(id, 'tv', sciFiTVShows)} />
-                )}
-                {shouldShowRow('tv') && crimeTVShows.length > 0 && (
-                    <MovieRow title="Series de Crimen" movies={crimeTVShows} onMoviePress={(id) => createContentPressHandler(id, 'tv', crimeTVShows)} />
-                )}
-                {shouldShowRow('movie') && romanceMovies.length > 0 && (
-                    <MovieRow title="Películas Románticas" movies={romanceMovies} onMoviePress={(id) => createContentPressHandler(id, 'movie', romanceMovies)} />
-                )}
-                {shouldShowRow('movie') && animationMovies.length > 0 && (
-                    <MovieRow title="Películas de Animación" movies={animationMovies} onMoviePress={(id) => createContentPressHandler(id, 'movie', animationMovies)} />
-                )}
-                {shouldShowRow('movie') && upcomingMovies.length > 0 && (
-                    <MovieRow title="Próximos Estrenos" movies={upcomingMovies} onMoviePress={(id) => createContentPressHandler(id, 'movie', upcomingMovies)} />
-                )}
-                {shouldShowRow('tv') && onTheAirTVShows.length > 0 && (
-                    <MovieRow title="Series al Aire" movies={onTheAirTVShows} onMoviePress={(id) => createContentPressHandler(id, 'tv', onTheAirTVShows)} />
-                )}
-
+                {ENHANCED_CATEGORIES.map((category) => {
+                    if (!shouldShowCategory(category.id)) return null;
+                    
+                    const categoryContent = contentSections[category.id];
+                    if (!categoryContent || categoryContent.length === 0) return null;
+                    
+                    const filteredContent = filterContent(categoryContent);
+                    if (filteredContent.length === 0) return null;
+                    
+                    return (
+                        <MovieRow 
+                            key={category.id}
+                            title={category.name} 
+                            movies={filteredContent} 
+                            onMoviePress={(id) => {
+                                const contentItem = filteredContent.find(item => item.id === id);
+                                if (contentItem) {
+                                    handleContentNavigation(contentItem);
+                                }
+                            }} 
+                        />
+                    );
+                })}
             </ScrollView>
 
             <MovieModal
