@@ -1,59 +1,78 @@
-/**
- * Utilidad para detectar automáticamente la IP local
- * Útil para configurar la URL del servidor en desarrollo
- */
-
 import { Platform } from 'react-native';
+import { loadNetworkConfig, saveNetworkConfig } from './networkStorage';
 
 /**
- * Obtiene la IP local automáticamente
- * En desarrollo, intenta detectar la IP de la red local
+ * Define las URLs base candidatas para el servidor backend.
+ * Esto es útil para desarrollo en diferentes entornos (emulador, dispositivo físico).
  */
-export const getLocalIP = (): string => {
-  // En desarrollo, usar la IP que funciona
-  if (__DEV__) {
-    // Para Android emulator, usar la IP local que funciona
-    if (Platform.OS === 'android') {
-      return '192.168.107.105'; // IP local que funciona
-    }
-    
-    // Para iOS simulator, usar localhost
-    if (Platform.OS === 'ios') {
-      return 'localhost';
-    }
-    
-    // Para web, usar localhost
-    return 'localhost';
-  }
-  
-  // En producción, usar localhost
-  return 'localhost';
+// Lista base sin IPs específicas de una red privada
+const BASE_CANDIDATES: string[] = [
+  'http://localhost:3001',
+  Platform.OS === 'android' ? 'http://10.0.2.2:3001' : '', // Emulador Android
+  'http://192.168.56.1:3001', // IP común para algunos emuladores (VirtualBox)
+].filter(Boolean);
+
+/**
+ * Almacenamiento dinámico para la URL base actual.
+ * Se inicializa con una URL por defecto y se puede actualizar dinámicamente.
+ */
+let currentBaseURL: string = BASE_CANDIDATES[0];
+
+/**
+ * Devuelve las URLs candidatas para que otros módulos puedan probar la conexión.
+ */
+export const getCandidateBaseURLs = (): string[] => {
+  // Incluir la URL actual (posiblemente cargada desde almacenamiento) primero
+  const dynamic = currentBaseURL ? [currentBaseURL] : [];
+  // Evitar duplicados manteniendo orden de preferencia
+  const set = new Set<string>([...dynamic, ...BASE_CANDIDATES]);
+  return Array.from(set);
 };
 
 /**
- * Construye la URL completa del servidor
+ * Construye una URL completa a partir de una ruta, usando la URL base actual.
+ * @param path - La ruta a la que se quiere acceder (ej. '/videos/anime.m3u').
  */
-export const buildServerURL = (port: number = 3001): string => {
-  const ip = getLocalIP();
-  return `http://${ip}:${port}`;
+export const buildServerURL = (path: string = ''): string => {
+  // Asegurarse de que el path comience con una barra
+  const formattedPath = path.startsWith('/') ? path : `/${path}`;
+  return `${currentBaseURL}${formattedPath}`;
 };
 
 /**
- * Configuración de red dinámica
+ * Configuración de red dinámica que gestiona la URL base del servidor.
+ * Incluye funciones para obtener y actualizar la URL, y probar la conexión.
  */
 export const DYNAMIC_NETWORK_CONFIG = {
-  getBaseURL: () => buildServerURL(),
-  getHealthURL: () => `${buildServerURL()}/health`,
-  getProfilesURL: () => `${buildServerURL()}/profiles`,
-  getMyListURL: (profileId: number) => `${buildServerURL()}/my-list/${profileId}`,
+  /**
+   * Devuelve la URL base actual.
+   */
+  getBaseURL: (): string => currentBaseURL,
+
+  /**
+   * Devuelve la URL para el endpoint de "health check" del servidor.
+   */
+  getHealthURL: (): string => `${currentBaseURL}/health`,
+
+  /**
+   * Actualiza la URL base y la guarda en el almacenamiento local.
+   */
+  setBaseURL: (newURL: string): void => {
+    currentBaseURL = newURL;
+    // Guardar la nueva URL para futuras sesiones
+    saveNetworkConfig(newURL);
+  },
+
+  /**
+   * Carga la URL desde el almacenamiento al iniciar la aplicación.
+   */
+  initialize: async (): Promise<void> => {
+    const savedURL = await loadNetworkConfig();
+    if (savedURL) {
+      currentBaseURL = savedURL;
+    }
+  },
 };
 
-// Log de la configuración en desarrollo
-if (__DEV__) {
-  console.log('🌐 Dynamic Network Config:', {
-    platform: Platform.OS,
-    localIP: getLocalIP(),
-    serverURL: buildServerURL(),
-    isDev: __DEV__,
-  });
-}
+// Inicializar la configuración de red al cargar el módulo
+DYNAMIC_NETWORK_CONFIG.initialize();

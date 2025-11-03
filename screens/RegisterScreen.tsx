@@ -11,9 +11,12 @@ import {
   ScrollView,
   ImageBackground,
   useWindowDimensions,
+  Image,
+  ActivityIndicator,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
+import * as ImagePicker from 'expo-image-picker';
 import databaseService from '../services/databaseService';
 import { DYNAMIC_NETWORK_CONFIG } from '../utils/networkUtils';
 
@@ -21,18 +24,19 @@ interface RegisterScreenProps {
   navigation: any;
 }
 
-type Step = 'email' | 'plan' | 'payment' | 'profile';
+// Flujo simplificado al estilo Netflix: sólo Email/Contraseña y Perfil
+type Step = 'email' | 'profile';
 
 // Avatares disponibles para los perfiles
 const AVAILABLE_AVATARS = [
-  { id: '1', name: 'Adulto 1', emoji: '👤', color: '#e50914' },
-  { id: '2', name: 'Adulto 2', emoji: '👨', color: '#0071eb' },
-  { id: '3', name: 'Adulto 3', emoji: '👩', color: '#46d369' },
-  { id: '4', name: 'Adulto 4', emoji: '🧑', color: '#f59e0b' },
-  { id: '5', name: 'Niños 1', emoji: '👶', color: '#8b5cf6' },
-  { id: '6', name: 'Niños 2', emoji: '🧒', color: '#ec4899' },
-  { id: '7', name: 'Niños 3', emoji: '👧', color: '#06b6d4' },
-  { id: '8', name: 'Niños 4', emoji: '👦', color: '#84cc16' },
+  { id: '1', name: 'Avatar 1', emoji: '👤', color: '#e50914' },
+  { id: '2', name: 'Avatar 2', emoji: '👨', color: '#0071eb' },
+  { id: '3', name: 'Avatar 3', emoji: '👩', color: '#46d369' },
+  { id: '4', name: 'Avatar 4', emoji: '🧑', color: '#f59e0b' },
+  { id: '5', name: 'Avatar 5', emoji: '👶', color: '#8b5cf6' },
+  { id: '6', name: 'Avatar 6', emoji: '🧒', color: '#ec4899' },
+  { id: '7', name: 'Avatar 7', emoji: '👧', color: '#06b6d4' },
+  { id: '8', name: 'Avatar 8', emoji: '👦', color: '#84cc16' },
 ];
 
 const RegisterScreen: React.FC<RegisterScreenProps> = ({ navigation }) => {
@@ -42,17 +46,16 @@ const RegisterScreen: React.FC<RegisterScreenProps> = ({ navigation }) => {
   const [currentStep, setCurrentStep] = useState<Step>('email');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [selectedPlan, setSelectedPlan] = useState('basic');
-  const [paymentMethod, setPaymentMethod] = useState('card');
+  // Eliminado flujo de plan/pago (no se requiere)
   const [profileName, setProfileName] = useState('');
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<{ [key: string]: string }>({});
+  const [selectedImageUri, setSelectedImageUri] = useState<string | null>(null);
+  const [uploadingImage, setUploadingImage] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const fileInputRef = React.useRef<any>(null);
 
-  const plans = [
-    { id: 'basic', name: 'Básico', price: '$8.99', description: 'Pantalla única' },
-    { id: 'standard', name: 'Estándar', price: '$13.99', description: '2 pantallas simultáneas' },
-    { id: 'premium', name: 'Premium', price: '$17.99', description: '4 pantallas simultáneas' },
-  ];
+  // Planes/Pagos removidos en este flujo
 
   const validateEmail = (): boolean => {
     const newErrors: { [key: string]: string } = {};
@@ -80,30 +83,90 @@ const RegisterScreen: React.FC<RegisterScreenProps> = ({ navigation }) => {
     if (!profileName.trim()) {
       newErrors.profileName = 'El nombre del perfil es requerido';
     }
+    
+    if (!selectedImageUri) {
+      newErrors.avatar = 'Debes seleccionar una foto de perfil';
+    }
 
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
 
+  const handleSelectProfileImage = async () => {
+    if (Platform.OS === 'web') {
+      if (fileInputRef.current) {
+        fileInputRef.current.click();
+      }
+      return;
+    }
+
+    try {
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      
+      if (status !== 'granted') {
+        Alert.alert(
+          'Permisos requeridos',
+          'Necesitamos acceso a tu galería para agregar una foto de perfil',
+          [{ text: 'OK' }]
+        );
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.8,
+      });
+
+      if (result.canceled || !result.assets || result.assets.length === 0) {
+        return;
+      }
+
+      setSelectedImageUri(result.assets[0].uri);
+    } catch (error) {
+      console.error('Error al seleccionar imagen:', error);
+      Alert.alert('Error', 'No se pudo seleccionar la imagen');
+    }
+  };
+
+  const handleWebFileSelect = async (event: any) => {
+    const file = event.target?.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      setErrors(prev => ({ ...prev, avatar: 'Por favor selecciona un archivo de imagen' }));
+      return;
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      setErrors(prev => ({ ...prev, avatar: 'El archivo es demasiado grande. Máximo 5MB' }));
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      setSelectedImageUri(e.target?.result as string);
+      setErrors(prev => ({ ...prev, avatar: '' }));
+    };
+    reader.readAsDataURL(file);
+    
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
   const handleNext = () => {
     if (currentStep === 'email') {
       if (validateEmail()) {
-        setCurrentStep('plan');
+        setCurrentStep('profile');
       }
-    } else if (currentStep === 'plan') {
-      setCurrentStep('payment');
-    } else if (currentStep === 'payment') {
-      setCurrentStep('profile');
     }
   };
 
   const handleBack = () => {
-    if (currentStep === 'plan') {
+    if (currentStep === 'profile') {
       setCurrentStep('email');
-    } else if (currentStep === 'payment') {
-      setCurrentStep('plan');
-    } else if (currentStep === 'profile') {
-      setCurrentStep('payment');
     }
   };
 
@@ -111,10 +174,10 @@ const RegisterScreen: React.FC<RegisterScreenProps> = ({ navigation }) => {
     try {
       const response = await fetch(DYNAMIC_NETWORK_CONFIG.getHealthURL());
       const data = await response.json();
-      console.log('✅ Conexión exitosa:', data);
+  console.log('Conexión exitosa:', data);
       return true;
     } catch (error) {
-      console.error('❌ Error de conexión:', error);
+  console.error('Error de conexión:', error);
       return false;
     }
   };
@@ -139,19 +202,44 @@ const RegisterScreen: React.FC<RegisterScreenProps> = ({ navigation }) => {
     try {
       // Registrar el usuario
       const registerResult = await databaseService.register(email.trim().toLowerCase(), password);
-      console.log('✅ Usuario registrado:', registerResult);
+  console.log('Usuario registrado:', registerResult);
       
       // Iniciar sesión automáticamente
       const loginResult = await databaseService.login(email.trim().toLowerCase(), password);
-      console.log('✅ Login automático exitoso:', loginResult);
+  console.log('Login automático exitoso:', loginResult);
       
-      // Crear un perfil automáticamente con el nombre proporcionado
+      // Subir la imagen del perfil primero
+      setUploadingImage(true);
+      let avatarUrl: string;
+      
+      if (!selectedImageUri) {
+        throw new Error('Debes seleccionar una foto de perfil');
+      }
+      
+      if (Platform.OS === 'web' && selectedImageUri.startsWith('data:')) {
+        // En web, convertir data URL a File
+        const response = await fetch(selectedImageUri);
+        const blob = await response.blob();
+        const file = new File([blob], 'avatar.jpg', { type: 'image/jpeg' });
+        const uploadResult = await databaseService.uploadAvatar(file);
+        avatarUrl = uploadResult.url;
+      } else if (typeof selectedImageUri === 'string') {
+        // En móvil, usar la URI directamente
+        const uploadResult = await databaseService.uploadAvatar(selectedImageUri);
+        avatarUrl = uploadResult.url;
+      } else {
+        throw new Error('Tipo de imagen no soportado');
+      }
+      
+      setUploadingImage(false);
+      
+      // Crear un perfil automáticamente con el nombre y avatar proporcionado
       const profileResult = await databaseService.createProfile({
         usuario_id: loginResult.id,
         name: profileName.trim() || 'Mi Perfil',
-        avatar_url: AVAILABLE_AVATARS[0].emoji, // Usar el primer avatar por defecto
+        avatar_url: avatarUrl,
       });
-      console.log('✅ Perfil creado:', profileResult);
+  console.log('Perfil creado:', profileResult);
       
       // Obtener el perfil creado para pasarlo a la pantalla principal
       const profiles = await databaseService.getProfiles(loginResult.id);
@@ -193,14 +281,85 @@ const RegisterScreen: React.FC<RegisterScreenProps> = ({ navigation }) => {
       let body = 'No se pudo crear tu cuenta. Intenta de nuevo.';
 
       if (status === 409 || message?.includes('Email ya registrado')) {
-        title = 'Email en uso';
-        body = 'Este email ya está registrado. Intenta iniciar sesión.';
+        // Flujo: ofrecer restablecer contraseña directamente desde aquí
+        try {
+          const fp = await databaseService.forgotPassword(email.trim().toLowerCase());
+          Alert.alert(
+            'Email en uso',
+            'Este email ya está registrado. ¿Quieres restablecer la contraseña ahora usando la que ingresaste?',
+            [
+              { text: 'Cancelar', style: 'cancel' },
+              {
+                text: 'Restablecer',
+                onPress: async () => {
+                  try {
+                    setLoading(true);
+                    // Aplicar reset con el token dev
+                    await databaseService.resetPassword(email.trim().toLowerCase(), fp.token, password);
+                    // Continuar con login y creación de perfil como en registro
+                    const loginResult = await databaseService.login(email.trim().toLowerCase(), password);
+                    setUploadingImage(true);
+                    let avatarUrl: string;
+                    if (!selectedImageUri) {
+                      throw new Error('Debes seleccionar una foto de perfil');
+                    }
+                    if (Platform.OS === 'web' && selectedImageUri.startsWith('data:')) {
+                      const response = await fetch(selectedImageUri);
+                      const blob = await response.blob();
+                      const file = new File([blob], 'avatar.jpg', { type: 'image/jpeg' });
+                      const uploadResult = await databaseService.uploadAvatar(file);
+                      avatarUrl = uploadResult.url;
+                    } else if (typeof selectedImageUri === 'string') {
+                      const uploadResult = await databaseService.uploadAvatar(selectedImageUri);
+                      avatarUrl = uploadResult.url;
+                    } else {
+                      throw new Error('Tipo de imagen no soportado');
+                    }
+                    setUploadingImage(false);
+                    const profileResult = await databaseService.createProfile({
+                      usuario_id: loginResult.id,
+                      name: profileName.trim() || 'Mi Perfil',
+                      avatar_url: avatarUrl,
+                    });
+                    const profiles = await databaseService.getProfiles(loginResult.id);
+                    const createdProfile = profiles.find((p: any) => p.id === profileResult.id);
+                    if (createdProfile) {
+                      navigation.reset({
+                        index: 0,
+                        routes: [
+                          { name: 'Main', params: { selectedProfile: createdProfile, userId: loginResult.id } },
+                        ],
+                      });
+                    } else {
+                      navigation.reset({ index: 0, routes: [ { name: 'ProfileSelection', params: { userId: loginResult.id } } ] });
+                    }
+                  } catch (e: any) {
+                    const msg = e?.response?.data?.message || e?.message || 'No se pudo restablecer la contraseña';
+                    Alert.alert('Error', msg);
+                  } finally {
+                    setLoading(false);
+                  }
+                }
+              }
+            ]
+          );
+        } catch (fpErr: any) {
+          const fpStatus = fpErr?.response?.status;
+          if (fpStatus === 404) {
+            title = 'Usuario no encontrado';
+            body = 'No existe una cuenta con ese email. Intenta con otro email.';
+          } else {
+            title = 'Error';
+            body = 'No se pudo iniciar el proceso de recuperación.';
+          }
+        }
       } else if (error.message?.includes('Network request failed')) {
         title = 'Sin conexión';
         body = `Error de conexión.\n\nURL: ${DYNAMIC_NETWORK_CONFIG.getBaseURL()}\n\nVerifica que el servidor esté ejecutándose.`;
       }
-
-      Alert.alert(title, body, [{ text: 'OK' }]);
+      if (title && body) {
+        Alert.alert(title, body, [{ text: 'OK' }]);
+      }
     } finally {
       setLoading(false);
     }
@@ -213,7 +372,7 @@ const RegisterScreen: React.FC<RegisterScreenProps> = ({ navigation }) => {
   };
 
   const renderStepIndicator = () => {
-    const steps = ['email', 'plan', 'payment', 'profile'];
+    const steps = ['email', 'profile'];
     const currentIndex = steps.indexOf(currentStep);
     
     return (
@@ -247,7 +406,7 @@ const RegisterScreen: React.FC<RegisterScreenProps> = ({ navigation }) => {
     <View style={styles.stepContent}>
       <Text style={styles.stepTitle}>Crea tu cuenta</Text>
       <Text style={styles.stepSubtitle}>
-        Solo necesitamos algunos datos para comenzar
+        Ingresa tu email y una contraseña para empezar
       </Text>
 
       <View style={styles.inputContainer}>
@@ -269,19 +428,33 @@ const RegisterScreen: React.FC<RegisterScreenProps> = ({ navigation }) => {
       </View>
 
       <View style={styles.inputContainer}>
-        <TextInput
-          style={[styles.input, errors.password && styles.inputError]}
-          placeholder="Contraseña"
-          placeholderTextColor="#8c8c8c"
-          value={password}
-          onChangeText={(text) => {
-            setPassword(text);
-            clearError('password');
-          }}
-          secureTextEntry
-          autoCapitalize="none"
-          editable={!loading}
-        />
+        <View style={{ position: 'relative' }}>
+          <TextInput
+            style={[
+              styles.input,
+              errors.password && styles.inputError,
+              { paddingRight: 44 }
+            ]}
+            placeholder="Contraseña"
+            placeholderTextColor="#8c8c8c"
+            value={password}
+            onChangeText={(text) => {
+              setPassword(text);
+              clearError('password');
+            }}
+            secureTextEntry={!showPassword}
+            autoCapitalize="none"
+            editable={!loading}
+          />
+          <TouchableOpacity
+            accessibilityLabel={showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}
+            onPress={() => setShowPassword(prev => !prev)}
+            style={{ position: 'absolute', right: 12, top: 12, padding: 4 }}
+            disabled={loading}
+          >
+            <Ionicons name={showPassword ? 'eye-off' : 'eye'} size={22} color="#8c8c8c" />
+          </TouchableOpacity>
+        </View>
         {errors.password && <Text style={styles.errorText}>{errors.password}</Text>}
       </View>
 
@@ -295,89 +468,9 @@ const RegisterScreen: React.FC<RegisterScreenProps> = ({ navigation }) => {
     </View>
   );
 
-  const renderPlanStep = () => (
-    <View style={styles.stepContent}>
-      <Text style={styles.stepTitle}>Elige tu plan</Text>
-      <Text style={styles.stepSubtitle}>
-        Puedes cambiar o cancelar tu plan en cualquier momento
-      </Text>
+  // Paso de Plan removido
 
-      {plans.map((plan) => (
-        <TouchableOpacity
-          key={plan.id}
-          style={[
-            styles.planCard,
-            selectedPlan === plan.id && styles.planCardSelected
-          ]}
-          onPress={() => setSelectedPlan(plan.id)}
-        >
-          <View style={styles.planInfo}>
-            <Text style={styles.planName}>{plan.name}</Text>
-            <Text style={styles.planPrice}>{plan.price}/mes</Text>
-            <Text style={styles.planDescription}>{plan.description}</Text>
-          </View>
-          {selectedPlan === plan.id && (
-            <Ionicons name="checkmark-circle" size={24} color="#E50914" />
-          )}
-        </TouchableOpacity>
-      ))}
-
-      <View style={styles.buttonContainer}>
-        <TouchableOpacity style={styles.backButton} onPress={handleBack}>
-          <Text style={styles.backButtonText}>Atrás</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.nextButton} onPress={handleNext}>
-          <Text style={styles.nextButtonText}>Siguiente</Text>
-        </TouchableOpacity>
-      </View>
-    </View>
-  );
-
-  const renderPaymentStep = () => (
-    <View style={styles.stepContent}>
-      <Text style={styles.stepTitle}>Método de pago</Text>
-      <Text style={styles.stepSubtitle}>
-        Tu información de pago está encriptada y segura
-      </Text>
-
-      <TouchableOpacity
-        style={[
-          styles.paymentCard,
-          paymentMethod === 'card' && styles.paymentCardSelected
-        ]}
-        onPress={() => setPaymentMethod('card')}
-      >
-        <Ionicons name="card" size={24} color="#FFFFFF" />
-        <Text style={styles.paymentText}>Tarjeta de crédito o débito</Text>
-        {paymentMethod === 'card' && (
-          <Ionicons name="checkmark-circle" size={24} color="#E50914" />
-        )}
-      </TouchableOpacity>
-
-      <TouchableOpacity
-        style={[
-          styles.paymentCard,
-          paymentMethod === 'paypal' && styles.paymentCardSelected
-        ]}
-        onPress={() => setPaymentMethod('paypal')}
-      >
-        <Ionicons name="logo-paypal" size={24} color="#FFFFFF" />
-        <Text style={styles.paymentText}>PayPal</Text>
-        {paymentMethod === 'paypal' && (
-          <Ionicons name="checkmark-circle" size={24} color="#E50914" />
-        )}
-      </TouchableOpacity>
-
-      <View style={styles.buttonContainer}>
-        <TouchableOpacity style={styles.backButton} onPress={handleBack}>
-          <Text style={styles.backButtonText}>Atrás</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.nextButton} onPress={handleNext}>
-          <Text style={styles.nextButtonText}>Siguiente</Text>
-        </TouchableOpacity>
-      </View>
-    </View>
-  );
+  // Paso de Pago removido
 
   const renderProfileStep = () => (
     <View style={styles.stepContent}>
@@ -402,17 +495,57 @@ const RegisterScreen: React.FC<RegisterScreenProps> = ({ navigation }) => {
         {errors.profileName && <Text style={styles.errorText}>{errors.profileName}</Text>}
       </View>
 
+      <View style={styles.inputContainer}>
+        <Text style={styles.label}>Foto de perfil (obligatorio):</Text>
+        <TouchableOpacity
+          style={styles.imagePickerContainer}
+          onPress={handleSelectProfileImage}
+          disabled={loading || uploadingImage}
+        >
+          {selectedImageUri ? (
+            <Image 
+              source={{ uri: selectedImageUri }} 
+              style={styles.previewImage}
+            />
+          ) : (
+            <View style={styles.imagePickerPlaceholder}>
+              {uploadingImage ? (
+                <ActivityIndicator size="large" color="#E50914" />
+              ) : (
+                <>
+                  <Ionicons name="camera" size={40} color="#8c8c8c" />
+                  <Text style={styles.imagePickerText}>Toca para seleccionar imagen</Text>
+                </>
+              )}
+            </View>
+          )}
+        </TouchableOpacity>
+        {errors.avatar && <Text style={styles.errorText}>{errors.avatar}</Text>}
+        
+        {/* Input file oculto para web */}
+        {Platform.OS === 'web' && (
+          <input
+            // @ts-ignore
+            ref={(el: HTMLInputElement) => { fileInputRef.current = el; }}
+            type="file"
+            accept="image/*"
+            style={{ display: 'none' }}
+            onChange={handleWebFileSelect}
+          />
+        )}
+      </View>
+
       <View style={styles.buttonContainer}>
         <TouchableOpacity style={styles.backButton} onPress={handleBack}>
           <Text style={styles.backButtonText}>Atrás</Text>
         </TouchableOpacity>
         <TouchableOpacity
-          style={[styles.nextButton, loading && styles.buttonDisabled]}
+          style={[styles.nextButton, (loading || uploadingImage) && styles.buttonDisabled]}
           onPress={handleRegister}
-          disabled={loading}
+          disabled={loading || uploadingImage}
         >
           <Text style={styles.nextButtonText}>
-            {loading ? 'Creando cuenta e iniciando sesión...' : 'Crear cuenta e iniciar sesión'}
+            {loading || uploadingImage ? 'Creando cuenta e iniciando sesión...' : 'Crear cuenta e iniciar sesión'}
           </Text>
         </TouchableOpacity>
       </View>
@@ -423,10 +556,6 @@ const RegisterScreen: React.FC<RegisterScreenProps> = ({ navigation }) => {
     switch (currentStep) {
       case 'email':
         return renderEmailStep();
-      case 'plan':
-        return renderPlanStep();
-      case 'payment':
-        return renderPaymentStep();
       case 'profile':
         return renderProfileStep();
       default:
@@ -476,7 +605,7 @@ const RegisterScreen: React.FC<RegisterScreenProps> = ({ navigation }) => {
               {__DEV__ && (
                 <View style={styles.debugInfo}>
                   <Text style={styles.debugText}>
-                    🔧 Debug: {DYNAMIC_NETWORK_CONFIG.getBaseURL()}
+                    Debug: {DYNAMIC_NETWORK_CONFIG.getBaseURL()}
                   </Text>
                 </View>
               )}
@@ -715,6 +844,44 @@ const styles = StyleSheet.create({
     color: '#46d369',
     fontSize: 12,
     fontFamily: 'monospace',
+  },
+  label: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
+    marginBottom: 8,
+  },
+  imagePickerContainer: {
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    overflow: 'hidden',
+    backgroundColor: '#333',
+    borderWidth: 2,
+    borderColor: '#666',
+    borderStyle: 'dashed',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginVertical: 10,
+    alignSelf: 'center',
+  },
+  imagePickerPlaceholder: {
+    width: '100%',
+    height: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 8,
+  },
+  imagePickerText: {
+    color: '#8c8c8c',
+    fontSize: 12,
+    textAlign: 'center',
+    paddingHorizontal: 10,
+  },
+  previewImage: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 60,
   },
 });
 

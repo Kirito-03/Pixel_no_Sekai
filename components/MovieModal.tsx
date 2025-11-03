@@ -26,12 +26,17 @@ import {
   getRecommendedTVShows,
   getMovieDetails,
   getTVShowDetails,
-  getImageUrl 
+  getImageUrl,
+  getMoviesByGenre,
+  getTVShowsByGenre,
+  getAllPopularContent,
+  tmdbToContentItem
 } from '../services/api';
 import { colors, spacing } from '../theme';
 import { useProfile } from '../contexts/ProfileContext';
 import { useMyList } from '../contexts/MyListContext';
-import AnimeSeriesModal from './AnimeSeriesModal';
+import AnimeSeriesModalWrapper from './AnimeSeriesModalWrapper';
+import databaseService from '../services/databaseService';
 
 interface MovieModalProps {
   content: ContentItem | null;
@@ -56,11 +61,14 @@ export default function MovieModal({
   const [detailData, setDetailData] = useState<MovieDetail | TVShowDetail | null>(null);
   const [trailerKey, setTrailerKey] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [relatedContent, setRelatedContent] = useState<(Movie | TVShow)[]>([]);
+  const [relatedContent, setRelatedContent] = useState<ContentItem[]>([]);
   const [loadingRelated, setLoadingRelated] = useState(false);
   const [showTrailer, setShowTrailer] = useState(false);
   const [trailerDelay, setTrailerDelay] = useState(false);
   const [trailerFinished, setTrailerFinished] = useState(false);
+  const [isTogglingMyList, setIsTogglingMyList] = useState(false);
+  const [isTogglingDownloads, setIsTogglingDownloads] = useState(false);
+  const [currentInDownloads, setCurrentInDownloads] = useState(false);
   
   const { currentProfile } = useProfile();
   const { isInMyList, toggleMyList } = useMyList();
@@ -72,7 +80,24 @@ export default function MovieModal({
   const slideAnim = useRef(new Animated.Value(height)).current;
 
   // Verificar si el contenido actual está en Mi Lista
-  const currentInMyList = currentContent ? isInMyList(currentContent.id, currentContent.type) : false;
+  // Normalizar el tipo basado en la fuente para la verificación de Mi Lista
+  const normalizedTypeForCurrentContent: 'movie' | 'tv' | 'anime' = currentContent
+    ? (currentContent.source === 'anilist'
+        ? 'anime'
+        : currentContent.source === 'tmdb'
+          ? (currentContent.type === 'tv' ? 'tv' : 'movie')
+          : currentContent.type)
+    : 'movie';
+  const currentInMyList = currentContent ? isInMyList(currentContent.id, normalizedTypeForCurrentContent) : false;
+
+  // Normalizar tipo para Descargas (mismo criterio que Mi Lista)
+  const normalizedTypeForDownloads: 'movie' | 'tv' | 'anime' = currentContent
+    ? (currentContent.source === 'anilist'
+        ? 'anime'
+        : currentContent.source === 'tmdb'
+          ? (currentContent.type === 'tv' ? 'tv' : 'movie')
+          : currentContent.type)
+    : 'movie';
 
   // Actualizar contenido cuando cambie el prop
   useEffect(() => {
@@ -105,6 +130,25 @@ export default function MovieModal({
       // Cargar detalles del contenido
       loadContentDetails();
       loadRelatedContent();
+
+      // Comprobar estado de Descargas
+      (async () => {
+        try {
+          if (currentProfile && currentContent) {
+            const inDownloads = await databaseService.isInDownloads(
+              currentProfile.id,
+              currentContent.id,
+              normalizedTypeForDownloads
+            );
+            setCurrentInDownloads(inDownloads);
+          } else {
+            setCurrentInDownloads(false);
+          }
+        } catch (error) {
+          console.error('MovieModal: error comprobando Descargas', error);
+          setCurrentInDownloads(false);
+        }
+      })();
       
       // Delay de 3 segundos para mostrar el trailer en el fondo
       const trailerTimer = setTimeout(() => {
@@ -131,6 +175,72 @@ export default function MovieModal({
       setTrailerDelay(false);
     }
   }, [visible, currentContent, trailerKey]);
+
+  const handleRemoveFromDownloads = async () => {
+    if (!currentContent) return;
+    if (!currentProfile) {
+      Alert.alert('Perfil requerido', 'Selecciona un perfil para gestionar Descargas.');
+      return;
+    }
+
+    if (isTogglingDownloads) return;
+    setIsTogglingDownloads(true);
+    try {
+      await databaseService.removeFromDownloads(
+        currentProfile.id,
+        currentContent.id,
+        normalizedTypeForDownloads
+      );
+      setCurrentInDownloads(false);
+    } catch (error) {
+      console.error('MovieModal: error al eliminar de Descargas', error);
+      Alert.alert('Error', 'No se pudo eliminar de Descargas.');
+    } finally {
+      setIsTogglingDownloads(false);
+    }
+  };
+
+  const handleDownloadOptions = async () => {
+    if (!currentContent) return;
+    if (!currentProfile) {
+      Alert.alert('Perfil requerido', 'Selecciona un perfil para gestionar Descargas.');
+      return;
+    }
+
+    if (isTogglingDownloads) return;
+    setIsTogglingDownloads(true);
+    try {
+      if (currentInDownloads) {
+        // Si ya está en descargas, actuar como toggle y eliminar
+        await databaseService.removeFromDownloads(
+          currentProfile.id,
+          currentContent.id,
+          normalizedTypeForDownloads
+        );
+        setCurrentInDownloads(false);
+      } else {
+        await databaseService.addToDownloads(
+          currentProfile.id,
+          currentContent.id,
+          normalizedTypeForDownloads,
+          {
+            status: 'PENDING',
+            progress: 0,
+            file_path: JSON.stringify({
+              type: 'movie',
+              estimated_size_mb: estimateMovieSizeMB(),
+            }),
+          }
+        );
+        setCurrentInDownloads(true);
+      }
+    } catch (error) {
+      console.error('MovieModal: error gestionando Descargas', error);
+      Alert.alert('Error', 'No se pudo actualizar Descargas.');
+    } finally {
+      setIsTogglingDownloads(false);
+    }
+  };
 
   const loadContentDetails = async () => {
     if (!currentContent) return;
@@ -181,33 +291,41 @@ export default function MovieModal({
     
     setLoadingRelated(true);
     try {
-      let similar = [];
-      let recommended = [];
+      let similar: ContentItem[] = [];
+      let recommended: ContentItem[] = [];
       
       if (currentContent.type === 'movie') {
         try {
-        [similar, recommended] = await Promise.all([
-          getSimilarMovies(currentContent.id),
-          getRecommendedMovies(currentContent.id),
-        ]);
+          const [similarMovies, recommendedMovies] = await Promise.all([
+            getSimilarMovies(currentContent.id),
+            getRecommendedMovies(currentContent.id),
+          ]);
+          similar = similarMovies.map(m => tmdbToContentItem(m, 'movie'));
+          recommended = recommendedMovies.map(m => tmdbToContentItem(m, 'movie'));
         } catch (error) {
           console.log('Error loading movie related content, using fallback');
-          similar = await getMoviesByGenre(detailData?.genres?.[0]?.id || 28, 1);
+          const fallbackMovies = await getMoviesByGenre(detailData?.genres?.[0]?.id || 28);
+          similar = fallbackMovies.map(m => tmdbToContentItem(m, 'movie'));
         }
       } else if (currentContent.type === 'tv') {
         try {
-        [similar, recommended] = await Promise.all([
-          getSimilarTVShows(currentContent.id),
-          getRecommendedTVShows(currentContent.id),
-        ]);
+          const [similarTV, recommendedTV] = await Promise.all([
+            getSimilarTVShows(currentContent.id),
+            getRecommendedTVShows(currentContent.id),
+          ]);
+          similar = similarTV.map(s => tmdbToContentItem(s, 'tv'));
+          recommended = recommendedTV.map(s => tmdbToContentItem(s, 'tv'));
         } catch (error) {
           console.log('Error loading TV related content, using fallback');
-          similar = await getTVShowsByGenre(detailData?.genres?.[0]?.id || 10759, 1);
+          const fallbackTV = await getTVShowsByGenre(detailData?.genres?.[0]?.id || 10759);
+          similar = fallbackTV.map(s => tmdbToContentItem(s, 'tv'));
         }
       } else if (currentContent.type === 'anime') {
         // Para anime, usar películas de animación como similares
-        similar = await getMoviesByGenre(16, 1); // Género animación
-        recommended = await getMoviesByGenre(16, 2); // Más animación
+        const simAnim = await getMoviesByGenre(16); // Género animación
+        const recAnim = await getMoviesByGenre(16); // Más animación
+        similar = simAnim.map(m => tmdbToContentItem(m, 'movie'));
+        recommended = recAnim.map(m => tmdbToContentItem(m, 'movie'));
       } else {
         // Fallback
         similar = await getAllPopularContent();
@@ -215,7 +333,7 @@ export default function MovieModal({
       }
       
       // Combinar y eliminar duplicados
-      const combined = [...similar, ...recommended];
+      const combined: ContentItem[] = [...similar, ...recommended];
       const uniqueContent = combined.filter((item, index, self) =>
         index === self.findIndex((t) => t.id === item.id)
       );
@@ -227,59 +345,45 @@ export default function MovieModal({
       try {
         const fallbackContent = await getAllPopularContent();
         const filteredFallback = fallbackContent
-          .filter(item => item.id !== currentContent.id)
+          .filter((item: ContentItem) => item.id !== currentContent.id)
           .slice(0, 10);
         setRelatedContent(filteredFallback);
       } catch (fallbackError) {
         console.error('Fallback also failed:', fallbackError);
-      setRelatedContent([]);
+        setRelatedContent([]);
       }
     } finally {
       setLoadingRelated(false);
     }
   };
 
-  const handleRelatedContentPress = (item: Movie | TVShow) => {
-    // Crear nuevo ContentItem
-    const isMovie = 'title' in item;
-    const newContentItem: ContentItem = {
-      id: item.id,
-      type: isMovie ? 'movie' : 'tv',
-      title: isMovie ? (item as Movie).title : (item as TVShow).name,
-      overview: item.overview,
-      poster_path: item.poster_path,
-      backdrop_path: item.backdrop_path,
-      release_date: isMovie ? (item as Movie).release_date : (item as TVShow).first_air_date,
-      vote_average: item.vote_average,
-      source: 'tmdb',
-    };
-    
+  const handleRelatedContentPress = (item: ContentItem) => {
     // Actualizar el contenido actual - esto recargará el modal con el nuevo contenido
-    setCurrentContent(newContentItem);
+    setCurrentContent(item);
   };
 
   const handleToggleList = async () => {
-    if (!currentContent || !currentProfile) {
-      console.log('❌ handleToggleList: Missing data', { 
-        currentContent: !!currentContent, 
-        currentProfile: !!currentProfile 
-      });
+    if (!currentContent) return;
+    if (!currentProfile) {
+      Alert.alert('Perfil requerido', 'Selecciona un perfil para usar Mi Lista.');
       return;
     }
-    
-    console.log('🎬 handleToggleList: Starting', { 
-      contentId: currentContent.id, 
-      contentType: currentContent.type,
-      profileId: currentProfile.id,
-      currentInMyList 
-    });
-    
+
+    if (isTogglingMyList) return;
+    setIsTogglingMyList(true);
     try {
-      await toggleMyList(currentContent.id, currentContent.type);
-      console.log('✅ handleToggleList: Success');
+      // Normalizar el tipo basado en la fuente para evitar desajustes de ID/tipo
+      const normalizedType: 'movie' | 'tv' | 'anime' =
+        currentContent.source === 'anilist' ? 'anime' :
+        currentContent.source === 'tmdb' ? (currentContent.type === 'tv' ? 'tv' : 'movie') :
+        currentContent.type;
+      console.log('MovieModal: toggleMyList with', { id: currentContent.id, type: currentContent.type, source: currentContent.source, normalizedType });
+      await toggleMyList(currentContent.id, normalizedType);
     } catch (error) {
-      console.error('❌ handleToggleList: Error', error);
+      console.error('handleToggleList: Error', error);
       Alert.alert('Error', 'No se pudo actualizar Mi Lista');
+    } finally {
+      setIsTogglingMyList(false);
     }
   };
 
@@ -354,6 +458,20 @@ export default function MovieModal({
     return 0;
   };
 
+  // Estimar tamaño aproximado para mostrar en Descargas (no descarga real)
+  const estimateMovieSizeMB = (): number => {
+    const minutes = getRuntime();
+    let runtimeMinutes = 90;
+    if (typeof minutes === 'number' && minutes > 0) {
+      runtimeMinutes = minutes;
+    } else if (Array.isArray(minutes) && minutes.length > 0 && minutes[0] > 0) {
+      runtimeMinutes = minutes[0];
+    }
+    // Aproximación de 7 MB/min para 1080p
+    const estimated = Math.round(runtimeMinutes * 7);
+    return Math.min(Math.max(estimated, 300), 3500);
+  };
+
   const handleClose = () => {
     // Animación de salida estilo Netflix
     Animated.parallel([
@@ -378,12 +496,24 @@ export default function MovieModal({
     });
   };
 
+  // Fallback para Web: abrir el trailer directamente en YouTube si el iframe falla
+  const openExternalTrailer = (key?: string | null) => {
+    if (!key) return;
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      try {
+        window.open(`https://www.youtube.com/watch?v=${key}`, '_blank');
+      } catch (e) {
+        // Ignorar errores de apertura
+      }
+    }
+  };
+
   if (!currentContent && !movie) return null;
 
   // Si es anime o serie, usar el componente específico
   if (currentContent && (currentContent.type === 'anime' || currentContent.type === 'tv')) {
     return (
-      <AnimeSeriesModal
+      <AnimeSeriesModalWrapper
         content={currentContent}
         visible={visible}
         onClose={onClose}
@@ -414,19 +544,24 @@ export default function MovieModal({
                 opacity: fadeAnim,
               },
             ]}
-            onStartShouldSetResponder={() => true}
           >
             {/* Botón cerrar estilo Netflix */}
             <TouchableOpacity style={styles.closeButton} onPress={handleClose}>
               <Ionicons name="close" size={28} color="#FFFFFF" />
             </TouchableOpacity>
 
-            <ScrollView showsVerticalScrollIndicator={false} style={styles.scrollView}>
+            <ScrollView
+              showsVerticalScrollIndicator={false}
+              style={styles.scrollView}
+              contentContainerStyle={{ paddingBottom: 32 }}
+              nestedScrollEnabled
+              scrollEventThrottle={16}
+            >
               {/* Hero Section con backdrop */}
               <View style={styles.heroSection}>
                 {/* Imagen de fondo o trailer */}
                 {trailerDelay && trailerKey && !trailerFinished ? (
-                  <View style={styles.trailerBackground}>
+                  <View style={styles.trailerBackground} pointerEvents="none">
                     {Platform.OS === 'web' ? (
                     <iframe
                       style={{
@@ -437,29 +572,40 @@ export default function MovieModal({
                           top: 0,
                           left: 0,
                       }}
-                        src={`https://www.youtube.com/embed/${trailerKey}?autoplay=1&controls=0&modestbranding=1&loop=0&playlist=${trailerKey}&rel=0&showinfo=0`}
+                        src={`https://www.youtube-nocookie.com/embed/${trailerKey}?autoplay=1&controls=0&modestbranding=1&loop=0&playlist=${trailerKey}&rel=0&showinfo=0&mute=1&playsinline=1`}
                       allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
                       allowFullScreen
+                        onError={() => {
+                          setTrailerDelay(false);
+                          setTrailerFinished(true);
+                          openExternalTrailer(trailerKey);
+                        }}
                         onLoad={() => {
                           // Cuando el iframe carga, configuramos un listener para el final del video
                           setTimeout(() => {
                             setTrailerDelay(false);
                             setTrailerFinished(true);
                             // Mostrar imagen de fondo cuando termine el trailer
-                          }, 120000); // 2 minutos máximo como fallback
+                          }, 8000); // ~8s: fallback corto si el trailer no reproduce
                         }}
                     />
                   ) : (
                     <WebView
+                        pointerEvents="none"
                         style={styles.trailerBackgroundVideo}
                       source={{
-                          uri: `https://www.youtube.com/embed/${trailerKey}?autoplay=1&controls=0&modestbranding=1&loop=0&playlist=${trailerKey}&rel=0&showinfo=0`,
+                          uri: `https://www.youtube-nocookie.com/embed/${trailerKey}?autoplay=1&controls=0&modestbranding=1&loop=0&playlist=${trailerKey}&rel=0&showinfo=0&mute=1&playsinline=1`,
                       }}
                       allowsFullscreenVideo
                       javaScriptEnabled
                       domStorageEnabled
                         mediaPlaybackRequiresUserAction={false}
                         scalesPageToFit={true}
+                        onError={() => {
+                          // Si el trailer falla, ocultarlo y volver al backdrop
+                          setTrailerDelay(false);
+                          setTrailerFinished(true);
+                        }}
                         onLoadEnd={() => {
                           // Fallback para móvil: después de 2 minutos vuelve a imagen
                           setTimeout(() => {
@@ -502,41 +648,17 @@ export default function MovieModal({
                         <Text style={styles.heroSeparator}>•</Text>
                         <Text style={styles.heroAgeRating}>{getAgeRating()}</Text>
                         <Text style={styles.heroSeparator}>•</Text>
-                        <Text style={styles.heroRating}>
-                          ⭐ {currentContent?.vote_average.toFixed(1)}
-                        </Text>
+                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                          <Ionicons name="star" size={16} color="#FFD700" />
+                          <Text style={[styles.heroRating, { marginLeft: 4 }]}> {currentContent?.vote_average.toFixed(1)}</Text>
+                        </View>
               </View>
 
-                      {/* Botones de acción estilo Netflix */}
+                      {/* Botón "Ver ahora" reubicado nuevamente en el hero (posición original) */}
                       <View style={styles.actionButtons}>
                         <TouchableOpacity style={styles.playButton}>
                           <Ionicons name="play" size={20} color="#000" />
                           <Text style={styles.playButtonText}>Ver ahora</Text>
-                        </TouchableOpacity>
-                        
-                        <TouchableOpacity 
-                          style={styles.myListButton}
-                          onPress={handleToggleList}
-                        >
-                          <Ionicons 
-                            name={currentInMyList ? "checkmark" : "add"} 
-                            size={20} 
-                            color="#FFFFFF" 
-                          />
-                          <Text style={styles.myListButtonText}>
-                            {currentInMyList ? "En mi lista" : "Mi lista"}
-                          </Text>
-                        </TouchableOpacity>
-
-                        {/* Botón de trailer invisible */}
-                        <TouchableOpacity 
-                          style={[styles.trailerButton, { opacity: 0 }]}
-                          onPress={() => setTrailerDelay(!trailerDelay)}
-                        >
-                          <Ionicons name={trailerDelay ? "pause-circle-outline" : "play-circle-outline"} size={20} color="#FFFFFF" />
-                          <Text style={styles.trailerButtonText}>
-                            {trailerDelay ? "Pausar Trailer" : "Ver Trailer"}
-                  </Text>
                         </TouchableOpacity>
                       </View>
 
@@ -594,6 +716,49 @@ export default function MovieModal({
                 )}
                 </View>
 
+                {/* Botones de acción reubicados: arriba de 'Similar' (solo Mi Lista y Descargas) */}
+                <View style={styles.bottomActionContainer}>
+                  <View style={styles.bottomActionButtons}>
+                  <TouchableOpacity 
+                    style={[styles.myListButton, isTogglingMyList && { opacity: 0.6 }]}
+                    onPress={handleToggleList}
+                    disabled={isTogglingMyList}
+                  >
+                    {isTogglingMyList ? (
+                      <ActivityIndicator size="small" color="#FFFFFF" />
+                    ) : (
+                      <Ionicons 
+                        name={currentInMyList ? "checkmark" : "add"} 
+                        size={20} 
+                        color="#FFFFFF" 
+                      />
+                    )}
+                    <Text style={styles.myListButtonText}>
+                      {isTogglingMyList ? "Procesando..." : (currentInMyList ? "En mi lista" : "Mi lista")}
+                    </Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[styles.downloadButton, isTogglingDownloads && { opacity: 0.6 }]}
+                    onPress={handleDownloadOptions}
+                    disabled={isTogglingDownloads}
+                  >
+                    {isTogglingDownloads ? (
+                      <ActivityIndicator size="small" color="#FFFFFF" />
+                    ) : (
+                      <Ionicons
+                        name={currentInDownloads ? "checkmark" : "download"}
+                        size={20}
+                        color="#FFFFFF"
+                      />
+                    )}
+                    <Text style={styles.downloadButtonText}>
+                      {isTogglingDownloads ? 'Procesando...' : (currentInDownloads ? 'En descargas' : 'Descargar')}
+                    </Text>
+                  </TouchableOpacity>
+                  </View>
+                </View>
+
                 {/* Contenido relacionado */}
               <View style={styles.relatedSection}>
                 <Text style={styles.relatedTitle}>
@@ -614,24 +779,21 @@ export default function MovieModal({
                     showsHorizontalScrollIndicator={false}
                     keyExtractor={(item) => item.id.toString()}
                     renderItem={({ item }) => {
-                        const isMovie = 'title' in item;
-                        const title = isMovie ? (item as Movie).title : (item as TVShow).name;
-                        
-                        return (
-                          <TouchableOpacity
+                      return (
+                        <TouchableOpacity
                           style={styles.relatedCard}
-                            onPress={() => handleRelatedContentPress(item)}
-                          >
-                            <Image
-                              source={{ uri: getImageUrl(item.poster_path, 'w500') }}
+                          onPress={() => handleRelatedContentPress(item)}
+                        >
+                          <Image
+                            source={{ uri: getImageUrl(item.poster_path, 'w500') }}
                             style={styles.relatedPoster}
-                              resizeMode="cover"
-                            />
+                            resizeMode="cover"
+                          />
                           <Text style={styles.relatedTitle} numberOfLines={2}>
-                            {title}
+                            {item.title}
                           </Text>
-                          </TouchableOpacity>
-                        );
+                        </TouchableOpacity>
+                      );
                     }}
                   />
                   ) : (
@@ -682,7 +844,6 @@ const styles = StyleSheet.create({
   },
   scrollView: {
     flex: 1,
-    height: '100%',
   },
   heroSection: {
     height: '120%',
@@ -790,6 +951,17 @@ const styles = StyleSheet.create({
     marginTop: 12,
     marginBottom: 16,
   },
+  bottomActionContainer: {
+    backgroundColor: '#141414', // Consistente con la sección de detalles/relacionados
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+  },
+  bottomActionButtons: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-start',
+    gap: 12,
+  },
   playButton: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -814,6 +986,20 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   myListButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  downloadButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(109, 109, 110, 0.7)',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 6,
+    gap: 8,
+  },
+  downloadButtonText: {
     color: '#FFFFFF',
     fontSize: 16,
     fontWeight: '600',

@@ -107,6 +107,46 @@ export interface AnimeDetail extends Anime {
   };
 }
 
+// Types for anime streaming
+export interface AnimeEpisode {
+  id: string;
+  number: number;
+  title: string;
+  description?: string;
+  image?: string;
+  url?: string;
+  sources?: VideoSource[];
+}
+
+export interface VideoSource {
+  url: string;
+  quality?: string; // e.g., '1080p', '720p', etc.
+  isM3U8?: boolean; // explicit flag if source is HLS
+}
+
+export interface AnimeSeason {
+  id: string;
+  title: string;
+  season: number;
+  episodes: AnimeEpisode[];
+}
+
+export interface StreamingInfo {
+  animeId: string;
+  title: string;
+  description: string;
+  image: string;
+  genres: string[];
+  status: string;
+  totalEpisodes: number;
+  seasons: AnimeSeason[];
+}
+
+// Extended anime detail with streaming info
+export interface AnimeDetailWithStreaming extends AnimeDetail {
+  streamingInfo?: StreamingInfo;
+}
+
 // Tipos unificados para contenido (película, serie o anime)
 export type Content = Movie | TVShow | Anime;
 export type ContentDetail = MovieDetail | TVShowDetail | AnimeDetail;
@@ -122,6 +162,9 @@ export interface ContentItem {
   release_date: string;
   vote_average: number;
   source: 'tmdb' | 'anilist';
+  // Campos opcionales para enriquecer el filtrado y la UI
+  genres?: string[]; // Solo aplicable principalmente para anime
+  isAdult?: boolean; // Marcador para contenido +18 (Ecchi/Hentai en anime)
 }
 
 // Navegación
@@ -129,6 +172,7 @@ export type RootStackParamList = {
   Login: undefined;
   Main: undefined;
   MyList: undefined;
+  Downloads: undefined;
 };
 
 export type TabParamList = {

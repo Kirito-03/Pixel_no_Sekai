@@ -9,17 +9,22 @@ import {
   Modal,
   TextInput,
   Image,
+  ActivityIndicator,
+  Platform,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import databaseService from '../services/databaseService';
+import * as ImagePicker from 'expo-image-picker';
+import databaseService, { getCurrentBaseURL } from '../services/databaseService';
+import { useFocusEffect } from '@react-navigation/native';
+import { useAuth } from '../contexts/AuthContext';
+// DYNAMIC_NETWORK_CONFIG is not used in this file; remove the import to fix the missing module error
 
 // Definir interfaz Profile localmente
 interface Profile {
   id: number;
   name: string;
   avatar_url?: string;
-  isKids?: boolean;
 }
 
 interface ProfileSelectionScreenProps {
@@ -33,45 +38,142 @@ interface ProfileSelectionScreenProps {
 
 // Avatares disponibles para los perfiles
 const AVAILABLE_AVATARS = [
-  { id: '1', name: 'Adulto 1', emoji: '👤', color: '#e50914' },
-  { id: '2', name: 'Adulto 2', emoji: '👨', color: '#0071eb' },
-  { id: '3', name: 'Adulto 3', emoji: '👩', color: '#46d369' },
-  { id: '4', name: 'Adulto 4', emoji: '🧑', color: '#f59e0b' },
-  { id: '5', name: 'Niños 1', emoji: '👶', color: '#8b5cf6' },
-  { id: '6', name: 'Niños 2', emoji: '🧒', color: '#ec4899' },
-  { id: '7', name: 'Niños 3', emoji: '👧', color: '#06b6d4' },
-  { id: '8', name: 'Niños 4', emoji: '👦', color: '#84cc16' },
+  { id: '1', name: 'Avatar 1', emoji: '👤', color: '#e50914' },
+  { id: '2', name: 'Avatar 2', emoji: '👨', color: '#0071eb' },
+  { id: '3', name: 'Avatar 3', emoji: '👩', color: '#46d369' },
+  { id: '4', name: 'Avatar 4', emoji: '🧑', color: '#f59e0b' },
+  { id: '5', name: 'Avatar 5', emoji: '👶', color: '#8b5cf6' },
+  { id: '6', name: 'Avatar 6', emoji: '🧒', color: '#ec4899' },
+  { id: '7', name: 'Avatar 7', emoji: '👧', color: '#06b6d4' },
+  { id: '8', name: 'Avatar 8', emoji: '👦', color: '#84cc16' },
 ];
 
 const ProfileSelectionScreen: React.FC<ProfileSelectionScreenProps> = ({ navigation, route }) => {
-  const { userId } = route.params;
+  const { user } = useAuth();
+  const userId = route.params?.userId || user?.id;
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [loading, setLoading] = useState(true);
+  // Versión de perfiles para cache-busting de imágenes en Android
+  const [profilesVersion, setProfilesVersion] = useState(0);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [newProfileName, setNewProfileName] = useState('');
   const [selectedAvatar, setSelectedAvatar] = useState(AVAILABLE_AVATARS[0]);
-  const [isKidsProfile, setIsKidsProfile] = useState(false);
+  // Eliminado soporte de perfil para niños
   const [creating, setCreating] = useState(false);
+  const [selectedImageUri, setSelectedImageUri] = useState<string | null>(null);
+  const [uploadingImage, setUploadingImage] = useState(false);
+  const fileInputRef = React.useRef<any>(null);
 
   useEffect(() => {
     loadProfiles();
   }, []);
 
+  // Volver a cargar los perfiles cada vez que la pantalla vuelve a estar en foco
+  useFocusEffect(
+    React.useCallback(() => {
+      loadProfiles();
+      return undefined;
+    }, [userId])
+  );
+
   const loadProfiles = async () => {
     try {
+      if (!userId) {
+        Alert.alert('Error', 'Usuario no identificado');
+        setLoading(false);
+        return;
+      }
       const rows = await databaseService.getProfiles(userId);
-      const mapped: Profile[] = rows.map((p) => ({
+      const mapped: Profile[] = rows.map((p: any) => ({
         id: p.id,
         name: p.name,
         avatar_url: p.avatar_url,
-        isKids: !!p.is_kids,
       }));
       setProfiles(mapped);
+      // Aumentar la versión para invalidar caché de imágenes
+      setProfilesVersion((v) => v + 1);
+      // Prefetch de avatares corregidos para ayudar a Android a refrescar caché
+      try {
+        const urls = mapped
+          .map((p) => (p.avatar_url ? (getCorrectedAvatarUrl(p.avatar_url) || p.avatar_url) : null))
+          .filter((u): u is string => Boolean(u));
+        urls.forEach((u) => {
+          // @ts-ignore RN Image tiene prefetch
+          Image.prefetch(u).catch(() => {});
+        });
+        console.log('ProfileSelection: Prefetch de avatares', urls);
+      } catch {}
     } catch (error) {
       console.error('Error al cargar perfiles:', error);
       Alert.alert('Error', 'No se pudieron cargar los perfiles');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleSelectImage = async () => {
+    if (Platform.OS === 'web') {
+      if (fileInputRef.current) {
+        fileInputRef.current.click();
+      }
+      return;
+    }
+
+    // Para móviles, usar expo-image-picker
+    try {
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      
+      if (status !== 'granted') {
+        Alert.alert(
+          'Permisos requeridos',
+          'Necesitamos acceso a tu galería para agregar una foto de perfil',
+          [{ text: 'OK' }]
+        );
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.8,
+      });
+
+      if (result.canceled || !result.assets || result.assets.length === 0) {
+        return;
+      }
+
+      setSelectedImageUri(result.assets[0].uri);
+    } catch (error) {
+      console.error('Error al seleccionar imagen:', error);
+      Alert.alert('Error', 'No se pudo seleccionar la imagen');
+    }
+  };
+
+  const handleWebFileSelect = async (event: any) => {
+    const file = event.target?.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      Alert.alert('Error', 'Por favor selecciona un archivo de imagen');
+      return;
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      Alert.alert('Error', 'El archivo es demasiado grande. Máximo 5MB');
+      return;
+    }
+
+    // Crear una URL local para la vista previa
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      setSelectedImageUri(e.target?.result as string);
+    };
+    reader.readAsDataURL(file);
+    
+    // Guardar el archivo para subirlo después
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
     }
   };
 
@@ -81,32 +183,88 @@ const ProfileSelectionScreen: React.FC<ProfileSelectionScreenProps> = ({ navigat
       return;
     }
 
+    if (!selectedImageUri) {
+      Alert.alert('Error', 'Por favor selecciona una imagen para el perfil');
+      return;
+    }
+
     if (profiles.length >= 5) {
       Alert.alert('Límite alcanzado', 'Solo puedes tener hasta 5 perfiles');
       return;
     }
 
     setCreating(true);
+    setUploadingImage(true);
     try {
-      const avatarUrl = `https://i.pravatar.cc/200?img=${selectedAvatar.id}`;
+      // Subir la imagen primero
+      let avatarUrl: string;
+      
+      if (Platform.OS === 'web' && selectedImageUri.startsWith('data:')) {
+        // En web, convertir data URL a File
+        const response = await fetch(selectedImageUri);
+        const blob = await response.blob();
+        const file = new File([blob], 'avatar.jpg', { type: 'image/jpeg' });
+        const uploadResult = await databaseService.uploadAvatar(file);
+        avatarUrl = uploadResult.url;
+      } else if (typeof selectedImageUri === 'string') {
+        // En móvil, usar la URI directamente
+        const uploadResult = await databaseService.uploadAvatar(selectedImageUri);
+        avatarUrl = uploadResult.url;
+      } else {
+        throw new Error('Tipo de imagen no soportado');
+      }
+
+      setUploadingImage(false);
+      
+      // Crear el perfil con la URL del avatar subido
       await databaseService.createProfile({
-        usuario_id: userId,
+        usuario_id: userId!,
         name: newProfileName.trim(),
         avatar_url: avatarUrl,
-        is_kids: isKidsProfile,
       });
 
       setNewProfileName('');
-      setSelectedAvatar(AVAILABLE_AVATARS[0]);
-      setIsKidsProfile(false);
+      setSelectedImageUri(null);
+      // No hay estado de perfil para niños
       setShowCreateModal(false);
       await loadProfiles();
-      Alert.alert('Éxito', 'Perfil creado correctamente');
-    } catch (error) {
-      console.error('Error al crear perfil:', error);
-      Alert.alert('Error', 'No se pudo crear el perfil');
+      
+      // Obtener el perfil recién creado
+      const updatedProfiles = await databaseService.getProfiles(userId!);
+      const createdProfile = updatedProfiles.find((p: any) => p.avatar_url === avatarUrl);
+      
+      if (createdProfile) {
+        // Navegar a Main con el perfil creado
+        const mappedProfile = {
+          id: createdProfile.id,
+          name: createdProfile.name,
+          avatar_url: createdProfile.avatar_url,
+        };
+        navigation.reset({
+          index: 0,
+          routes: [
+            {
+              name: 'Main',
+              params: {
+                selectedProfile: mappedProfile,
+                userId: userId,
+              },
+            },
+          ],
+        });
+      } else {
+        Alert.alert('Éxito', 'Perfil creado correctamente');
+      }
+    } catch (error: any) {
+      console.error('Error al crear perfil:', {
+        status: error?.response?.status,
+        data: error?.response?.data,
+        message: error?.message,
+      });
+      Alert.alert('Error', 'No se pudo crear el perfil. Por favor intenta nuevamente.');
     } finally {
       setCreating(false);
+      setUploadingImage(false);
     }
   };
 
@@ -114,11 +272,67 @@ const ProfileSelectionScreen: React.FC<ProfileSelectionScreenProps> = ({ navigat
     return AVAILABLE_AVATARS.find(avatar => avatar.id === avatarId) || AVAILABLE_AVATARS[0];
   };
 
+  // Añadir parámetro de cache-busting a la URL
+  const appendCacheBust = (url: string) => {
+    try {
+      const hasQuery = url.includes('?');
+      const sep = hasQuery ? '&' : '?';
+      // Usar profilesVersion, que cambia cada vez que recargamos la lista
+      return `${url}${sep}cb=${profilesVersion}`;
+    } catch {
+      return url;
+    }
+  };
+
+  // Función para corregir URLs de avatar que contengan localhost y añadir cache-busting
+  const getCorrectedAvatarUrl = (avatarUrl: string | undefined): string | null => {
+    if (!avatarUrl) return null;
+    
+    // Si la URL ya es completa (empieza con http)
+    if (avatarUrl.startsWith('http')) {
+      // Obtener el BASE_URL real actualizado
+      const realBaseURL = getCurrentBaseURL();
+      
+      // Si la URL contiene localhost/127.0.0.1 pero el BASE_URL real no, corregirla
+      const hasLocalhost = avatarUrl.includes('localhost') || avatarUrl.includes('127.0.0.1');
+      const baseURLIsNotLocalhost = realBaseURL && !realBaseURL.includes('localhost') && !realBaseURL.includes('127.0.0.1');
+      
+      if (hasLocalhost && baseURLIsNotLocalhost) {
+        // Extraer la ruta del archivo (todo después de /uploads/)
+        const urlMatch = avatarUrl.match(/\/uploads\/(.+)$/);
+        if (urlMatch) {
+          const filePath = urlMatch[1];
+          const correctedUrl = `${realBaseURL}/uploads/${filePath}`;
+          console.log('URL corregida en selección de perfil:', {
+            original: avatarUrl,
+            corrected: correctedUrl
+          });
+          return appendCacheBust(correctedUrl);
+        }
+      }
+      // No requiere corrección; aplicar cache-busting igualmente
+      return appendCacheBust(avatarUrl);
+    }
+    
+    // URL relativa: construir con BASE_URL y añadir cache-busting
+    const baseURL = getCurrentBaseURL();
+    const constructed = `${baseURL}${avatarUrl.startsWith('/') ? '' : '/'}${avatarUrl}`;
+    return appendCacheBust(constructed);
+  };
+
   const handleSelectProfile = (profile: Profile) => {
     // Navegar a la pantalla principal con el perfil seleccionado
-    navigation.replace('Main', { 
-      selectedProfile: profile,
-      userId: userId 
+    navigation.reset({
+      index: 0,
+      routes: [
+        {
+          name: 'Main',
+          params: {
+            selectedProfile: profile,
+            userId: userId,
+          },
+        },
+      ],
     });
   };
 
@@ -174,15 +388,35 @@ const ProfileSelectionScreen: React.FC<ProfileSelectionScreenProps> = ({ navigat
               >
                 <View style={[styles.avatarContainer, { backgroundColor: '#333' }]}>
                   {profile.avatar_url ? (
-                    <Image source={{ uri: profile.avatar_url }} style={{ width: 80, height: 80, borderRadius: 40 }} />
+                    (() => {
+                      const corrected = getCorrectedAvatarUrl(profile.avatar_url) || profile.avatar_url;
+                      // Forzar remount del Image cuando cambia la URL o la versión de perfiles
+                      return (
+                        <Image
+                          key={`avatar-${profile.id}-${profilesVersion}-${corrected}`}
+                          source={{ uri: corrected }}
+                          style={{ width: 80, height: 80, borderRadius: 40 }}
+                          onLoadStart={() => {
+                            console.log('ProfileSelection: Iniciando carga de avatar', { id: profile.id, url: corrected, baseURL: getCurrentBaseURL() });
+                          }}
+                          onLoad={() => {
+                            console.log('ProfileSelection: Avatar cargado', { id: profile.id, url: corrected });
+                          }}
+                          onError={(error) => {
+                            console.error('Error al cargar avatar en selección:', {
+                              id: profile.id,
+                              url: profile.avatar_url,
+                              corrected,
+                              error: error.nativeEvent
+                            });
+                          }}
+                        />
+                      );
+                    })()
                   ) : (
                     <Text style={styles.avatarEmoji}>{getAvatarById('1').emoji}</Text>
                   )}
-                  {profile.isKids && (
-                    <View style={styles.kidsIndicator}>
-                      <Ionicons name="star" size={16} color="#ffd700" />
-                    </View>
-                  )}
+                  {/* Indicador de niños eliminado */}
                 </View>
                 <Text style={styles.profileName}>{profile.name}</Text>
               </TouchableOpacity>
@@ -231,32 +465,44 @@ const ProfileSelectionScreen: React.FC<ProfileSelectionScreenProps> = ({ navigat
               maxLength={20}
             />
 
-            <Text style={styles.sectionTitle}>Selecciona un avatar:</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.avatarScroll}>
-              {AVAILABLE_AVATARS.map((avatar) => (
-                <TouchableOpacity
-                  key={avatar.id}
-                  style={[
-                    styles.avatarOption,
-                    { backgroundColor: avatar.color },
-                    selectedAvatar.id === avatar.id && styles.selectedAvatar,
-                  ]}
-                  onPress={() => setSelectedAvatar(avatar)}
-                >
-                  <Text style={styles.avatarOptionEmoji}>{avatar.emoji}</Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-
+            <Text style={styles.sectionTitle}>Foto de perfil (obligatorio):</Text>
             <TouchableOpacity
-              style={styles.kidsToggle}
-              onPress={() => setIsKidsProfile(!isKidsProfile)}
+              style={styles.imagePickerContainer}
+              onPress={handleSelectImage}
+              disabled={uploadingImage}
             >
-              <View style={[styles.checkbox, isKidsProfile && styles.checkboxChecked]}>
-                {isKidsProfile && <Ionicons name="checkmark" size={16} color="#000" />}
-              </View>
-              <Text style={styles.kidsToggleText}>Perfil para niños</Text>
+              {selectedImageUri ? (
+                <Image 
+                  source={{ uri: selectedImageUri }} 
+                  style={styles.previewImage}
+                />
+              ) : (
+                <View style={styles.imagePickerPlaceholder}>
+                  {uploadingImage ? (
+                    <ActivityIndicator size="large" color="#fff" />
+                  ) : (
+                    <>
+                      <Ionicons name="camera" size={40} color="#666" />
+                      <Text style={styles.imagePickerText}>Toca para seleccionar imagen</Text>
+                    </>
+                  )}
+                </View>
+              )}
             </TouchableOpacity>
+            
+            {/* Input file oculto para web */}
+            {Platform.OS === 'web' && (
+              <input
+                // @ts-ignore
+                ref={(el: HTMLInputElement) => { fileInputRef.current = el; }}
+                type="file"
+                accept="image/*"
+                style={{ display: 'none' }}
+                onChange={handleWebFileSelect}
+              />
+            )}
+
+            {/* Opción de perfil para niños eliminada */}
 
             <View style={styles.modalButtons}>
               <TouchableOpacity
@@ -338,17 +584,7 @@ const styles = StyleSheet.create({
   avatarEmoji: {
     fontSize: 32,
   },
-  kidsIndicator: {
-    position: 'absolute',
-    top: -5,
-    right: -5,
-    backgroundColor: '#000',
-    borderRadius: 12,
-    width: 24,
-    height: 24,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
+  // Indicador de niños eliminado
   profileName: {
     color: '#fff',
     fontSize: 16,
@@ -436,29 +672,7 @@ const styles = StyleSheet.create({
   avatarOptionEmoji: {
     fontSize: 24,
   },
-  kidsToggle: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 20,
-  },
-  checkbox: {
-    width: 20,
-    height: 20,
-    borderRadius: 4,
-    borderWidth: 2,
-    borderColor: '#666',
-    marginRight: 10,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  checkboxChecked: {
-    backgroundColor: '#fff',
-    borderColor: '#fff',
-  },
-  kidsToggleText: {
-    color: '#fff',
-    fontSize: 16,
-  },
+  // Estilos de perfil para niños eliminados
   modalButtons: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -490,6 +704,38 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 16,
     fontWeight: 'bold',
+  },
+  imagePickerContainer: {
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    overflow: 'hidden',
+    backgroundColor: '#333',
+    borderWidth: 2,
+    borderColor: '#666',
+    borderStyle: 'dashed',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginVertical: 15,
+    alignSelf: 'center',
+  },
+  imagePickerPlaceholder: {
+    width: '100%',
+    height: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 8,
+  },
+  imagePickerText: {
+    color: '#666',
+    fontSize: 12,
+    textAlign: 'center',
+    paddingHorizontal: 10,
+  },
+  previewImage: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 60,
   },
 });
 

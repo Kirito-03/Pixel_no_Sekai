@@ -13,11 +13,14 @@ import {
   ScrollView,
   ViewStyle,
   TextStyle,
+  Modal,
+  ActivityIndicator,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../theme';
 import databaseService from '../services/databaseService';
+import { useAuth } from '../contexts/AuthContext';
 
 type DynamicStyles = {
   scrollContent: ViewStyle;
@@ -30,12 +33,23 @@ type DynamicStyles = {
 export default function LoginScreen({ navigation }: any) {
   const { width } = useWindowDimensions();
   const isSmallScreen = width < 768;
+  const { login } = useAuth();
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(true);
   const [loading, setLoading] = useState(false);
+
+  // --- Recuperación de contraseña ---
+  const [forgotVisible, setForgotVisible] = useState(false);
+  const [resetVisible, setResetVisible] = useState(false);
+  const [forgotEmail, setForgotEmail] = useState('');
+  const [forgotLoading, setForgotLoading] = useState(false);
+  const [resetToken, setResetToken] = useState('');
+  const [newPassword1, setNewPassword1] = useState('');
+  const [newPassword2, setNewPassword2] = useState('');
+  const [resetLoading, setResetLoading] = useState(false);
 
   const handleLogin = useCallback(async () => {
     if (!email.trim() || !password.trim()) {
@@ -47,12 +61,18 @@ export default function LoginScreen({ navigation }: any) {
 
     try {
       const user = await databaseService.login(email.trim().toLowerCase(), password);
+      // Guardar la sesión en el contexto
+      await login({ id: user.id, email: user.email || email.trim().toLowerCase() });
       navigation.replace('ProfileSelection', { userId: user.id });
       return;
     } catch (error: any) {
       console.error('Error en login:', error);
       const status = error?.response?.status;
       const message = error?.response?.data?.message;
+      const isNetworkError = error.code === 'NETWORK_ERROR' || 
+                            error.code === 'ERR_NETWORK' || 
+                            error.message?.includes('Network Error') ||
+                            error.message?.includes('Network request failed');
 
       if (status === 401 || message?.includes('Credenciales inválidas')) {
         setTimeout(() => {
@@ -62,13 +82,17 @@ export default function LoginScreen({ navigation }: any) {
         setTimeout(() => {
           Alert.alert('Datos incompletos', 'Email y contraseña son requeridos.', [{ text: 'OK' }]);
         }, 100);
-      } else if (error.message?.includes('Network request failed')) {
+      } else if (isNetworkError) {
         setTimeout(() => {
-          Alert.alert('Error de conexión', 'No se pudo conectar con el servidor. Verifica tu conexión a internet.', [{ text: 'OK' }]);
+          Alert.alert(
+            'Error de conexión', 
+            'No se pudo conectar con el servidor.\n\nVerifica que:\n• El servidor esté ejecutándose\n• Estés en la misma red\n• El firewall no esté bloqueando la conexión', 
+            [{ text: 'OK' }]
+          );
         }, 100);
       } else {
         setTimeout(() => {
-          Alert.alert('Error Inesperado', 'Ocurrió un problema. Por favor, inténtalo de nuevo más tarde.', [{ text: 'OK' }]);
+          Alert.alert('Error Inesperado', `Ocurrió un problema: ${error.message || 'Error desconocido'}`, [{ text: 'OK' }]);
         }, 100);
       }
     } finally {
@@ -198,7 +222,13 @@ export default function LoginScreen({ navigation }: any) {
                   </Text>
                 </TouchableOpacity>
 
-                <TouchableOpacity style={styles.forgotPassword}>
+                <TouchableOpacity
+                  style={styles.forgotPassword}
+                  onPress={() => {
+                    setForgotEmail(email);
+                    setForgotVisible(true);
+                  }}
+                >
                   <Text style={styles.forgotPasswordText}>
                     ¿Olvidaste la contraseña?
                   </Text>
@@ -238,6 +268,202 @@ export default function LoginScreen({ navigation }: any) {
               </View>
             </ScrollView>
           </KeyboardAvoidingView>
+
+          {/* Modal: Solicitar email para recuperación */}
+          <Modal
+            visible={forgotVisible}
+            transparent
+            animationType="fade"
+            onRequestClose={() => setForgotVisible(false)}
+          >
+            <View style={styles.modalOverlay}>
+              <View style={styles.modalContent}>
+                <Text style={styles.modalTitle}>Recuperar contraseña</Text>
+                <Text style={styles.modalDesc}>
+                  Ingresa tu correo asociado a la cuenta. Te enviaremos un código de recuperación.
+                </Text>
+                <TextInput
+                  style={styles.modalInput}
+                  placeholder="Tu correo"
+                  placeholderTextColor="#8c8c8c"
+                  value={forgotEmail}
+                  onChangeText={setForgotEmail}
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                />
+                <View style={styles.modalActions}>
+                  <TouchableOpacity
+                    style={[styles.modalButton, styles.modalButtonSecondary]}
+                    onPress={() => setForgotVisible(false)}
+                    disabled={forgotLoading}
+                  >
+                    <Text style={styles.modalButtonText}>Cancelar</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.modalButton, forgotLoading && { opacity: 0.7 }]}
+                    onPress={async () => {
+                      const emailToUse = (forgotEmail || email).trim().toLowerCase();
+                      if (!emailToUse) {
+                        Alert.alert('Email requerido', 'Ingresa tu correo para continuar.');
+                        return;
+                      }
+                      setForgotLoading(true);
+                      try {
+                        console.log('🔄 ForgotPassword: solicitando token para', emailToUse);
+                        const res = await databaseService.forgotPassword(emailToUse);
+                        console.log('✅ ForgotPassword: respuesta', res);
+                        // En entorno de desarrollo, el backend devuelve el token
+                        if (res?.token) {
+                          setResetToken(res.token);
+                          setResetVisible(true);
+                          setForgotVisible(false);
+                          Alert.alert(
+                            'Código generado',
+                            `Se generó un código de recuperación (dev):\n${res.token}\n\nVigencia: ${res.expires_in_minutes || 10} minutos.`
+                          );
+                        } else {
+                          Alert.alert(
+                            'Correo enviado',
+                            'Si el correo existe, se envió un código de recuperación.'
+                          );
+                          setForgotVisible(false);
+                          setResetVisible(true);
+                        }
+                        // Prefijar el email en el formulario de reseteo
+                        setEmail(emailToUse);
+                      } catch (error: any) {
+                        console.error('❌ ForgotPassword error:', error?.response?.data || error.message);
+                        const status = error?.response?.status;
+                        const message = error?.response?.data?.message;
+                        if (status === 404 || message?.includes('no encontrado')) {
+                          Alert.alert('Cuenta no encontrada', 'No existe un usuario con ese correo.');
+                        } else {
+                          Alert.alert('Error', message || 'No se pudo procesar la solicitud.');
+                        }
+                      } finally {
+                        setForgotLoading(false);
+                      }
+                    }}
+                    disabled={forgotLoading}
+                  >
+                    {forgotLoading ? (
+                      <ActivityIndicator color="#FFFFFF" />
+                    ) : (
+                      <Text style={styles.modalButtonText}>Enviar código</Text>
+                    )}
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </View>
+          </Modal>
+
+          {/* Modal: Ingresar código y nueva contraseña */}
+          <Modal
+            visible={resetVisible}
+            transparent
+            animationType="fade"
+            onRequestClose={() => setResetVisible(false)}
+          >
+            <View style={styles.modalOverlay}>
+              <View style={styles.modalContent}>
+                <Text style={styles.modalTitle}>Restablecer contraseña</Text>
+                <Text style={styles.modalDesc}>Ingresa el código recibido y tu nueva contraseña.</Text>
+
+                <TextInput
+                  style={styles.modalInput}
+                  placeholder="Código de recuperación"
+                  placeholderTextColor="#8c8c8c"
+                  value={resetToken}
+                  onChangeText={setResetToken}
+                  autoCapitalize="none"
+                />
+
+                <TextInput
+                  style={styles.modalInput}
+                  placeholder="Nueva contraseña"
+                  placeholderTextColor="#8c8c8c"
+                  value={newPassword1}
+                  onChangeText={setNewPassword1}
+                  secureTextEntry
+                  autoCapitalize="none"
+                />
+
+                <TextInput
+                  style={styles.modalInput}
+                  placeholder="Confirmar contraseña"
+                  placeholderTextColor="#8c8c8c"
+                  value={newPassword2}
+                  onChangeText={setNewPassword2}
+                  secureTextEntry
+                  autoCapitalize="none"
+                />
+
+                <View style={styles.modalActions}>
+                  <TouchableOpacity
+                    style={[styles.modalButton, styles.modalButtonSecondary]}
+                    onPress={() => setResetVisible(false)}
+                    disabled={resetLoading}
+                  >
+                    <Text style={styles.modalButtonText}>Cancelar</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.modalButton, resetLoading && { opacity: 0.7 }]}
+                    onPress={async () => {
+                      const emailToUse = (forgotEmail || email).trim().toLowerCase();
+                      if (!emailToUse) {
+                        Alert.alert('Email requerido', 'Completa tu correo primero.');
+                        return;
+                      }
+                      if (!resetToken.trim()) {
+                        Alert.alert('Código requerido', 'Ingresa el código de recuperación.');
+                        return;
+                      }
+                      if (newPassword1.length < 6) {
+                        Alert.alert('Contraseña insegura', 'La contraseña debe tener al menos 6 caracteres.');
+                        return;
+                      }
+                      if (newPassword1 !== newPassword2) {
+                        Alert.alert('Las contraseñas no coinciden', 'Verifica ambas entradas.');
+                        return;
+                      }
+                      setResetLoading(true);
+                      try {
+                        console.log('🔄 ResetPassword: reseteando contraseña para', emailToUse);
+                        const res = await databaseService.resetPassword(emailToUse, resetToken.trim(), newPassword1);
+                        console.log('✅ ResetPassword: respuesta', res);
+                        Alert.alert('Contraseña actualizada', 'Ahora puedes iniciar sesión con tu nueva contraseña.', [
+                          { text: 'OK', onPress: () => setResetVisible(false) },
+                        ]);
+                        // Rellenar el formulario de login y cerrar modales
+                        setEmail(emailToUse);
+                        setPassword(newPassword1);
+                        setForgotVisible(false);
+                        setResetVisible(false);
+                      } catch (error: any) {
+                        console.error('❌ ResetPassword error:', error?.response?.data || error.message);
+                        const status = error?.response?.status;
+                        const message = error?.response?.data?.message;
+                        if (status === 400 || message?.includes('Token inválido')) {
+                          Alert.alert('Código inválido', 'El código es incorrecto o ha expirado.');
+                        } else {
+                          Alert.alert('Error', message || 'No se pudo actualizar la contraseña.');
+                        }
+                      } finally {
+                        setResetLoading(false);
+                      }
+                    }}
+                    disabled={resetLoading}
+                  >
+                    {resetLoading ? (
+                      <ActivityIndicator color="#FFFFFF" />
+                    ) : (
+                      <Text style={styles.modalButtonText}>Actualizar contraseña</Text>
+                    )}
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </View>
+          </Modal>
         </LinearGradient>
       </ImageBackground>
     </View>
@@ -386,5 +612,68 @@ const styles = StyleSheet.create({
     color: '#46d369',
     fontSize: 14,
     fontWeight: '600',
+  },
+  // --- Modal styles ---
+  modalOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  modalContent: {
+    width: '100%',
+    maxWidth: 480,
+    backgroundColor: 'rgba(0,0,0,0.9)',
+    borderRadius: 6,
+    padding: 20,
+    borderWidth: 1,
+    borderColor: '#333',
+  },
+  modalTitle: {
+    color: '#FFFFFF',
+    fontSize: 20,
+    fontWeight: 'bold',
+    marginBottom: 10,
+  },
+  modalDesc: {
+    color: '#b3b3b3',
+    fontSize: 14,
+    marginBottom: 16,
+  },
+  modalInput: {
+    backgroundColor: '#333333',
+    borderRadius: 4,
+    padding: 12,
+    fontSize: 16,
+    color: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#333333',
+    marginBottom: 12,
+  },
+  modalActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 10,
+    marginTop: 8,
+  },
+  modalButton: {
+    backgroundColor: '#E50914',
+    borderRadius: 4,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    alignItems: 'center',
+  },
+  modalButtonSecondary: {
+    backgroundColor: '#333333',
+  },
+  modalButtonText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: 'bold',
   },
 });

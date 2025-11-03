@@ -100,9 +100,9 @@ export default function Header({ black = false, onProfilePress, onSearchPress, o
     <Animated.View style={[dynamicStyles.container, { backgroundColor }]}>
       <SafeAreaView>
         <View style={dynamicStyles.header}>
-          {/* Logo de DSIView */}
+          {/* Logo: Pixel No Sekai */}
           <TouchableOpacity style={dynamicStyles.logoContainer}>
-            <Text style={dynamicStyles.logo}>DSIVIEW</Text>
+            <Text style={dynamicStyles.logo}>Pixel No Sekai</Text>
           </TouchableOpacity>
 
           {/* Contenedor derecho: Búsqueda + Notificaciones */}

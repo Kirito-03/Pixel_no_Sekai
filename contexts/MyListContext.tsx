@@ -3,11 +3,12 @@ import { useProfile } from './ProfileContext';
 import databaseService from '../services/databaseService';
 
 interface MyListContextType {
-  myListItems: Set<number>;
-  isInMyList: (movieId: number, contentType?: 'movie' | 'tv' | 'anime') => boolean;
-  addToMyList: (movieId: number, contentType?: 'movie' | 'tv' | 'anime') => Promise<void>;
-  removeFromMyList: (movieId: number, contentType?: 'movie' | 'tv' | 'anime') => Promise<void>;
-  toggleMyList: (movieId: number, contentType?: 'movie' | 'tv' | 'anime') => Promise<void>;
+  // Guardamos claves compuestas con el tipo para evitar colisiones entre TMDB y AniList
+  myListItems: Set<string>;
+  isInMyList: (contentId: number, contentType?: 'movie' | 'tv' | 'anime') => boolean;
+  addToMyList: (contentId: number, contentType?: 'movie' | 'tv' | 'anime') => Promise<void>;
+  removeFromMyList: (contentId: number, contentType?: 'movie' | 'tv' | 'anime') => Promise<void>;
+  toggleMyList: (contentId: number, contentType?: 'movie' | 'tv' | 'anime') => Promise<void>;
   refreshMyList: () => Promise<void>;
   loading: boolean;
 }
@@ -20,7 +21,7 @@ interface MyListProviderProps {
 
 export const MyListProvider: React.FC<MyListProviderProps> = ({ children }) => {
   const { currentProfile } = useProfile();
-  const [myListItems, setMyListItems] = useState<Set<number>>(new Set());
+  const [myListItems, setMyListItems] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(false);
 
   // Cargar la lista cuando cambie el perfil
@@ -37,28 +38,58 @@ export const MyListProvider: React.FC<MyListProviderProps> = ({ children }) => {
     
     setLoading(true);
     try {
-      console.log('🔄 Cargando Mi Lista para perfil:', currentProfile.id);
+      console.log('🔄 refreshMyList: Cargando Mi Lista para perfil:', currentProfile.id);
       const items = await databaseService.getMyList(currentProfile.id);
-      const movieIds = new Set<number>(items.map((item: { content_id: number }) => item.content_id));
-      setMyListItems(movieIds);
-      console.log('✅ Mi Lista cargada exitosamente:', movieIds.size, 'items');
+      console.log('🔄 refreshMyList: Items recibidos del backend:', items);
+      
+      // Crear claves únicas por tipo para evitar colisiones (ej: 'anime:12345')
+      // Normalizamos el tipo por si el backend envía variantes de casing
+      const keyed = new Set<string>(
+        items.map((item: { content_id: number; content_type: 'movie' | 'tv' | 'anime' }) => {
+          const typeRaw = String(item.content_type ?? '').toLowerCase();
+          let type: 'movie' | 'tv' | 'anime';
+
+          if (typeRaw === 'movie' || typeRaw === 'tv' || typeRaw === 'anime') {
+            type = typeRaw;
+          } else {
+            // Fallback: si el backend devuelve tipo vacío por un ENUM inválido, intentamos inferir
+            // Si ya existe la clave 'anime:<id>' en el estado previo, asumimos que es anime
+            if (myListItems.has(`anime:${item.content_id}`)) {
+              type = 'anime';
+              console.warn(`⚠️ refreshMyList: content_type vacío para ID ${item.content_id}. Inferido como 'anime' por estado previo.`);
+            } else {
+              // Como último recurso, mantenemos compatibilidad con el comportamiento previo
+              type = 'movie';
+              console.warn(`⚠️ refreshMyList: content_type inválido ('${typeRaw}') para ID ${item.content_id}. Usando fallback 'movie'.`);
+            }
+          }
+
+          const key = `${type}:${item.content_id}`;
+          console.log(`🔄 refreshMyList: Procesando item - ID: ${item.content_id}, Type: ${item.content_type} -> ${type}, Key: ${key}`);
+          return key;
+        })
+      );
+      setMyListItems(keyed);
+      console.log('✅ refreshMyList: Mi Lista cargada exitosamente:', keyed.size, 'items');
+      console.log('✅ refreshMyList: Claves finales:', Array.from(keyed));
     } catch (error) {
-      console.error('❌ Error loading my list:', error);
-      if (error.code === 'NETWORK_ERROR') {
-        console.error('💡 Error de red - verificar conexión al servidor');
+      console.error('❌ refreshMyList: Error loading my list:', error);
+      if (error instanceof Error && 'code' in error && error.code === 'NETWORK_ERROR') {
+        console.error('❌ refreshMyList: Error de red - verificar conexión al servidor');
       }
-      setMyListItems(new Set<number>());
+      setMyListItems(new Set<string>());
     } finally {
       setLoading(false);
     }
   };
 
-  const isInMyList = (movieId: number, contentType?: 'movie' | 'tv' | 'anime'): boolean => {
-    return myListItems.has(movieId);
+  const isInMyList = (contentId: number, contentType: 'movie' | 'tv' | 'anime' = 'movie'): boolean => {
+    const key = `${contentType}:${contentId}`;
+    return myListItems.has(key);
   };
 
-  const addToMyList = async (movieId: number, contentType: 'movie' | 'tv' | 'anime' = 'movie') => {
-    console.log('➕ addToMyList: Starting', { movieId, contentType });
+  const addToMyList = async (contentId: number, contentType: 'movie' | 'tv' | 'anime' = 'movie') => {
+    console.log('➕ addToMyList: Starting', { contentId, contentType, profileId: currentProfile?.id });
     
     if (!currentProfile) {
       console.log('❌ addToMyList: No current profile');
@@ -66,20 +97,34 @@ export const MyListProvider: React.FC<MyListProviderProps> = ({ children }) => {
     }
 
     try {
-      console.log('🌐 addToMyList: Calling databaseService.addToMyList', { profileId: currentProfile.id });
-      await databaseService.addToMyList(currentProfile.id, movieId, contentType);
-      console.log('✅ addToMyList: Database call successful');
+      console.log('➕ addToMyList: Calling databaseService.addToMyList', { 
+        profileId: currentProfile.id, 
+        contentId, 
+        contentType 
+      });
       
-      setMyListItems(prev => new Set<number>([...prev, movieId]));
-      console.log('📝 addToMyList: Local state updated');
+      const result = await databaseService.addToMyList(currentProfile.id, contentId, contentType);
+      console.log('✅ addToMyList: Database call successful, result:', result);
+      
+      const key = `${contentType}:${contentId}`;
+      setMyListItems(prev => {
+        const newSet = new Set<string>([...prev, key]);
+        console.log('✅ addToMyList: Local state updated, new key:', key);
+        console.log('✅ addToMyList: All keys now:', Array.from(newSet));
+        return newSet;
+      });
     } catch (error) {
       console.error('❌ addToMyList: Error', error);
+      if (error instanceof Error) {
+        console.error('❌ addToMyList: Error message:', error.message);
+        console.error('❌ addToMyList: Error stack:', error.stack);
+      }
       throw error;
     }
   };
 
-  const removeFromMyList = async (movieId: number, contentType: 'movie' | 'tv' | 'anime' = 'movie') => {
-    console.log('➖ removeFromMyList: Starting', { movieId, contentType });
+  const removeFromMyList = async (contentId: number, contentType: 'movie' | 'tv' | 'anime' = 'movie') => {
+    console.log('➖ removeFromMyList: Starting', { contentId, contentType, profileId: currentProfile?.id });
     
     if (!currentProfile) {
       console.log('❌ removeFromMyList: No current profile');
@@ -87,24 +132,35 @@ export const MyListProvider: React.FC<MyListProviderProps> = ({ children }) => {
     }
 
     try {
-      console.log('🌐 removeFromMyList: Calling databaseService.removeFromMyList', { profileId: currentProfile.id });
-      await databaseService.removeFromMyList(currentProfile.id, movieId, contentType);
-      console.log('✅ removeFromMyList: Database call successful');
+      console.log('➖ removeFromMyList: Calling databaseService.removeFromMyList', { 
+        profileId: currentProfile.id, 
+        contentId, 
+        contentType 
+      });
+      
+      const result = await databaseService.removeFromMyList(currentProfile.id, contentId, contentType);
+      console.log('✅ removeFromMyList: Database call successful, result:', result);
       
       setMyListItems(prev => {
         const newSet = new Set(prev);
-        newSet.delete(movieId);
+        const key = `${contentType}:${contentId}`;
+        const wasDeleted = newSet.delete(key);
+        console.log('✅ removeFromMyList: Local state updated, removed key:', key, 'was present:', wasDeleted);
+        console.log('✅ removeFromMyList: All keys now:', Array.from(newSet));
         return newSet;
       });
-      console.log('📝 removeFromMyList: Local state updated');
     } catch (error) {
       console.error('❌ removeFromMyList: Error', error);
+      if (error instanceof Error) {
+        console.error('❌ removeFromMyList: Error message:', error.message);
+        console.error('❌ removeFromMyList: Error stack:', error.stack);
+      }
       throw error;
     }
   };
 
   const toggleMyList = async (contentId: number, contentType: 'movie' | 'tv' | 'anime' = 'movie') => {
-    console.log('🔄 toggleMyList: Starting', { contentId, contentType });
+    console.log('🔄 toggleMyList: Starting', { contentId, contentType, profileId: currentProfile?.id });
     
     if (!currentProfile) {
       console.log('❌ toggleMyList: No current profile');
@@ -112,7 +168,12 @@ export const MyListProvider: React.FC<MyListProviderProps> = ({ children }) => {
     }
 
     const isCurrentlyInList = isInMyList(contentId, contentType);
-    console.log('📋 toggleMyList: Current status', { isCurrentlyInList });
+    const key = `${contentType}:${contentId}`;
+    console.log('🔄 toggleMyList: Current status', { 
+      isCurrentlyInList, 
+      key,
+      allKeys: Array.from(myListItems)
+    });
 
     try {
       if (isCurrentlyInList) {
@@ -128,6 +189,9 @@ export const MyListProvider: React.FC<MyListProviderProps> = ({ children }) => {
       console.log('✅ toggleMyList: Success');
     } catch (error) {
       console.error('❌ toggleMyList: Error', error);
+      if (error instanceof Error) {
+        console.error('❌ toggleMyList: Error message:', error.message);
+      }
       throw error;
     }
   };

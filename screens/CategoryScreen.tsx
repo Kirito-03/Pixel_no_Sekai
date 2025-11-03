@@ -7,6 +7,7 @@ import MovieRow from '../components/MovieRow';
 import { ContentItem } from '../types';
 import MovieModal from '../components/MovieModal';
 import CategoriesMenu from '../components/CategoriesMenu';
+import { useProfile } from '../contexts/ProfileContext';
 import {
   getPopularMovies,
   getTopRatedMovies,
@@ -52,6 +53,7 @@ const categoryToGenreMap: { [key: string]: any } = {
 
 export default function CategoryScreen({ navigation, route }: Props) {
   const { categoryId, categoryName } = route.params;
+  const { adultContentEnabled } = useProfile();
   const [loading, setLoading] = useState(true);
   const [content, setContent] = useState<any>({
     movies: [],
@@ -225,7 +227,7 @@ export default function CategoryScreen({ navigation, route }: Props) {
         {content.movies.length > 0 && (
           <MovieRow
             title={`${categoryName} - Películas`}
-            movies={content.movies}
+            movies={content.movies.filter((item: any) => adultContentEnabled || !item.isAdult)}
             onMoviePress={(id) => {
               const movie = content.movies.find((m: any) => m.id === id);
               handleContentPress(id, 'movie', movie);
@@ -237,7 +239,7 @@ export default function CategoryScreen({ navigation, route }: Props) {
         {content.tvShows.length > 0 && (
           <MovieRow
             title={`${categoryName} - Series`}
-            movies={content.tvShows}
+            movies={content.tvShows.filter((item: any) => adultContentEnabled || !item.isAdult)}
             onMoviePress={(id) => {
               const show = content.tvShows.find((s: any) => s.id === id);
               handleContentPress(id, 'tv', show);
@@ -249,7 +251,7 @@ export default function CategoryScreen({ navigation, route }: Props) {
         {content.topRated.length > 0 && (
           <MovieRow
             title="Mejor Valoradas"
-            movies={content.topRated}
+            movies={content.topRated.filter((item: any) => adultContentEnabled || !item.isAdult)}
             onMoviePress={(id) => {
               const movie = content.topRated.find((m: any) => m.id === id);
               handleContentPress(id, 'movie', movie);
@@ -261,7 +263,7 @@ export default function CategoryScreen({ navigation, route }: Props) {
         {content.topRatedTV.length > 0 && (
           <MovieRow
             title="Series Mejor Valoradas"
-            movies={content.topRatedTV}
+            movies={content.topRatedTV.filter((item: any) => adultContentEnabled || !item.isAdult)}
             onMoviePress={(id) => {
               const show = content.topRatedTV.find((s: any) => s.id === id);
               handleContentPress(id, 'tv', show);

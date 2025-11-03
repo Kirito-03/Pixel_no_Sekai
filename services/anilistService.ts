@@ -1,28 +1,78 @@
 import { Anime, AnimeDetail } from '../types';
+import { Platform } from 'react-native';
+import { getCurrentBaseURL } from './databaseService';
 
 const ANILIST_API_URL = 'https://graphql.anilist.co';
 
+// Limitar tasa de peticiones para evitar 429 y añadir reintentos con backoff
+const REQUEST_INTERVAL_MS = 350; // mínimo ~3 peticiones/segundo
+let lastRequestTimestamp = 0;
+
+const waitForSlot = async () => {
+  const now = Date.now();
+  const nextAllowed = lastRequestTimestamp + REQUEST_INTERVAL_MS;
+  const delay = nextAllowed - now;
+  if (delay > 0) {
+    await new Promise(res => setTimeout(res, delay));
+  }
+  lastRequestTimestamp = Date.now();
+};
+
 // Función auxiliar para hacer consultas GraphQL
 const graphqlRequest = async (query: string, variables: any = {}) => {
-  const response = await fetch(ANILIST_API_URL, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Accept': 'application/json',
-    },
-    body: JSON.stringify({
-      query,
-      variables,
-    }),
-  });
+  // En web, usar el backend como proxy para evitar CORS
+  const url = Platform.OS === 'web' ? `${getCurrentBaseURL()}/proxy/anilist` : ANILIST_API_URL;
+  // Reintentos con backoff exponencial en caso de 429 u otros errores transitorios
+  const maxAttempts = 3;
+  let attempt = 0;
+  let lastError: any = null;
 
-  const data = await response.json();
-  
-  if (data.errors) {
-    throw new Error(data.errors[0].message);
+  while (attempt < maxAttempts) {
+    attempt++;
+    // Respetar intervalo mínimo entre peticiones
+    await waitForSlot();
+
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+        body: JSON.stringify({
+          query,
+          variables,
+        }),
+      });
+
+      if (response.status === 429) {
+        const retryAfter = Number(response.headers.get('retry-after')) || 500 * attempt; // ms
+        await new Promise(res => setTimeout(res, retryAfter));
+        continue; // reintentar
+      }
+
+      // Manejo robusto de errores de red
+      if (!response.ok) {
+        const text = await response.text().catch(() => '');
+        throw new Error(`AniList request failed: ${response.status} ${response.statusText} ${text}`);
+      }
+
+      const data = await response.json();
+      if (data?.errors) {
+        throw new Error(data.errors[0]?.message || 'AniList error');
+      }
+      return data?.data ?? data;
+    } catch (err: any) {
+      lastError = err;
+      // Backoff exponencial con jitter para otros errores transitorios
+      const baseDelay = 400 * attempt;
+      const jitter = Math.floor(Math.random() * 200);
+      await new Promise(res => setTimeout(res, baseDelay + jitter));
+    }
   }
-  
-  return data.data;
+
+  // Si agotamos intentos, propagar último error
+  throw lastError || new Error('AniList request failed: unknown error');
 };
 
 // Consulta GraphQL para obtener anime populares
@@ -282,31 +332,41 @@ const normalizeAnimeDetail = (anime: any): AnimeDetail => ({
 // ===== FUNCIONES EXPORTADAS =====
 
 // Obtener anime populares
-export const getPopularAnime = async (page: number = 1, perPage: number = 20): Promise<Anime[]> => {
+export const getPopularAnime = async (page: number = 1, perPage: number = 12): Promise<Anime[]> => {
   const data = await graphqlRequest(POPULAR_ANIME_QUERY, { page, perPage });
   return data.Page.media.map(normalizeAnime);
 };
 
 // Obtener anime mejor puntuados
-export const getTopRatedAnime = async (page: number = 1, perPage: number = 20): Promise<Anime[]> => {
+export const getTopRatedAnime = async (page: number = 1, perPage: number = 12): Promise<Anime[]> => {
   const data = await graphqlRequest(TOP_RATED_ANIME_QUERY, { page, perPage });
   return data.Page.media.map(normalizeAnime);
 };
 
 // Obtener anime en emisión
-export const getAiringAnime = async (page: number = 1, perPage: number = 20): Promise<Anime[]> => {
+export const getAiringAnime = async (page: number = 1, perPage: number = 12): Promise<Anime[]> => {
   const data = await graphqlRequest(AIRING_ANIME_QUERY, { page, perPage });
   return data.Page.media.map(normalizeAnime);
 };
 
 // Obtener detalles de un anime
 export const getAnimeDetails = async (id: number): Promise<AnimeDetail> => {
+  // Cache en memoria para evitar reconsultas del mismo ID
+  if (!(global as any).__aniDetailsCache) {
+    (global as any).__aniDetailsCache = new Map<number, AnimeDetail>();
+  }
+  const cache: Map<number, AnimeDetail> = (global as any).__aniDetailsCache;
+  const cached = cache.get(id);
+  if (cached) return cached;
+
   const data = await graphqlRequest(ANIME_DETAILS_QUERY, { id });
-  return normalizeAnimeDetail(data.Media);
+  const normalized = normalizeAnimeDetail(data.Media);
+  cache.set(id, normalized);
+  return normalized;
 };
 
 // Buscar anime
-export const searchAnime = async (query: string, page: number = 1, perPage: number = 20): Promise<Anime[]> => {
+export const searchAnime = async (query: string, page: number = 1, perPage: number = 10): Promise<Anime[]> => {
   const data = await graphqlRequest(SEARCH_ANIME_QUERY, { search: query, page, perPage });
   return data.Page.media.map(normalizeAnime);
 };

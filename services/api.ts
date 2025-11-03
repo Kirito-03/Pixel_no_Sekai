@@ -17,26 +17,26 @@ const api = axios.create({
 // ===== PELÍCULAS =====
 
 // Obtener películas populares
-export const getPopularMovies = async (): Promise<Movie[]> => {
-  const { data } = await api.get('/movie/popular');
+export const getPopularMovies = async (page: number = 1): Promise<Movie[]> => {
+  const { data } = await api.get('/movie/popular', { params: { page } });
   return data.results;
 };
 
 // Obtener películas mejor valoradas
-export const getTopRatedMovies = async (): Promise<Movie[]> => {
-  const { data } = await api.get('/movie/top_rated');
+export const getTopRatedMovies = async (page: number = 1): Promise<Movie[]> => {
+  const { data } = await api.get('/movie/top_rated', { params: { page } });
   return data.results;
 };
 
 // Obtener películas en cartelera
-export const getNowPlayingMovies = async (): Promise<Movie[]> => {
-  const { data } = await api.get('/movie/now_playing');
+export const getNowPlayingMovies = async (page: number = 1): Promise<Movie[]> => {
+  const { data } = await api.get('/movie/now_playing', { params: { page } });
   return data.results;
 };
 
 // Obtener próximos estrenos
-export const getUpcomingMovies = async (): Promise<Movie[]> => {
-  const { data } = await api.get('/movie/upcoming');
+export const getUpcomingMovies = async (page: number = 1): Promise<Movie[]> => {
+  const { data } = await api.get('/movie/upcoming', { params: { page } });
   return data.results;
 };
 
@@ -50,10 +50,18 @@ export const getMoviesByGenre = async (genreId: number): Promise<Movie[]> => {
 
 // Obtener detalles de una película (incluye trailer y clasificación)
 export const getMovieDetails = async (id: number): Promise<MovieDetail> => {
-  const { data } = await api.get(`/movie/${id}`, {
-    params: { append_to_response: 'videos,release_dates' },
-  });
-  return data;
+  try {
+    const { data } = await api.get(`/movie/${id}`, {
+      params: { append_to_response: 'videos,release_dates' },
+    });
+    return data;
+  } catch (error: any) {
+    if (error.response?.status === 404) {
+      console.warn(`⚠️ TMDB Movie ${id} not found (404) - item may be invalid or removed`);
+      throw new Error(`TMDB_404: Movie ${id} not found`);
+    }
+    throw error;
+  }
 };
 
 // Obtener películas similares
@@ -71,26 +79,26 @@ export const getRecommendedMovies = async (movieId: number): Promise<Movie[]> =>
 // ===== SERIES =====
 
 // Obtener series populares
-export const getPopularTVShows = async (): Promise<TVShow[]> => {
-  const { data } = await api.get('/tv/popular');
+export const getPopularTVShows = async (page: number = 1): Promise<TVShow[]> => {
+  const { data } = await api.get('/tv/popular', { params: { page } });
   return data.results;
 };
 
 // Obtener series mejor valoradas
-export const getTopRatedTVShows = async (): Promise<TVShow[]> => {
-  const { data } = await api.get('/tv/top_rated');
+export const getTopRatedTVShows = async (page: number = 1): Promise<TVShow[]> => {
+  const { data } = await api.get('/tv/top_rated', { params: { page } });
   return data.results;
 };
 
 // Obtener series en emisión
-export const getOnTheAirTVShows = async (): Promise<TVShow[]> => {
-  const { data } = await api.get('/tv/on_the_air');
+export const getOnTheAirTVShows = async (page: number = 1): Promise<TVShow[]> => {
+  const { data } = await api.get('/tv/on_the_air', { params: { page } });
   return data.results;
 };
 
 // Obtener series que se emiten hoy
-export const getAiringTodayTVShows = async (): Promise<TVShow[]> => {
-  const { data } = await api.get('/tv/airing_today');
+export const getAiringTodayTVShows = async (page: number = 1): Promise<TVShow[]> => {
+  const { data } = await api.get('/tv/airing_today', { params: { page } });
   return data.results;
 };
 
@@ -104,10 +112,18 @@ export const getTVShowsByGenre = async (genreId: number): Promise<TVShow[]> => {
 
 // Obtener detalles de una serie
 export const getTVShowDetails = async (id: number): Promise<TVShowDetail> => {
-  const { data } = await api.get(`/tv/${id}`, {
-    params: { append_to_response: 'videos,content_ratings' },
-  });
-  return data;
+  try {
+    const { data } = await api.get(`/tv/${id}`, {
+      params: { append_to_response: 'videos' },
+    });
+    return data;
+  } catch (error: any) {
+    if (error.response?.status === 404) {
+      console.warn(`⚠️ TMDB TV Show ${id} not found (404) - item may be invalid or removed`);
+      throw new Error(`TMDB_404: TV Show ${id} not found`);
+    }
+    throw error;
+  }
 };
 
 // Obtener series similares
@@ -180,7 +196,7 @@ export const GENRES = {
 // ===== FUNCIONES DE INTEGRACIÓN (TMDB + ANILIST) =====
 
 // Función para convertir Movie/TVShow a ContentItem
-const tmdbToContentItem = (item: Movie | TVShow, type: 'movie' | 'tv'): ContentItem => {
+export const tmdbToContentItem = (item: Movie | TVShow, type: 'movie' | 'tv'): ContentItem => {
   const title = 'title' in item ? item.title : item.name;
   const releaseDate = 'release_date' in item ? item.release_date : item.first_air_date;
   
@@ -198,27 +214,39 @@ const tmdbToContentItem = (item: Movie | TVShow, type: 'movie' | 'tv'): ContentI
 };
 
 // Función para convertir Anime a ContentItem
-const animeToContentItem = (anime: Anime): ContentItem => {
+export const animeToContentItem = (anime: Anime): ContentItem => {
+  // Tolerancia a nulos en AniList: algunos campos pueden venir vacíos
+  const title = AniListService.getAnimeTitle(anime.title) || 'Sin título';
+  const poster = anime?.coverImage?.large || anime?.coverImage?.medium || '';
+  const backdrop = anime?.bannerImage || poster;
+  const releaseYear = anime?.startDate?.year ?? null;
+  // Detectar contenido adulto según géneros de AniList
+  const genres = Array.isArray(anime?.genres) ? anime.genres : [];
+  const normalizedGenres = genres.map(g => (g || '').toString().toLowerCase());
+  const isAdult = normalizedGenres.includes('hentai') || normalizedGenres.includes('ecchi');
+
   return {
     id: anime.id,
     type: 'anime',
-    title: AniListService.getAnimeTitle(anime.title),
-    overview: anime.description || '',
-    poster_path: anime.coverImage.large,
-    backdrop_path: anime.bannerImage || anime.coverImage.large,
-    release_date: anime.startDate.year.toString(),
-    vote_average: AniListService.getAnimeScore(anime.averageScore),
+    title,
+    overview: anime?.description || '',
+    poster_path: poster,
+    backdrop_path: backdrop,
+    release_date: releaseYear ? String(releaseYear) : '',
+    vote_average: AniListService.getAnimeScore(anime?.averageScore),
     source: 'anilist',
+    genres,
+    isAdult,
   };
 };
 
 // Obtener contenido popular combinado (películas, series y anime)
-export const getAllPopularContent = async (): Promise<ContentItem[]> => {
+export const getAllPopularContent = async (page: number = 1): Promise<ContentItem[]> => {
   try {
     const [movies, tvShows, anime] = await Promise.all([
-      getPopularMovies(),
-      getPopularTVShows(),
-      AniListService.getPopularAnime(),
+      getPopularMovies(page),
+      getPopularTVShows(page),
+      AniListService.getPopularAnime(page),
     ]);
 
     const movieItems = movies.slice(0, 6).map(movie => tmdbToContentItem(movie, 'movie'));
@@ -233,12 +261,12 @@ export const getAllPopularContent = async (): Promise<ContentItem[]> => {
 };
 
 // Obtener contenido mejor valorado combinado
-export const getAllTopRatedContent = async (): Promise<ContentItem[]> => {
+export const getAllTopRatedContent = async (page: number = 1): Promise<ContentItem[]> => {
   try {
     const [movies, tvShows, anime] = await Promise.all([
-      getTopRatedMovies(),
-      getTopRatedTVShows(),
-      AniListService.getTopRatedAnime(),
+      getTopRatedMovies(page),
+      getTopRatedTVShows(page),
+      AniListService.getTopRatedAnime(page),
     ]);
 
     const movieItems = movies.slice(0, 6).map(movie => tmdbToContentItem(movie, 'movie'));
@@ -254,31 +282,40 @@ export const getAllTopRatedContent = async (): Promise<ContentItem[]> => {
 
 // Búsqueda unificada en todas las APIs
 export const searchAllContent = async (query: string): Promise<ContentItem[]> => {
-  try {
-    const [movies, tvShows, anime] = await Promise.all([
-      searchMovies(query),
-      searchTVShows(query),
-      AniListService.searchAnime(query),
-    ]);
+  // Hacer la búsqueda resiliente: si AniList falla (p.ej. por CORS en web),
+  // devolver al menos resultados de TMDB.
+  const normalizedQuery = (query ?? '').toString().trim().toLowerCase();
+  const results = await Promise.allSettled([
+    searchMovies(normalizedQuery),
+    searchTVShows(normalizedQuery),
+    // Reducir presión sobre AniList: limitar por página a 8
+    AniListService.searchAnime(normalizedQuery, 1, 8),
+  ]);
 
-    const movieItems = movies.map(movie => tmdbToContentItem(movie, 'movie'));
-    const tvItems = tvShows.map(show => tmdbToContentItem(show, 'tv'));
-    const animeItems = anime.map(animeToContentItem);
+  const movies = results[0].status === 'fulfilled' ? results[0].value : [];
+  const tvShows = results[1].status === 'fulfilled' ? results[1].value : [];
+  const anime = results[2].status === 'fulfilled' ? results[2].value : [];
 
-    return [...movieItems, ...tvItems, ...animeItems];
-  } catch (error) {
-    console.error('Error searching all content:', error);
-    return [];
+  if (results[2].status === 'rejected') {
+    const err = (results[2] as PromiseRejectedResult).reason;
+    // Log más discreto para no spamear la consola durante la escritura
+    console.warn('AniList search falló, continuando solo con TMDB:', err?.message || err);
   }
+
+  const movieItems = movies.map(movie => tmdbToContentItem(movie, 'movie'));
+  const tvItems = tvShows.map(show => tmdbToContentItem(show, 'tv'));
+  const animeItems = anime.map(animeToContentItem);
+
+  return [...movieItems, ...tvItems, ...animeItems];
 };
 
 // Obtener contenido en emisión/cartelera
-export const getCurrentContent = async (): Promise<ContentItem[]> => {
+export const getCurrentContent = async (page: number = 1): Promise<ContentItem[]> => {
   try {
     const [movies, tvShows, anime] = await Promise.all([
-      getNowPlayingMovies(),
-      getOnTheAirTVShows(),
-      AniListService.getAiringAnime(),
+      getNowPlayingMovies(page),
+      getOnTheAirTVShows(page),
+      AniListService.getAiringAnime(page),
     ]);
 
     const movieItems = movies.slice(0, 6).map(movie => tmdbToContentItem(movie, 'movie'));
@@ -298,23 +335,62 @@ export const getContentDetails = async (
   type: 'movie' | 'tv' | 'anime',
   source: 'tmdb' | 'anilist'
 ): Promise<ContentItem | null> => {
+  console.log('🔍 getContentDetails: Starting', { id, type, source });
+  
   try {
     if (source === 'anilist' && type === 'anime') {
+      console.log('🔍 getContentDetails: Fetching anime from AniList', { id });
       const anime = await AniListService.getAnimeDetails(id);
-      return animeToContentItem(anime);
+      console.log('✅ getContentDetails: AniList response received', { animeTitle: anime?.title?.romaji || anime?.title?.english });
+      const contentItem = animeToContentItem(anime);
+      console.log('✅ getContentDetails: Anime converted to ContentItem', { 
+        contentId: contentItem.id, 
+        contentType: contentItem.type, 
+        contentSource: contentItem.source 
+      });
+      return contentItem;
     } else if (source === 'tmdb') {
       if (type === 'movie') {
+        console.log('🔍 getContentDetails: Fetching movie from TMDB', { id });
         const movie = await getMovieDetails(id);
-        return tmdbToContentItem(movie, 'movie');
+        console.log('✅ getContentDetails: TMDB movie response received', { movieTitle: movie?.title });
+        const contentItem = tmdbToContentItem(movie, 'movie');
+        console.log('✅ getContentDetails: Movie converted to ContentItem', { 
+          contentId: contentItem.id, 
+          contentType: contentItem.type, 
+          contentSource: contentItem.source 
+        });
+        return contentItem;
       } else if (type === 'tv') {
+        console.log('🔍 getContentDetails: Fetching TV show from TMDB', { id });
         const tvShow = await getTVShowDetails(id);
-        return tmdbToContentItem(tvShow, 'tv');
+        console.log('✅ getContentDetails: TMDB TV show response received', { tvTitle: tvShow?.name });
+        const contentItem = tmdbToContentItem(tvShow, 'tv');
+        console.log('✅ getContentDetails: TV show converted to ContentItem', { 
+          contentId: contentItem.id, 
+          contentType: contentItem.type, 
+          contentSource: contentItem.source 
+        });
+        return contentItem;
       }
     }
+    
+    console.log('❌ getContentDetails: No matching source/type combination', { id, type, source });
     return null;
-  } catch (error) {
-    console.error('Error fetching content details:', error);
-    return null;
+  } catch (error: any) {
+    console.error(`❌ getContentDetails: Error fetching content for ID ${id}, type ${type}, source ${source}:`, error);
+    
+    // Si es un error 404 de TMDB, propagar con información específica
+    if (error.message?.includes('TMDB_404')) {
+      throw new Error(`TMDB_404: Content ${id} (${type}) not found on TMDB`);
+    }
+    
+    // Si es un error de AniList, propagar con información específica
+    if (source === 'anilist' && error.response?.status === 404) {
+      throw new Error(`ANILIST_404: Anime ${id} not found on AniList`);
+    }
+    
+    throw error;
   }
 };
 
@@ -338,17 +414,21 @@ export const ENHANCED_CATEGORIES = [
   {
     id: 'popular_anime',
     name: 'Anime Popular',
-    fetcher: async () => (await AniListService.getPopularAnime()).map(animeToContentItem),
+    fetcher: async () => (await AniListService.getPopularAnime())
+      // Incluir también películas de anime
+      .map(animeToContentItem),
   },
   {
     id: 'airing_anime',
     name: 'Anime en Emisión',
-    fetcher: async () => (await AniListService.getAiringAnime()).map(animeToContentItem),
+    fetcher: async () => (await AniListService.getAiringAnime())
+      .map(animeToContentItem),
   },
   {
     id: 'top_anime',
     name: 'Mejor Anime',
-    fetcher: async () => (await AniListService.getTopRatedAnime()).map(animeToContentItem),
+    fetcher: async () => (await AniListService.getTopRatedAnime())
+      .map(animeToContentItem),
   },
   {
     id: 'popular_movies',
@@ -361,4 +441,43 @@ export const ENHANCED_CATEGORIES = [
     fetcher: async () => (await getPopularTVShows()).map(show => tmdbToContentItem(show, 'tv')),
   },
 ];
+
+// ===== Helper para obtener una página de una categoría concreta =====
+export const fetchCategoryPage = async (categoryId: string, page: number = 1): Promise<ContentItem[]> => {
+  try {
+    switch (categoryId) {
+      case 'popular_all':
+        return await getAllPopularContent(page);
+      case 'top_rated_all':
+        return await getAllTopRatedContent(page);
+      case 'current_all':
+        return await getCurrentContent(page);
+      case 'popular_movies': {
+        const movies = await getPopularMovies(page);
+        return movies.map(movie => tmdbToContentItem(movie, 'movie'));
+      }
+      case 'popular_tv': {
+        const tv = await getPopularTVShows(page);
+        return tv.map(show => tmdbToContentItem(show, 'tv'));
+      }
+      case 'popular_anime': {
+        const anime = await AniListService.getPopularAnime(page);
+        return anime.map(animeToContentItem);
+      }
+      case 'airing_anime': {
+        const anime = await AniListService.getAiringAnime(page);
+        return anime.map(animeToContentItem);
+      }
+      case 'top_anime': {
+        const anime = await AniListService.getTopRatedAnime(page);
+        return anime.map(animeToContentItem);
+      }
+      default:
+        return [];
+    }
+  } catch (error) {
+    console.error(`Error fetching page for category ${categoryId}:`, error);
+    return [];
+  }
+};
 

@@ -3,41 +3,31 @@ import { View, ScrollView, StyleSheet, ActivityIndicator, Platform, Dimensions, 
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { HomeStackParamList, MovieDetail, TVShowDetail, ContentItem, Movie, TVShow } from '../types';
 import {
-    getPopularMovies,
-    getTopRatedMovies,
-    getNowPlayingMovies,
-    getUpcomingMovies,
-    getMoviesByGenre,
-    getPopularTVShows,
-    getTopRatedTVShows,
-    getOnTheAirTVShows,
-    getAiringTodayTVShows,
-    getTVShowsByGenre,
     getMovieDetails,
-    GENRES,
     ENHANCED_CATEGORIES,
-    getAllPopularContent,
-    getAllTopRatedContent,
-    getCurrentContent
+    fetchCategoryPage
 } from '../services/api';
 import { colors } from '../theme';
 import Header from '../components/Header';
 import FeaturedMovie from '../components/FeaturedMovie';
+import FeaturedCarousel from '../components/FeaturedCarousel';
 import MovieRow from '../components/MovieRow';
 import MovieModal from '../components/MovieModal';
 import { useProfile } from '../contexts/ProfileContext';
 import databaseService from '../services/databaseService';
+import { useMyList } from '../contexts/MyListContext';
 
 type Props = NativeStackScreenProps<HomeStackParamList, 'HomeScreen'>;
 
 export default function HomeScreen({ navigation }: Props) {
-    const { currentProfile } = useProfile();
+    const { currentProfile, adultContentEnabled } = useProfile();
+    const { addToMyList: addToMyListContext } = useMyList();
 
     // Estado unificado para contenido (TMDB + AniList)
     const [contentSections, setContentSections] = useState<{[key: string]: ContentItem[]}>({});
 
     // Estados de la UI
-    const [featuredMovie, setFeaturedMovie] = useState<MovieDetail | null>(null);
+    const [featuredMovies, setFeaturedMovies] = useState<MovieDetail[]>([]);
     const [selectedContent, setSelectedContent] = useState<ContentItem | null>(null);
     const [modalVisible, setModalVisible] = useState(false);
     const [loading, setLoading] = useState(true);
@@ -51,6 +41,42 @@ export default function HomeScreen({ navigation }: Props) {
 
     const scrollViewRef = useRef<ScrollView>(null);
     const { height: screenHeight } = Dimensions.get('window');
+    const [isLoadingMore, setIsLoadingMore] = useState(false);
+    // Mutex para evitar condiciones de carrera al cargar más filas
+    const loadingMoreRef = useRef<boolean>(false);
+    // Set global de keys ya añadidas para evitar duplicados incluso con llamadas concurrentes
+    const loadedRowKeysRef = useRef<Set<string>>(new Set());
+    const [extraRows, setExtraRows] = useState<{ key: string; title: string; items: ContentItem[] }[]>([]);
+    const [categorySequenceIndex, setCategorySequenceIndex] = useState(0);
+    const [pagesByCategory, setPagesByCategory] = useState<Record<string, number>>({
+        popular_all: 1,
+        top_rated_all: 1,
+        current_all: 1,
+        popular_anime: 1,
+        airing_anime: 1,
+        top_anime: 1,
+        popular_movies: 1,
+        popular_tv: 1,
+    });
+
+    // Pools de categorías por filtro para lograr variedad en cada carga
+    const CATEGORY_LABELS: Record<string, string> = {
+        popular_all: 'Popular Ahora',
+        top_rated_all: 'Mejor Valorado',
+        current_all: 'En Emisión/Cartelera',
+        popular_anime: 'Anime Popular',
+        airing_anime: 'Anime en Emisión',
+        top_anime: 'Mejor Anime',
+        popular_movies: 'Películas Populares',
+        popular_tv: 'Series Populares',
+    };
+
+    const CATEGORY_POOLS: Record<'all' | 'movies' | 'series' | 'anime', string[]> = {
+        all: ['popular_all', 'current_all', 'top_rated_all', 'popular_anime', 'airing_anime', 'top_anime', 'popular_movies', 'popular_tv'],
+        movies: ['popular_all', 'top_rated_all', 'current_all', 'popular_movies'],
+        series: ['popular_all', 'top_rated_all', 'current_all', 'popular_tv'],
+        anime: ['popular_all', 'top_rated_all', 'current_all', 'popular_anime', 'airing_anime', 'top_anime'],
+    };
 
     useEffect(() => {
         loadContent();
@@ -82,16 +108,16 @@ export default function HomeScreen({ navigation }: Props) {
 
             setContentSections(newContentSections);
 
-            // Cargar película destacada del contenido popular
+            // Cargar varias películas destacadas del contenido popular (top 5)
             const popularContent = newContentSections['popular_all'];
             if (popularContent && popularContent.length > 0) {
-                const firstMovie = popularContent.find(item => item.type === 'movie');
-                if (firstMovie) {
+                const popularMovies = popularContent.filter(item => item.type === 'movie').slice(0, 5);
+                if (popularMovies.length > 0) {
                     try {
-                        const featured = await getMovieDetails(firstMovie.id);
-                        setFeaturedMovie(featured);
+                        const details = await Promise.all(popularMovies.map(m => getMovieDetails(m.id)));
+                        setFeaturedMovies(details);
                     } catch (error) {
-                        console.error('Error loading featured movie:', error);
+                        console.error('Error loading featured movies:', error);
                     }
                 }
             }
@@ -109,8 +135,8 @@ export default function HomeScreen({ navigation }: Props) {
             return;
         }
         try {
-            // Usar el servicio de base de datos en lugar de AsyncStorage
-            await databaseService.addToMyList(currentProfile.id, contentId, 'movie');
+            // Usar el contexto para mantener el estado UI sincronizado
+            await addToMyListContext(contentId, 'movie');
             Alert.alert('Éxito', 'Agregado a "Mi Lista".');
         } catch (error: any) {
             console.error('Error adding to my list:', error);
@@ -124,8 +150,16 @@ export default function HomeScreen({ navigation }: Props) {
     };
 
     const handleScroll = (event: any) => {
-        const scrollY = event.nativeEvent.contentOffset.y;
+        const { contentOffset, layoutMeasurement, contentSize } = event.nativeEvent;
+        const scrollY = contentOffset.y;
         setBlackHeader(scrollY > 10);
+
+        // Detectar si estamos cerca del final del scroll para cargar más
+        const paddingToBottom = 80;
+        const isAtBottom = layoutMeasurement.height + contentOffset.y >= contentSize.height - paddingToBottom;
+        if (isAtBottom && !isLoadingMore) {
+            loadMoreContent();
+        }
     };
 
     const handleContentPress = (item: ContentItem) => {
@@ -139,6 +173,86 @@ export default function HomeScreen({ navigation }: Props) {
     const handleFilterChange = (filter: 'series' | 'movies' | 'all' | 'anime') => {
         setContentFilter(filter);
         setSelectedCategory(null); // Resetear categoría al cambiar el filtro principal
+        // Reiniciar paginación y filas extra para evitar duplicados/mezclas al cambiar filtro
+        setExtraRows([]);
+        setCategorySequenceIndex(0);
+        // Limpiar keys cargadas
+        loadedRowKeysRef.current = new Set();
+        setPagesByCategory({
+            popular_all: 1,
+            top_rated_all: 1,
+            current_all: 1,
+            popular_anime: 1,
+            airing_anime: 1,
+            top_anime: 1,
+            popular_movies: 1,
+            popular_tv: 1,
+        });
+    };
+
+    const loadMoreContent = async () => {
+        try {
+            // Evitar llamadas paralelas que generan claves duplicadas
+            if (loadingMoreRef.current) {
+                return;
+            }
+            loadingMoreRef.current = true;
+            setIsLoadingMore(true);
+
+            const pool = CATEGORY_POOLS[contentFilter];
+            const batchSize = 3; // número de filas nuevas por carga para variedad
+            const newExtraRows: { key: string; title: string; items: ContentItem[] }[] = [];
+            // Usar un mapa local para evitar condiciones de carrera al actualizar páginas
+            const updatedPages: Record<string, number> = { ...pagesByCategory };
+
+            for (let i = 0; i < batchSize; i++) {
+                const idx = (categorySequenceIndex + i) % pool.length;
+                const categoryId = pool[idx];
+                const nextPage = (updatedPages[categoryId] || 1) + 1;
+                const items = await fetchCategoryPage(categoryId, nextPage);
+
+                if (items.length > 0) {
+                    const rowKey = `${categoryId}_page_${nextPage}`;
+                    // Si ya existe esa key, saltarla para evitar duplicado
+                    if (!loadedRowKeysRef.current.has(rowKey)) {
+                        newExtraRows.push({
+                            key: rowKey,
+                            title: CATEGORY_LABELS[categoryId],
+                            items,
+                        });
+                        loadedRowKeysRef.current.add(rowKey);
+                    }
+                }
+
+                // Actualizar el contador de página por categoría
+                updatedPages[categoryId] = nextPage;
+            }
+
+            // Avanzar el índice de la secuencia para la próxima carga
+            setCategorySequenceIndex(prev => (prev + batchSize) % pool.length);
+
+            // Aplicar actualización de páginas de manera atómica
+            setPagesByCategory(updatedPages);
+
+            if (newExtraRows.length > 0) {
+                // Evitar duplicados de keys al anexar nuevas filas (segunda barrera)
+                setExtraRows(prev => {
+                    const all = [...prev, ...newExtraRows];
+                    const map = new Map<string, { key: string; title: string; items: ContentItem[] }>();
+                    for (const r of all) {
+                        if (!map.has(r.key)) {
+                            map.set(r.key, r);
+                        }
+                    }
+                    return Array.from(map.values());
+                });
+            }
+        } catch (error) {
+            console.error('Error loading more content:', error);
+        } finally {
+            setIsLoadingMore(false);
+            loadingMoreRef.current = false;
+        }
     };
 
     const handleCategorySelect = (categoryId: string, categoryName: string) => {
@@ -165,19 +279,19 @@ export default function HomeScreen({ navigation }: Props) {
 
     // Función para filtrar contenido basado en el filtro actual
     const filterContent = (content: ContentItem[]): ContentItem[] => {
-        if (contentFilter === 'all') return content;
-        
-        return content.filter(item => {
-            switch (contentFilter) {
-                case 'movies':
-                    return item.type === 'movie';
-                case 'series':
-                    return item.type === 'tv';
-                case 'anime':
-                    return item.type === 'anime';
-                default:
-                    return true;
+        const byType = content.filter(item => {
+            if (contentFilter === 'all') return true;
+            if (contentFilter === 'movies') return item.type === 'movie';
+            if (contentFilter === 'series') return item.type === 'tv';
+            if (contentFilter === 'anime') return item.type === 'anime';
+            return true;
+        });
+        // Aplicar filtro de +18 sobre anime si está deshabilitado
+        return byType.filter(item => {
+            if (item.type === 'anime' && !adultContentEnabled) {
+                return !item.isAdult;
             }
+            return true;
         });
     };
 
@@ -216,21 +330,20 @@ export default function HomeScreen({ navigation }: Props) {
                 scrollEventThrottle={16}
                 showsVerticalScrollIndicator={false}
             >
-                {contentFilter !== 'series' && contentFilter !== 'anime' && featuredMovie && (
-                    <FeaturedMovie
-                        movie={featuredMovie}
-                        onWatch={() => handleContentNavigation({
-                            id: featuredMovie.id,
+                {contentFilter !== 'series' && contentFilter !== 'anime' && featuredMovies.length > 0 && (
+                    <FeaturedCarousel
+                        movies={featuredMovies}
+                        onWatch={(movie) => handleContentNavigation({
+                            id: movie.id,
                             type: 'movie',
-                            title: featuredMovie.title,
-                            overview: featuredMovie.overview,
-                            poster_path: featuredMovie.poster_path,
-                            backdrop_path: featuredMovie.backdrop_path,
-                            release_date: featuredMovie.release_date,
-                            vote_average: featuredMovie.vote_average,
+                            title: movie.title,
+                            overview: movie.overview,
+                            poster_path: movie.poster_path,
+                            backdrop_path: movie.backdrop_path,
+                            release_date: movie.release_date,
+                            vote_average: movie.vote_average,
                             source: 'tmdb'
                         })}
-                        onAddList={() => addToMyList(featuredMovie.id)}
                     />
                 )}
 
@@ -257,6 +370,27 @@ export default function HomeScreen({ navigation }: Props) {
                         />
                     );
                 })}
+
+                {/* Filas adicionales cargadas dinámicamente al llegar al final */}
+                {extraRows.map((row) => (
+                    <MovieRow
+                        key={row.key}
+                        title={row.title}
+                        movies={filterContent(row.items)}
+                        onMoviePress={(id) => {
+                            const contentItem = row.items.find(item => item.id === id);
+                            if (contentItem) {
+                                handleContentNavigation(contentItem);
+                            }
+                        }}
+                    />
+                ))}
+
+                {isLoadingMore && (
+                    <View style={styles.loadingMore}>
+                        <ActivityIndicator size="small" color={colors.primary} />
+                    </View>
+                )}
             </ScrollView>
 
             <MovieModal
@@ -278,6 +412,11 @@ const styles = StyleSheet.create({
     },
     scrollContent: {
         paddingTop: 100, // Ajustado para un Header estándar
+    },
+    loadingMore: {
+        paddingVertical: 16,
+        alignItems: 'center',
+        justifyContent: 'center',
     },
     loading: {
         flex: 1,

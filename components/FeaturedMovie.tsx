@@ -1,24 +1,54 @@
-import React from 'react';
-import { View, Image, Text, TouchableOpacity, StyleSheet, useWindowDimensions } from 'react-native';
+import React, { useState } from 'react';
+import { View, Image, Text, TouchableOpacity, StyleSheet, useWindowDimensions, Alert } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { MovieDetail } from '../types';
 import { getImageUrl } from '../services/api';
 import { colors, spacing } from '../theme';
+import { useProfile } from '../contexts/ProfileContext';
+import { useMyList } from '../contexts/MyListContext';
 
 interface Props {
   movie: MovieDetail;
   onWatch: () => void;
+  // Mantener compatibilidad: si el padre pasa un handler, lo usamos;
+  // en caso contrario, usamos el contexto para toggle.
   onAddList?: () => void;
 }
 
 export default function FeaturedMovie({ movie, onWatch, onAddList }: Props) {
   const { width, height } = useWindowDimensions();
   const isSmallScreen = width < 768;
-  
+  const { currentProfile } = useProfile();
+  const { isInMyList, toggleMyList, addToMyList } = useMyList();
+  const [isToggling, setIsToggling] = useState(false);
+
   const releaseYear = movie.release_date ? new Date(movie.release_date).getFullYear() : '';
   const genres = movie.genres ? movie.genres.map(g => g.name).join(', ') : '';
   const voteAverage = movie.vote_average ? movie.vote_average.toFixed(1) : '0';
+  const inMyList = isInMyList(movie.id, 'movie');
+
+  const handleMyListPress = async () => {
+    // Si el padre provee un handler específico, usarlo (para compatibilidad)
+    if (onAddList) {
+      return onAddList();
+    }
+    if (!currentProfile) {
+      Alert.alert('Perfil requerido', 'Selecciona un perfil para usar Mi Lista.');
+      return;
+    }
+    if (isToggling) return;
+    setIsToggling(true);
+    try {
+      // FeaturedMovie siempre es una película
+      await toggleMyList(movie.id, 'movie');
+    } catch (err) {
+      console.error('FeaturedMovie: Error al actualizar Mi Lista', err);
+      Alert.alert('Error', 'No se pudo actualizar Mi Lista.');
+    } finally {
+      setIsToggling(false);
+    }
+  };
 
   const dynamicStyles = {
     container: {
@@ -85,8 +115,10 @@ export default function FeaturedMovie({ movie, onWatch, onAddList }: Props) {
     },
     buttons: {
       flexDirection: 'row' as const,
+      alignItems: 'center' as const,
+      justifyContent: 'flex-start' as const,
       marginTop: isSmallScreen ? 12 : 15,
-      flexWrap: 'wrap' as const,
+      flexWrap: 'nowrap' as const,
     },
     watchButton: {
       backgroundColor: '#fff',
@@ -111,6 +143,7 @@ export default function FeaturedMovie({ movie, onWatch, onAddList }: Props) {
       paddingVertical: isSmallScreen ? 10 : 15,
       paddingHorizontal: isSmallScreen ? 20 : 25,
       borderRadius: 5,
+      marginLeft: 10,
     },
     myListButtonText: {
       color: '#fff',
@@ -174,9 +207,11 @@ export default function FeaturedMovie({ movie, onWatch, onAddList }: Props) {
                 <Text style={dynamicStyles.watchButtonText}>Ver ahora</Text>
               </TouchableOpacity>
               
-              <TouchableOpacity style={dynamicStyles.myListButton} onPress={onAddList}>
-                <Ionicons name="add" size={16} color="#fff" />
-                <Text style={dynamicStyles.myListButtonText}>Mi lista</Text>
+              <TouchableOpacity style={[dynamicStyles.myListButton, isToggling && { opacity: 0.6 }]} onPress={handleMyListPress}>
+                <Ionicons name={inMyList ? 'checkmark' : 'add'} size={16} color="#fff" />
+                <Text style={dynamicStyles.myListButtonText}>
+                  {isToggling ? 'Procesando...' : (inMyList ? 'En mi lista' : 'Mi lista')}
+                </Text>
               </TouchableOpacity>
             </View>
             

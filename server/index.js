@@ -2,8 +2,55 @@ import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import mysql from 'mysql2/promise';
+import { readFileSync, mkdirSync } from 'fs';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
+import multer from 'multer';
+import crypto from 'crypto';
+import axios from 'axios';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 dotenv.config({ path: new URL('../.env', import.meta.url).pathname });
+
+// Crear carpeta de uploads si no existe
+const uploadsDir = join(__dirname, 'uploads', 'avatars');
+try {
+  mkdirSync(uploadsDir, { recursive: true });
+} catch (error) {
+  // La carpeta ya existe o no se pudo crear
+}
+
+// Configuración de multer para avatares
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, uploadsDir);
+  },
+  filename: (req, file, cb) => {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    const ext = file.originalname.split('.').pop();
+    cb(null, `avatar-${uniqueSuffix}.${ext}`);
+  }
+});
+
+const upload = multer({
+  storage: storage,
+  limits: {
+    fileSize: 5 * 1024 * 1024 // 5MB límite
+  },
+  fileFilter: (req, file, cb) => {
+    const allowedTypes = /jpeg|jpg|png|gif|webp/;
+    const extname = allowedTypes.test(file.originalname.toLowerCase().split('.').pop());
+    const mimetype = allowedTypes.test(file.mimetype);
+    
+    if (mimetype && extname) {
+      return cb(null, true);
+    } else {
+      cb(new Error('Solo se permiten archivos de imagen (jpeg, jpg, png, gif, webp)'));
+    }
+  }
+});
 
 const app = express();
 
@@ -12,10 +59,18 @@ app.use(cors({
   origin: true, // Permitir cualquier origen en desarrollo
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'Accept']
+  // Aceptar tanto mayúsculas como minúsculas para el header personalizado
+  allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'X-Client-BaseURL', 'x-client-baseurl'],
+  exposedHeaders: ['Content-Type']
 }));
 
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
+// SERVIR ESTÁTICAMENTE LA CARPETA videos
+app.use('/videos', express.static(join(__dirname, 'videos')));
+// SERVIR ESTÁTICAMENTE LA CARPETA uploads
+app.use('/uploads', express.static(join(__dirname, 'uploads')));
 
 // Middleware de logging para desarrollo
 if (process.env.NODE_ENV !== 'production') {
@@ -37,8 +92,89 @@ const pool = mysql.createPool({
   queueLimit: 0,
 });
 
-// Health
+// Ensure auxiliary tables exist
+async function ensurePasswordResetsTable() {
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS password_resets (
+        id INT(11) NOT NULL AUTO_INCREMENT,
+        usuario_id INT(11) NOT NULL,
+        token VARCHAR(255) NOT NULL,
+        expires_at DATETIME NOT NULL,
+        used TINYINT(1) NOT NULL DEFAULT 0,
+        created_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP(),
+        PRIMARY KEY (id),
+        KEY idx_password_resets_usuario_id (usuario_id),
+        CONSTRAINT fk_password_resets_usuario_id FOREIGN KEY (usuario_id) REFERENCES usuarios (id) ON DELETE CASCADE
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+    `);
+    console.log('Tabla password_resets verificada/creada');
+  } catch (e) {
+    console.error('Error creando/verificando tabla password_resets:', e.message);
+  }
+}
+ensurePasswordResetsTable();
+
+// Ensure downloads tables exist
+async function ensureDownloadsTables() {
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS descargas (
+        id INT(11) NOT NULL AUTO_INCREMENT,
+        perfil_id INT(11) NOT NULL,
+        name VARCHAR(100) NOT NULL DEFAULT 'Descargas',
+        created_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP(),
+        PRIMARY KEY (id),
+        UNIQUE KEY uniq_descargas_perfil (perfil_id),
+        KEY idx_descargas_perfil_id (perfil_id),
+        CONSTRAINT fk_descargas_perfil_id FOREIGN KEY (perfil_id) REFERENCES perfiles (id) ON DELETE CASCADE
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+    `);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS descarga_items (
+        id INT(11) NOT NULL AUTO_INCREMENT,
+        descarga_id INT(11) NOT NULL,
+        content_id INT(11) NOT NULL,
+        content_type ENUM('movie','tv','anime') NOT NULL,
+        status ENUM('PENDING','DOWNLOADING','COMPLETED','FAILED') NOT NULL DEFAULT 'PENDING',
+        progress TINYINT UNSIGNED NOT NULL DEFAULT 0,
+        file_path VARCHAR(255) DEFAULT NULL,
+        added_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP(),
+        updated_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP() ON UPDATE CURRENT_TIMESTAMP(),
+        PRIMARY KEY (id),
+        UNIQUE KEY uniq_descarga_item (descarga_id, content_id, content_type),
+        KEY idx_descarga_items_descarga_id (descarga_id),
+        CONSTRAINT fk_descarga_items_descarga_id FOREIGN KEY (descarga_id) REFERENCES descargas (id) ON DELETE CASCADE
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+    `);
+    console.log('Tablas de descargas verificadas/creadas');
+  } catch (e) {
+    console.error('Error creando/verificando tablas de descargas:', e.message);
+  }
+}
+ensureDownloadsTables();
+
+// Health: no depender de la base de datos
+// Devuelve 200 siempre que el servidor esté vivo, y reporta estado opcional de la DB
 app.get('/health', async (req, res) => {
+  const status = {
+    ok: true,
+    uptime: process.uptime(),
+    timestamp: new Date().toISOString(),
+    db: { ok: false },
+  };
+  try {
+    const [rows] = await pool.query('SELECT 1 as ok');
+    status.db.ok = true;
+  } catch (e) {
+    status.db.ok = false;
+    status.db.error = e.message;
+  }
+  res.status(200).json(status);
+});
+
+// Health DB: endpoint dedicado que falla si la DB está caída (útil para monitoreo)
+app.get('/health/db', async (req, res) => {
   try {
     const [rows] = await pool.query('SELECT 1 as ok');
     res.json({ ok: true, rows });
@@ -82,12 +218,64 @@ app.post('/auth/login', async (req, res) => {
   }
 });
 
+// Auth: forgot password (dev-friendly - returns token)
+app.post('/auth/forgot-password', async (req, res) => {
+  const { email } = req.body || {};
+  if (!email) return res.status(400).json({ message: 'email requerido' });
+  try {
+    const [rows] = await pool.query('SELECT id FROM usuarios WHERE email = ?', [email]);
+    if (!rows.length) return res.status(404).json({ message: 'Usuario no encontrado' });
+    const userId = rows[0].id;
+    const token = crypto.randomBytes(24).toString('hex');
+    // 30 minutos de vigencia
+    await pool.query('INSERT INTO password_resets (usuario_id, token, expires_at) VALUES (?, ?, NOW() + INTERVAL 30 MINUTE)', [userId, token]);
+    // En entorno dev, devolvemos el token para usarlo manualmente
+    res.json({ ok: true, token, expires_in_minutes: 30 });
+  } catch (e) {
+    res.status(500).json({ message: 'Error al generar token de recuperación', error: e.message });
+  }
+});
+
+// Auth: reset password using token
+app.post('/auth/reset-password', async (req, res) => {
+  const { email, token, new_password } = req.body || {};
+  if (!email || !token || !new_password) return res.status(400).json({ message: 'email, token y new_password requeridos' });
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    const [users] = await conn.query('SELECT id FROM usuarios WHERE email = ?', [email]);
+    if (!users.length) {
+      await conn.rollback();
+      return res.status(404).json({ message: 'Usuario no encontrado' });
+    }
+    const userId = users[0].id;
+    const [tokens] = await conn.query(
+      'SELECT id FROM password_resets WHERE usuario_id = ? AND token = ? AND used = 0 AND expires_at > NOW() ORDER BY id DESC LIMIT 1',
+      [userId, token]
+    );
+    if (!tokens.length) {
+      await conn.rollback();
+      return res.status(400).json({ message: 'Token inválido o expirado' });
+    }
+    const resetId = tokens[0].id;
+    await conn.query('UPDATE usuarios SET password_hash = ? WHERE id = ?', [new_password, userId]);
+    await conn.query('UPDATE password_resets SET used = 1 WHERE id = ?', [resetId]);
+    await conn.commit();
+    res.json({ ok: true });
+  } catch (e) {
+    await conn.rollback();
+    res.status(500).json({ message: 'Error al restablecer contraseña', error: e.message });
+  } finally {
+    conn.release();
+  }
+});
+
 // Profiles: list
 app.get('/profiles', async (req, res) => {
   const userId = Number(req.query.userId);
   if (!userId) return res.status(400).json({ message: 'userId requerido' });
   try {
-    const [rows] = await pool.query('SELECT id, usuario_id, name, avatar_url, is_kids FROM perfiles WHERE usuario_id = ?', [userId]);
+    const [rows] = await pool.query('SELECT id, usuario_id, name, avatar_url FROM perfiles WHERE usuario_id = ?', [userId]);
     res.json(rows);
   } catch (e) {
     res.status(500).json({ message: 'Error al obtener perfiles', error: e.message });
@@ -96,24 +284,81 @@ app.get('/profiles', async (req, res) => {
 
 // Profiles: create (and ensure "Mi lista")
 app.post('/profiles', async (req, res) => {
-  const { usuario_id, name, avatar_url, is_kids } = req.body || {};
+  const { usuario_id, name, avatar_url } = req.body || {};
   if (!usuario_id || !name || !avatar_url) return res.status(400).json({ message: 'Datos de perfil incompletos' });
   const conn = await pool.getConnection();
   try {
+    // Validar que el usuario existe para evitar errores de FK en cascada
+    const [u] = await conn.query('SELECT id FROM usuarios WHERE id = ?', [usuario_id]);
+    if (!u.length) {
+      return res.status(404).json({ message: 'Usuario no encontrado para crear perfil' });
+    }
+
     await conn.beginTransaction();
     const [result] = await conn.query(
-      'INSERT INTO perfiles (usuario_id, name, avatar_url, is_kids) VALUES (?, ?, ?, ?)',
-      [usuario_id, name, avatar_url, is_kids ? 1 : 0]
+      'INSERT INTO perfiles (usuario_id, name, avatar_url) VALUES (?, ?, ?)',
+      [usuario_id, name, avatar_url]
     );
     const perfilId = result.insertId;
     await conn.query('INSERT INTO listas (perfil_id, name, type) VALUES (?, ?, ?)', [perfilId, 'Mi lista', 'MY_LIST']);
+    // Crear registro único de descargas para el perfil
+    await conn.query('INSERT INTO descargas (perfil_id, name) VALUES (?, ?)', [perfilId, 'Descargas']);
     await conn.commit();
     res.status(201).json({ id: perfilId });
   } catch (e) {
     await conn.rollback();
-    res.status(500).json({ message: 'Error al crear perfil', error: e.message });
+    // Respuestas más claras por errores comunes de esquema/enum
+    const code = e.code || 'UNKNOWN';
+    const sqlMessage = e.sqlMessage || e.message;
+    if (code === 'ER_NO_REFERENCED_ROW_2') {
+      return res.status(400).json({ message: 'Error de referencia: usuario_id no existe', error: sqlMessage });
+    }
+    if (code === 'ER_NO_SUCH_TABLE') {
+      return res.status(500).json({ message: 'Tabla faltante (listas/perfiles). Importa bd_netflix_full.sql', error: sqlMessage });
+    }
+    if (code === 'ER_WRONG_VALUE_FOR_FIELD' || sqlMessage?.includes('Incorrect enum value')) {
+      return res.status(400).json({ message: 'Valor ENUM inválido para listas.type. Asegura ENUM("MY_LIST")', error: sqlMessage });
+    }
+    console.error('Error al crear perfil:', { code, sqlMessage });
+    res.status(500).json({ message: 'Error al crear perfil', error: sqlMessage });
   } finally {
     conn.release();
+  }
+});
+
+// Profiles: update
+app.put('/profiles/:id', async (req, res) => {
+  const id = Number(req.params.id);
+  const { name, avatar_url } = req.body || {};
+  if (!id) return res.status(400).json({ message: 'id requerido' });
+  
+  // Construir query dinámicamente según los campos proporcionados
+  const updates = [];
+  const values = [];
+  
+  if (name !== undefined) {
+    updates.push('name = ?');
+    values.push(name);
+  }
+  if (avatar_url !== undefined) {
+    updates.push('avatar_url = ?');
+    values.push(avatar_url);
+  }
+  
+  if (updates.length === 0) {
+    return res.status(400).json({ message: 'No hay campos para actualizar' });
+  }
+  
+  values.push(id);
+  
+  try {
+    await pool.query(
+      `UPDATE perfiles SET ${updates.join(', ')} WHERE id = ?`,
+      values
+    );
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ message: 'Error al actualizar perfil', error: e.message });
   }
 });
 
@@ -152,6 +397,10 @@ app.post('/my-list/:perfilId/items', async (req, res) => {
   const perfilId = Number(req.params.perfilId);
   const { content_id, content_type } = req.body || {};
   if (!perfilId || !content_id || !content_type) return res.status(400).json({ message: 'Datos incompletos' });
+  const allowedTypes = ['movie', 'tv', 'anime'];
+  if (!allowedTypes.includes(String(content_type).toLowerCase())) {
+    return res.status(400).json({ message: 'Tipo de contenido inválido', allowed: allowedTypes });
+  }
   try {
     const [listas] = await pool.query('SELECT id FROM listas WHERE perfil_id = ? AND type = "MY_LIST"', [perfilId]);
     if (!listas.length) return res.status(404).json({ message: 'Mi lista no encontrada' });
@@ -172,6 +421,10 @@ app.delete('/my-list/:perfilId/items/:contentId/:type', async (req, res) => {
   const contentId = Number(req.params.contentId);
   const type = req.params.type;
   if (!perfilId || !contentId || !type) return res.status(400).json({ message: 'Datos incompletos' });
+  const allowedTypes = ['movie', 'tv', 'anime'];
+  if (!allowedTypes.includes(String(type).toLowerCase())) {
+    return res.status(400).json({ message: 'Tipo de contenido inválido', allowed: allowedTypes });
+  }
   try {
     const [listas] = await pool.query('SELECT id FROM listas WHERE perfil_id = ? AND type = "MY_LIST"', [perfilId]);
     if (!listas.length) return res.status(404).json({ message: 'Mi lista no encontrada' });
@@ -180,6 +433,114 @@ app.delete('/my-list/:perfilId/items/:contentId/:type', async (req, res) => {
     res.json({ ok: true });
   } catch (e) {
     res.status(500).json({ message: 'Error al quitar de Mi lista', error: e.message });
+  }
+});
+
+// Utilidad: asegura que exista el registro de descargas para un perfil y devuelve su id
+async function ensureDescargasForPerfil(perfilId) {
+  // Verificar que el perfil existe
+  const [perfilRows] = await pool.query('SELECT id FROM perfiles WHERE id = ? LIMIT 1', [perfilId]);
+  if (!perfilRows.length) {
+    throw new Error('Perfil no encontrado');
+  }
+  // Intentar obtener descargas
+  const [rows] = await pool.query('SELECT id FROM descargas WHERE perfil_id = ? LIMIT 1', [perfilId]);
+  if (rows.length) return rows[0].id;
+  // Crear registro de descargas si no existe
+  await pool.query('INSERT INTO descargas (perfil_id, name) VALUES (?, ?)', [perfilId, 'Descargas']);
+  // Recuperar id creado
+  const [created] = await pool.query('SELECT id FROM descargas WHERE perfil_id = ? LIMIT 1', [perfilId]);
+  return created[0]?.id;
+}
+
+// Downloads: get (auto-crea registro de descargas si falta)
+app.get('/downloads/:perfilId', async (req, res) => {
+  const perfilId = Number(req.params.perfilId);
+  if (!perfilId) return res.status(400).json({ message: 'perfilId requerido' });
+  try {
+    console.log(`[Downloads][GET] perfilId=${perfilId}`);
+    const descargaId = await ensureDescargasForPerfil(perfilId);
+    console.log(`[Downloads][GET] ensureDescargasForPerfil -> descargaId=${descargaId}`);
+    const [items] = await pool.query(
+      'SELECT content_id, content_type, status, progress, file_path, added_at, updated_at FROM descarga_items WHERE descarga_id = ? ORDER BY added_at DESC',
+      [descargaId]
+    );
+    console.log(`[Downloads][GET] returned ${items?.length || 0} items`);
+    res.json(items);
+  } catch (e) {
+    if (e.message === 'Perfil no encontrado') {
+      return res.status(404).json({ message: 'Perfil no encontrado' });
+    }
+    res.status(500).json({ message: 'Error al obtener descargas', error: e.message });
+  }
+});
+
+// Downloads: add or update (upsert)
+app.post('/downloads/:perfilId/items', async (req, res) => {
+  const perfilId = Number(req.params.perfilId);
+  const { content_id, content_type, status, progress, file_path } = req.body || {};
+  console.log(`[Downloads][POST] perfilId=${perfilId} body=`, { content_id, content_type, status, progress, file_path });
+  if (!perfilId || !content_id || !content_type) return res.status(400).json({ message: 'Datos incompletos' });
+  const allowedTypes = ['movie', 'tv', 'anime'];
+  if (!allowedTypes.includes(String(content_type).toLowerCase())) {
+    return res.status(400).json({ message: 'Tipo de contenido inválido', allowed: allowedTypes });
+  }
+  try {
+    const descargaId = await ensureDescargasForPerfil(perfilId);
+    console.log(`[Downloads][POST] ensureDescargasForPerfil -> descargaId=${descargaId}`);
+    await pool.query(
+      `INSERT INTO descarga_items (descarga_id, content_id, content_type, status, progress, file_path)
+       VALUES (?, ?, ?, ?, ?, ?)
+       ON DUPLICATE KEY UPDATE status = VALUES(status), progress = VALUES(progress), file_path = VALUES(file_path), updated_at = CURRENT_TIMESTAMP`,
+      [descargaId, content_id, content_type, status || 'PENDING', progress ?? 0, file_path || null]
+    );
+    console.log(`[Downloads][POST] upsert OK -> descarga_id=${descargaId}, content_id=${content_id}, type=${content_type}`);
+    res.status(201).json({ ok: true });
+  } catch (e) {
+    console.error('[Downloads][POST] error', e?.message);
+    res.status(500).json({ message: 'Error al añadir/actualizar descarga', error: e.message });
+  }
+});
+
+// Downloads: update progress/status
+app.put('/downloads/:perfilId/items/:contentId/:type', async (req, res) => {
+  const perfilId = Number(req.params.perfilId);
+  const contentId = Number(req.params.contentId);
+  const type = req.params.type;
+  const { status, progress, file_path } = req.body || {};
+  if (!perfilId || !contentId || !type) return res.status(400).json({ message: 'Datos incompletos' });
+  const allowedTypes = ['movie', 'tv', 'anime'];
+  if (!allowedTypes.includes(String(type).toLowerCase())) {
+    return res.status(400).json({ message: 'Tipo de contenido inválido', allowed: allowedTypes });
+  }
+  try {
+    const descargaId = await ensureDescargasForPerfil(perfilId);
+    await pool.query(
+      'UPDATE descarga_items SET status = ?, progress = ?, file_path = ?, updated_at = CURRENT_TIMESTAMP WHERE descarga_id = ? AND content_id = ? AND content_type = ?',
+      [status || 'PENDING', progress ?? 0, file_path || null, descargaId, contentId, type]
+    );
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ message: 'Error al actualizar descarga', error: e.message });
+  }
+});
+
+// Downloads: remove
+app.delete('/downloads/:perfilId/items/:contentId/:type', async (req, res) => {
+  const perfilId = Number(req.params.perfilId);
+  const contentId = Number(req.params.contentId);
+  const type = req.params.type;
+  if (!perfilId || !contentId || !type) return res.status(400).json({ message: 'Datos incompletos' });
+  const allowedTypes = ['movie', 'tv', 'anime'];
+  if (!allowedTypes.includes(String(type).toLowerCase())) {
+    return res.status(400).json({ message: 'Tipo de contenido inválido', allowed: allowedTypes });
+  }
+  try {
+    const descargaId = await ensureDescargasForPerfil(perfilId);
+    await pool.query('DELETE FROM descarga_items WHERE descarga_id = ? AND content_id = ? AND content_type = ?', [descargaId, contentId, type]);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ message: 'Error al quitar descarga', error: e.message });
   }
 });
 
@@ -198,7 +559,7 @@ app.get('/content/:type', async (req, res) => {
   const type = req.params.type;
   if (!['movie', 'tv', 'anime'].includes(type)) return res.status(400).json({ message: 'Tipo de contenido inválido' });
   try {
-    const [rows] = await pool.query('SELECT * FROM contenido WHERE type = ? ORDER BY created_at DESC', [type]);
+    const [rows] = await pool.query('SELECT * FROM contenido WHERE type = ? ORDER by created_at DESC', [type]);
     res.json(rows);
   } catch (e) {
     res.status(500).json({ message: 'Error al obtener contenido', error: e.message });
@@ -256,6 +617,122 @@ app.get('/images/:entity_type/:entity_id', async (req, res) => {
   }
 });
 
+// Endpoint de prueba para verificar que el servidor está funcionando
+app.get('/upload/test', (req, res) => {
+  res.json({ message: 'Upload endpoint test OK', timestamp: new Date().toISOString() });
+});
+
+// Upload: avatar
+app.post('/upload/avatar', upload.single('avatar'), (req, res) => {
+  console.log('Request recibido para subir avatar');
+  console.log('Method:', req.method);
+  console.log('URL:', req.url);
+  console.log('Content-Type:', req.headers['content-type']);
+  console.log('Archivo recibido:', req.file ? 'Sí' : 'No');
+  
+  try {
+    if (!req.file) {
+  console.error('No se recibió ningún archivo');
+      console.log('Body recibido:', req.body);
+      console.log('Headers:', req.headers);
+      return res.status(400).json({ message: 'No se proporcionó ninguna imagen' });
+    }
+    
+  console.log('Archivo recibido:', {
+      filename: req.file.filename,
+      originalName: req.file.originalname,
+      size: req.file.size,
+      mimetype: req.file.mimetype
+    });
+    
+    // Intentar usar el BASE_URL del cliente si está disponible
+    const clientBaseURL = req.headers['x-client-baseurl'];
+    let imageUrl;
+    
+    if (clientBaseURL) {
+      // Usar el BASE_URL del cliente para construir la URL correcta
+      imageUrl = `${clientBaseURL}/uploads/avatars/${req.file.filename}`;
+  console.log('Usando BASE_URL del cliente:', clientBaseURL);
+    } else {
+      // Fallback: usar el host del request
+      const protocol = req.protocol || 'http';
+      const host = req.get('host') || `${process.env.HOST || 'localhost'}:${process.env.PORT || 3001}`;
+      imageUrl = `${protocol}://${host}/uploads/avatars/${req.file.filename}`;
+  console.log('No se recibió BASE_URL del cliente, usando host del request:', host);
+    }
+    
+  console.log('Avatar subido exitosamente. URL:', imageUrl);
+    
+    res.json({
+      url: imageUrl,
+      filename: req.file.filename,
+      originalName: req.file.originalname,
+      size: req.file.size,
+      mimetype: req.file.mimetype
+    });
+  } catch (error) {
+  console.error('Error al subir avatar:', error);
+    res.status(500).json({ message: 'Error al procesar la imagen', error: error.message });
+  }
+});
+
+// Manejo de errores de multer (debe ir DESPUÉS de las rutas que usan multer)
+app.use((error, req, res, next) => {
+  if (error instanceof multer.MulterError) {
+  console.error('Error de Multer:', error);
+    if (error.code === 'LIMIT_FILE_SIZE') {
+      return res.status(400).json({ message: 'El archivo es demasiado grande. Máximo 5MB' });
+    }
+    return res.status(400).json({ message: 'Error al subir archivo', error: error.message });
+  }
+  if (error) {
+  console.error('Error en upload:', error);
+    return res.status(400).json({ message: error.message });
+  }
+  next();
+});
+
+// ===== Proxy para AniList GraphQL (evita CORS desde web) =====
+// Este endpoint reenvía la petición GraphQL a https://graphql.anilist.co
+// para que el navegador no haga la solicitud cross-origin directamente.
+app.post('/proxy/anilist', async (req, res) => {
+  const { query, variables } = req.body || {};
+  if (!query) {
+    return res.status(400).json({ message: 'Falta el campo "query" para la petición GraphQL' });
+  }
+  try {
+    const { data } = await axios.post('https://graphql.anilist.co', { query, variables }, {
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+      },
+      timeout: 15000,
+    });
+    if (data?.errors) {
+      return res.status(502).json({ message: 'Error de AniList', errors: data.errors });
+    }
+    return res.json(data?.data ?? data);
+  } catch (e) {
+    const status = e.response?.status || 500;
+    const errMsg = e.response?.data || { message: e.message };
+    console.error('Error proxy AniList:', e.message);
+    return res.status(status).json({ message: 'Fallo al consultar AniList', error: errMsg });
+  }
+});
+
+// Videos: serve M3U file
+app.get('/videos/animes madre.m3u', (req, res) => {
+  try {
+    const m3uPath = join(__dirname, 'videos', 'animes madre.m3u');
+    const content = readFileSync(m3uPath, 'utf-8');
+    res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
+    res.setHeader('Content-Disposition', 'inline; filename="animes madre.m3u"');
+    res.send(content);
+  } catch (e) {
+    res.status(500).json({ message: 'Error al obtener archivo M3U', error: e.message });
+  }
+});
+
 const PORT = process.env.PORT || 3001;
 const HOST = process.env.HOST || '0.0.0.0'; // Escuchar en todas las interfaces
 
@@ -263,4 +740,17 @@ app.listen(PORT, HOST, () => {
   console.log(`Backend escuchando en http://${HOST}:${PORT}`);
   console.log(`Acceso local: http://localhost:${PORT}`);
   console.log(`Acceso desde emulador Android: http://10.0.2.2:${PORT}`);
+});
+
+// Users: get by id (validate session)
+app.get('/users/:id', async (req, res) => {
+  const id = Number(req.params.id);
+  if (!id) return res.status(400).json({ message: 'id requerido' });
+  try {
+    const [rows] = await pool.query('SELECT id, email, created_at FROM usuarios WHERE id = ?', [id]);
+    if (!rows.length) return res.status(404).json({ message: 'Usuario no encontrado' });
+    res.json(rows[0]);
+  } catch (e) {
+    res.status(500).json({ message: 'Error al obtener usuario', error: e.message });
+  }
 });

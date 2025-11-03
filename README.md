@@ -1,18 +1,18 @@
-# 🎬 Proyecto Netflix Clone
+# Proyecto Netflix Clone
 
 Una aplicación móvil y web que replica la funcionalidad de Netflix, desarrollada con React Native, Expo y Node.js.
 
 ## 📋 Características
 
 - 🔐 **Autenticación completa**: Registro e inicio de sesión de usuarios
-- 👤 **Gestión de perfiles**: Múltiples perfiles por usuario (incluido perfil para niños)
+- 👤 **Gestión de perfiles**: Múltiples perfiles por usuario
 - 🎥 **Catálogo de películas**: Integración con TMDB API para contenido actualizado
 - 📱 **Responsive**: Funciona en móvil, tablet y web
-- ⭐ **Mi Lista**: Funcionalidad para guardar películas favoritas
-- 🔍 **Búsqueda**: Buscar películas por título
+- **Mi Lista**: Funcionalidad para guardar películas favoritas
+- **Búsqueda**: Buscar películas por título
 - 🎨 **UI moderna**: Interfaz inspirada en Netflix con gradientes y animaciones
 
-## 🛠️ Tecnologías utilizadas
+## Tecnologías utilizadas
 
 ### Frontend
 - **React Native** 0.81.4
@@ -30,7 +30,7 @@ Una aplicación móvil y web que replica la funcionalidad de Netflix, desarrolla
 ### APIs externas
 - **TMDB (The Movie Database)** para catálogo de películas
 
-## 🚀 Instalación y configuración
+## Instalación y configuración
 
 ### Prerrequisitos
 - Node.js (versión 16 o superior)
@@ -61,7 +61,7 @@ cd ..
 
 Este proyecto utiliza las siguientes tablas en la base `bd_netflix`:
 - `usuarios`: registro y login de usuarios
-- `perfiles`: perfiles de usuario (incluido soporte para niños)
+- `perfiles`: perfiles de usuario
 - `listas`: contenedor de la lista "Mi lista" por perfil
 - `lista_items`: elementos individuales de "Mi lista"
 
@@ -92,7 +92,7 @@ BACKEND_URL=http://localhost:3001
 TMDB_API_KEY=tu_api_key_de_tmdb
 ```
 
-## 🎯 Uso
+## Uso
 
 ### Iniciar el backend
 ```bash
@@ -129,7 +129,6 @@ Opciones disponibles:
 ### Gestión de perfiles
 - **Selección**: `ProfileSelectionScreen.tsx` → `GET /profiles`
 - **Creación**: Crear nuevos perfiles → `POST /profiles`
-- **Perfil para niños**: Soporte completo para contenido infantil
 
 ### Contenido
 - **Catálogo**: Películas populares, mejor valoradas, próximos estrenos
@@ -137,7 +136,7 @@ Opciones disponibles:
 - **Búsqueda**: Buscar por título en tiempo real
 - **Mi Lista**: `GET/POST/DELETE /my-list/...` → gestión de favoritos
 
-## 🏗️ Estructura del proyecto
+## Estructura del proyecto
 
 ```
 Proyecto_Netflix/
@@ -178,7 +177,7 @@ Proyecto_Netflix/
 - `npm start` - Inicia servidor de producción
 - `npm run dev` - Inicia con nodemon (desarrollo)
 
-## ⚠️ Solución de problemas
+## Solución de problemas
 
 ### Errores comunes
 
