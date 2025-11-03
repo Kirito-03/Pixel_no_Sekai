@@ -6,10 +6,40 @@ import { loadNetworkConfig, saveNetworkConfig } from './networkStorage';
  * Esto es útil para desarrollo en diferentes entornos (emulador, dispositivo físico).
  */
 // Lista base sin IPs específicas de una red privada
+// Intenta derivar la IP LAN del host desde Expo en desarrollo
+const deriveLanURLFromExpo = (): string => {
+  try {
+    // Cargar dinámicamente para evitar dependencia dura si no está instalado
+    const Constants = (() => {
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        return require('expo-constants').default;
+      } catch (_) {
+        return null;
+      }
+    })();
+    const hostUri = (Constants as any)?.expoConfig?.hostUri || (Constants as any)?.manifest2?.extra?.expoClient?.hostUri;
+    if (hostUri && typeof hostUri === 'string') {
+      const host = hostUri.split(':')[0];
+      if (host && /^\d+\.\d+\.\d+\.\d+$/.test(host)) {
+        return `http://${host}:3001`;
+      }
+    }
+  } catch (_) {
+    // Ignorar errores de entorno
+  }
+  return '';
+};
+
 const BASE_CANDIDATES: string[] = [
+  // Local en web/iOS simulador
   'http://localhost:3001',
-  Platform.OS === 'android' ? 'http://10.0.2.2:3001' : '', // Emulador Android
-  'http://192.168.56.1:3001', // IP común para algunos emuladores (VirtualBox)
+  // Emulador Android accede al host con 10.0.2.2
+  Platform.OS === 'android' ? 'http://10.0.2.2:3001' : '',
+  // Intento de LAN usando datos de Expo (útil para dispositivo físico en la misma red)
+  deriveLanURLFromExpo(),
+  // VirtualBox/host-only redes (
+  'http://192.168.56.1:3001',
 ].filter(Boolean);
 
 /**
