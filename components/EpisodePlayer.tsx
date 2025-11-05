@@ -1,3 +1,15 @@
+/**
+ * Reproductor de episodios de anime.
+ *
+ * ¿Para qué es?
+ * - Reproducir un episodio usando fuente directa (M3U) o fuentes obtenidas vía animeStreamingService.
+ * - Ofrecer controles básicos (play/pause, siguiente/anterior), ocultar StatusBar y manejar errores.
+ *
+ * ¿Cómo funciona?
+ * - Carga fuentes en mount o al cambiar de episodio: prioriza episode.url, luego getEpisodeSources; si no, usa videos de prueba.
+ * - En web usa <video> nativo; en móvil usa WebView con HTML embebido.
+ * - Mantiene estado de reproducción y visibilidad de controles; reacciona a eventos de fin para navegar al siguiente.
+ */
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import {
   View,

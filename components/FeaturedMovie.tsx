@@ -1,3 +1,15 @@
+/**
+ * Componente "hero" de película destacada (slide a pantalla completa).
+ *
+ * ¿Para qué es?
+ * - Mostrar una película con imagen de fondo, gradientes, título, info y acciones.
+ * - Botones: Ver ahora y Mi Lista (toggle), integrando contexto de perfil y lista.
+ *
+ * ¿Cómo funciona?
+ * - Usa LinearGradient para superponer degradados sobre el backdrop.
+ * - Responsivo con useWindowDimensions: ajusta tamaños para pantallas pequeñas.
+ * - Consulta MyListContext para indicar si está en la lista y permite añadir/quitar.
+ */
 import React, { useState } from 'react';
 import { View, Image, Text, TouchableOpacity, StyleSheet, useWindowDimensions, Alert } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';

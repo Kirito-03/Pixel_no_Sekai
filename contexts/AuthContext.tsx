@@ -1,3 +1,20 @@
+/**
+ * Contexto de Autenticación.
+ *
+ * ¿Para qué es?
+ * - Gestiona la sesión del usuario (login/logout) y su persistencia en AsyncStorage.
+ * - Expone el estado de carga (isLoading) y utilidades para cargar/validar la sesión.
+ *
+ * ¿Cómo funciona?
+ * - Al montar, loadSession lee 'userSession' desde almacenamiento.
+ * - Valida el usuario contra el backend (databaseService.validateUser) para evitar sesiones fantasma.
+ * - Si la validación falla, limpia la sesión y el perfil actual; si hay error de red, mantiene la sesión local para uso offline.
+ * - login guarda los datos del usuario y logout elimina las claves relevantes.
+ * - useAuth asegura acceso al contexto y arroja error si se usa fuera de AuthProvider.
+ *
+ * Notas de seguridad:
+ * - En producción, considera manejar tokens (p.ej. JWT) y expiración de sesión en lugar de solo id/email.
+ */
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import databaseService from '../services/databaseService';

@@ -1,3 +1,15 @@
+/**
+ * Carrusel de películas destacadas estilo Netflix.
+ *
+ * ¿Para qué es?
+ * - Mostrar slides a pantalla completa con una película destacada y autoplay.
+ * - Indicar la posición actual con puntos (dots).
+ *
+ * ¿Cómo funciona?
+ * - Usa FlatList horizontal con pagingEnabled y snapping.
+ * - Autoplay avanza cada 6s si hay más de una película.
+ * - onViewableItemsChanged actualiza el índice actual para los indicadores.
+ */
 import React, { useEffect, useRef, useState } from 'react';
 import { View, FlatList, StyleSheet, useWindowDimensions } from 'react-native';
 import FeaturedMovie from './FeaturedMovie';

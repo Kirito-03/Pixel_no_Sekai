@@ -1,3 +1,15 @@
+/**
+ * Fila horizontal de tarjetas de contenido con navegación por flechas.
+ *
+ * ¿Para qué es?
+ * - Mostrar un título de sección y una lista horizontal de MovieCard.
+ * - Permitir desplazamiento con flechas; en web soporta drag con PanResponder.
+ *
+ * ¿Cómo funciona?
+ * - Calcula el ancho/tamaño de tarjetas de forma responsiva.
+ * - Mantiene el scrollX para mostrar/ocultar flechas según posición.
+ * - Emite onMoviePress(id) al tocar una tarjeta.
+ */
 import React, { useRef, useState } from 'react';
 import { 
   View, 

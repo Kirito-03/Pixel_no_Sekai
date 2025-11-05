@@ -1,3 +1,16 @@
+/**
+ * Modal de detalles para películas (TMDB). No gestiona series ni anime.
+ *
+ * ¿Para qué es?
+ * - Mostrar detalles de una película, trailer en background y contenido relacionado.
+ * - Integrar acciones de Mi Lista (toggle) y Descargas por perfil.
+ *
+ * ¿Cómo funciona?
+ * - Al abrir, anima entrada (fade/slide), carga detalles y recomendaciones vía services/api.
+ * - Reproduce trailer (YouTube) con retraso opcional; no fuerza duración.
+ * - Normaliza el tipo para Mi Lista y Descargas; usa ProfileContext/MyListContext y databaseService.
+ * - Si el contenido es tv/anime, delega la experiencia a otros componentes y no ejecuta lógica propia.
+ */
 import React, { useEffect, useState, useRef } from 'react';
 import {
   Modal,

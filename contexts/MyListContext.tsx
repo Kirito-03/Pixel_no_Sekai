@@ -1,3 +1,21 @@
+/**
+ * Contexto "Mi Lista" por perfil.
+ *
+ * ¿Para qué es?
+ * - Mantiene y expone el conjunto de contenidos guardados por el usuario (por perfil).
+ * - Provee funciones para añadir, quitar, alternar y refrescar la lista desde el backend.
+ *
+ * ¿Cómo funciona?
+ * - Usa ProfileContext para conocer el perfil actual y cargar su lista.
+ * - Guarda claves compuestas "<tipo>:<id>" para evitar colisiones entre tipos (movie/tv/anime).
+ * - refreshMyList sincroniza con el backend (databaseService) y normaliza el tipo recibido.
+ * - add/remove actualizan estado local tras éxito en backend y toggleMyList alterna y refresca.
+ * - isInMyList consulta el Set local en O(1).
+ *
+ * Notas:
+ * - Ante datos inválidos del backend, se aplica un fallback de tipo y se loggea advertencia.
+ * - Si no hay perfil seleccionado, las operaciones arrojan error o se no-op cuando aplica.
+ */
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { useProfile } from './ProfileContext';
 import databaseService from '../services/databaseService';

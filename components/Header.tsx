@@ -1,3 +1,15 @@
+/**
+ * Header de la aplicación (barra superior) con filtros y menú de categorías.
+ *
+ * ¿Para qué es?
+ * - Mostrar el logo, acceso a búsqueda y notificaciones.
+ * - Permitir filtrar el contenido (Todo/Películas/Series/Anime) y abrir el menú de categorías.
+ *
+ * ¿Cómo funciona?
+ * - Anima el fondo con un overlay oscuro cuando la prop `black` está activa (efecto al hacer scroll).
+ * - Gestiona estado interno para el filtro seleccionado y visibilidad del CategoriesMenu.
+ * - Emite callbacks onSearchPress, onFilterChange y onCategorySelect al contenedor.
+ */
 import React, { useEffect, useRef, useState } from 'react';
 import { View, Image, Text, TouchableOpacity, StyleSheet, SafeAreaView, Animated, useWindowDimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';

@@ -1,3 +1,19 @@
+/**
+ * Parser de listas M3U orientado a anime (seasons/episodes).
+ *
+ * ¿Para qué es?
+ * - Leer y estructurar archivos M3U alojados en el servidor para obtener episodios de anime.
+ * - Exponer utilidades para buscar animes y construir temporadas/episodios con metadatos.
+ *
+ * ¿Cómo funciona?
+ * - Obtiene el archivo M3U vía fetch desde URLs candidatas (soporte emulador/host físico).
+ * - Parsea líneas #EXTINF para extraer atributos (group-title, tvg-name, tvg-logo) y la URL del video.
+ * - Normaliza títulos para búsquedas robustas y ordena episodios por temporada/número.
+ * - Implementa cache simple en memoria para evitar lecturas redundantes y provee resetM3UCache.
+ *
+ * Notas:
+ * - Este parser está adaptado para contenido de anime; otros formatos M3U podrían requerir reglas adicionales.
+ */
 import { AnimeEpisode, AnimeSeason, VideoSource } from '../types';
 import { buildServerURL, getCandidateBaseURLs } from '../utils/networkUtils';
 // Para React Native, necesitamos usar una forma diferente de leer archivos

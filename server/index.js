@@ -1,3 +1,23 @@
+/**
+ * Servidor backend (Express + MySQL) para la app estilo Netflix.
+ *
+ * ¿Para qué es?
+ * - Proveer endpoints de autenticación, gestión de perfiles, Mi Lista, descargas y utilidades.
+ * - Servir archivos estáticos (videos, uploads/avatars) y exponer health checks.
+ *
+ * ¿Cómo funciona?
+ * - Configura CORS para desarrollo, parseo JSON, y rutas estáticas.
+ * - Inicializa conexión pool a MySQL y asegura tablas auxiliares (password_resets, descargas, descarga_items).
+ * - Endpoints:
+ *   - /auth/register, /auth/login, /auth/forgot-password, /auth/reset-password
+ *   - /profiles (CRUD), /my-list (CRUD), /downloads (CRUD), /health
+ * - Multer gestiona subida de avatares con filtro de tipo y límite de tamaño.
+ * - Health endpoints permiten a clientes detectar disponibilidad del servidor y DB.
+ *
+ * Consideraciones:
+ * - Para producción, usar hashing seguro de contraseñas (bcrypt/argon2), tokens (JWT), y políticas de CORS estrictas.
+ * - Validar inputs exhaustivamente y sanitizar/escapar parámetros para evitar inyección SQL.
+ */
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';

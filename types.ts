@@ -1,3 +1,15 @@
+/**
+ * Tipos y modelos de datos compartidos (TMDB, AniList, Streaming y Navegación).
+ *
+ * ¿Para qué es?
+ * - Centralizar interfaces y tipos usados en toda la app para contenido (películas, series, anime),
+ *   detalles, streaming, y parámetros de navegación.
+ *
+ * ¿Cómo funciona?
+ * - Define contratos fuertes para respuestas de APIs (TMDB/AniList) y estructuras internas (ContentItem).
+ * - Unifica tipos para que funciones de integración trabajen de forma consistente.
+ * - Exporta tipos de rutas para stacks/tabs y pantallas internas.
+ */
 // Tipos para películas
 export interface Movie {
   id: number;

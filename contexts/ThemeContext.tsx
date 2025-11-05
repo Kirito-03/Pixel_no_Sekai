@@ -1,3 +1,15 @@
+/**
+ * Contexto de Tema (dark/light).
+ *
+ * ¿Para qué es?
+ * - Expone el tema actual, paleta de colores y espaciados para estilizar la app.
+ * - Permite alternar entre modo oscuro y claro y fijar explícitamente un tema.
+ *
+ * ¿Cómo funciona?
+ * - Mantiene el estado 'theme' y deriva 'colors' con useMemo desde theme (darkColors/lightColors).
+ * - 'spacing' se exporta desde theme.ts y se expone tal cual.
+ * - useTheme arroja error si se usa fuera de ThemeProvider para asegurar contexto válido.
+ */
 import React, { createContext, useContext, useMemo, useState, ReactNode } from 'react';
 import { darkColors, lightColors, spacing as baseSpacing } from '../theme';
 

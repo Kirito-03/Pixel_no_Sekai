@@ -1,3 +1,15 @@
+/**
+ * Menú modal de categorías.
+ *
+ * ¿Para qué es?
+ * - Mostrar una lista de categorías disponibles para navegar en la app.
+ * - Resalta la categoría actual y permite cerrarlo rápido.
+ *
+ * ¿Cómo funciona?
+ * - Renderiza un Modal con overlay oscuro; al tocar fuera se cierra.
+ * - Emite onSelectCategory(id, label) y luego onClose para ocultarse.
+ * - Las categorías están alineadas con ENHANCED_CATEGORIES del contenedor.
+ */
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Modal, ScrollView, Pressable } from 'react-native';
 import { colors } from '../theme';

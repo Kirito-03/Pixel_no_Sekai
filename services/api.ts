@@ -1,3 +1,16 @@
+/**
+ * Cliente TMDB + integración con AniList.
+ *
+ * ¿Para qué es?
+ * - Consumir endpoints públicos de TMDB (películas, series) y combinar datos con AniList para anime.
+ * - Proveer utilidades de imágenes, trailers y géneros, y funciones de búsqueda/descarga de listas populares.
+ *
+ * ¿Cómo funciona?
+ * - Configura Axios con BASE_URL de TMDB y api_key + idioma.
+ * - Expone funciones que devuelven tipos fuertes (Movie, TVShow, Anime, ContentItem).
+ * - Maneja errores 404 de TMDB con mensajes claros y excepciones tipadas.
+ * - Funciones tmdbToContentItem y animeToContentItem normalizan datos a ContentItem.
+ */
 import axios from 'axios';
 import { Movie, MovieDetail, TVShow, TVShowDetail, Anime, AnimeDetail, ContentItem } from '../types';
 import * as AniListService from './anilistService';

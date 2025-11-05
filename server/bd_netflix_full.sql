@@ -167,3 +167,24 @@ ALTER TABLE `descarga_items`
   MODIFY COLUMN `content_type` ENUM('movie','tv','anime') NOT NULL,
   ADD UNIQUE KEY `uniq_descarga_item` (`descarga_id`,`content_id`,`content_type`),
   ADD KEY `idx_descarga_items_descarga_id` (`descarga_id`);
+-- =============================================
+-- Esquema MySQL para backend Express: autenticación, perfiles,
+-- Mi Lista, contenido e imágenes, y módulos de Descargas.
+--
+-- ¿Para qué es?
+-- - Proveer las tablas necesarias para las rutas del servidor (server/index.js):
+--   usuarios, perfiles, listas/lista_items (Mi Lista), contenido, imagenes,
+--   password_resets, descargas y descarga_items.
+-- - Facilitar migraciones idempotentes para coexistir con BDs previas.
+--
+-- ¿Cómo funciona?
+-- - Crea la BD si no existe y define claves primarias/foráneas y restricciones únicas.
+-- - Los ENUM incluyen el tipo 'anime' donde aplica para soportar contenido multiplataforma.
+-- - La integridad se asegura con ON DELETE CASCADE entre perfiles y sus contenedores.
+--
+-- Notas de uso y seguridad:
+-- - Usa contraseñas hasheadas (password_hash) y tokens de reset con expiración.
+-- - En producción, restringe permisos del usuario MySQL y habilita TLS.
+-- - Mantén consistencia con los endpoints del backend; la app cliente
+--   espera 'MY_LIST' como tipo único de lista por perfil.
+-- =============================================

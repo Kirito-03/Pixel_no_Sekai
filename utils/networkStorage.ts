@@ -1,4 +1,16 @@
 /**
+ * Utilidad para persistir configuración de red (BASE_URL) en AsyncStorage.
+ *
+ * ¿Para qué es?
+ * - Guardar y recuperar la IP/host del backend entre sesiones.
+ * - Evitar reconfigurar manualmente al reiniciar la app.
+ *
+ * ¿Cómo funciona?
+ * - saveNetworkConfig guarda baseURL junto con lastUpdated para expirar valores antiguos.
+ * - loadNetworkConfig devuelve baseURL si no superó 7 días; si expira, limpia la clave.
+ * - clearNetworkConfig elimina la configuración guardada.
+ */
+/**
  * Utilidad para guardar y cargar la configuración de red
  * Permite persistir la IP del servidor entre sesiones
  */

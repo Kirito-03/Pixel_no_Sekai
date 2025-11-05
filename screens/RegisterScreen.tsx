@@ -18,7 +18,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import databaseService from '../services/databaseService';
-import { DYNAMIC_NETWORK_CONFIG } from '../utils/networkUtils';
+import { DYNAMIC_NETWORK_CONFIG, getCandidateBaseURLs } from '../utils/networkUtils';
 
 interface RegisterScreenProps {
   navigation: any;
@@ -53,6 +53,7 @@ const RegisterScreen: React.FC<RegisterScreenProps> = ({ navigation }) => {
   const [selectedImageUri, setSelectedImageUri] = useState<string | null>(null);
   const [uploadingImage, setUploadingImage] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  // Configuración manual del backend en desarrollo
   const fileInputRef = React.useRef<any>(null);
 
   // Planes/Pagos removidos en este flujo
@@ -172,12 +173,28 @@ const RegisterScreen: React.FC<RegisterScreenProps> = ({ navigation }) => {
 
   const testConnection = async () => {
     try {
-      const response = await fetch(DYNAMIC_NETWORK_CONFIG.getHealthURL());
-      const data = await response.json();
-  console.log('Conexión exitosa:', data);
-      return true;
+      const candidates = getCandidateBaseURLs();
+      console.log('[Register] Probando candidatos de BASE_URL:', candidates);
+      for (const candidate of candidates) {
+        try {
+          const resp = await fetch(`${candidate}/health`);
+          if (resp.ok) {
+            const data = await resp.json().catch(() => ({}));
+            console.log('[Register] Conexión exitosa:', { candidate, data });
+            DYNAMIC_NETWORK_CONFIG.setBaseURL(candidate);
+            // Sincronizar BASE_URL del servicio en esta sesión si está disponible
+            // @ts-ignore
+            databaseService.setBaseURL?.(candidate);
+            return true;
+          }
+        } catch (err) {
+          console.log(`[Register] Falló candidato ${candidate}`);
+        }
+      }
+      console.error('[Register] Ningún candidato funcionó');
+      return false;
     } catch (error) {
-  console.error('Error de conexión:', error);
+      console.error('Error de conexión:', error);
       return false;
     }
   };
@@ -535,8 +552,8 @@ const RegisterScreen: React.FC<RegisterScreenProps> = ({ navigation }) => {
         )}
       </View>
 
-      <View style={styles.buttonContainer}>
-        <TouchableOpacity style={styles.backButton} onPress={handleBack}>
+      <View style={[styles.buttonContainer, isSmallScreen && styles.buttonContainerColumn]}>
+        <TouchableOpacity style={[styles.backButton, isSmallScreen && { marginBottom: 12 }]} onPress={handleBack}>
           <Text style={styles.backButtonText}>Atrás</Text>
         </TouchableOpacity>
         <TouchableOpacity
@@ -544,8 +561,13 @@ const RegisterScreen: React.FC<RegisterScreenProps> = ({ navigation }) => {
           onPress={handleRegister}
           disabled={loading || uploadingImage}
         >
-          <Text style={styles.nextButtonText}>
-            {loading || uploadingImage ? 'Creando cuenta e iniciando sesión...' : 'Crear cuenta e iniciar sesión'}
+          <Text
+            style={[styles.nextButtonText, { fontSize: isSmallScreen ? 14 : 15 }]}
+            numberOfLines={1}
+            ellipsizeMode="tail"
+            allowFontScaling
+          >
+            {loading || uploadingImage ? 'Creando cuenta...' : 'Crear cuenta'}
           </Text>
         </TouchableOpacity>
       </View>
@@ -601,14 +623,7 @@ const RegisterScreen: React.FC<RegisterScreenProps> = ({ navigation }) => {
                 </Text>
               </TouchableOpacity>
 
-              {/* Debug info - solo en desarrollo */}
-              {__DEV__ && (
-                <View style={styles.debugInfo}>
-                  <Text style={styles.debugText}>
-                    Debug: {DYNAMIC_NETWORK_CONFIG.getBaseURL()}
-                  </Text>
-                </View>
-              )}
+              {/* Debug removido para limpiar la UI de registro */}
             </ScrollView>
           </KeyboardAvoidingView>
         </LinearGradient>
@@ -650,18 +665,18 @@ const styles = StyleSheet.create({
     letterSpacing: 2,
   },
   formContainer: {
-    width: '90%',
+    width: '92%',
     alignSelf: 'center',
     backgroundColor: 'rgba(0,0,0,0.75)',
     borderRadius: 4,
-    padding: 40,
-    maxWidth: 450,
+    padding: 24,
+    maxWidth: 420,
   },
   stepIndicator: {
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 40,
+    marginBottom: 24,
   },
   stepContainer: {
     flexDirection: 'row',
@@ -702,18 +717,18 @@ const styles = StyleSheet.create({
     width: '100%',
   },
   stepTitle: {
-    fontSize: 28,
+    fontSize: 24,
     fontWeight: 'bold',
     color: '#FFFFFF',
-    marginBottom: 8,
+    marginBottom: 6,
     textAlign: 'center',
   },
   stepSubtitle: {
-    fontSize: 16,
+    fontSize: 14,
     color: '#8c8c8c',
-    marginBottom: 32,
+    marginBottom: 20,
     textAlign: 'center',
-    lineHeight: 22,
+    lineHeight: 20,
   },
   inputContainer: {
     marginBottom: 16,
@@ -721,8 +736,8 @@ const styles = StyleSheet.create({
   input: {
     backgroundColor: '#333333',
     borderRadius: 4,
-    padding: 16,
-    fontSize: 16,
+    padding: 12,
+    fontSize: 15,
     color: '#FFFFFF',
     borderWidth: 1,
     borderColor: '#333333',
@@ -737,33 +752,45 @@ const styles = StyleSheet.create({
     marginLeft: 4,
   },
   nextButton: {
+    flex: 1,
     backgroundColor: '#E50914',
     borderRadius: 4,
-    padding: 16,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    minHeight: 40,
     alignItems: 'center',
-    marginTop: 24,
+    minWidth: 0, // Permite que el botón se contraiga en pantallas pequeñas y evita solapamientos
+    // Evitar doble margen: el contenedor ya tiene marginTop
   },
   nextButtonText: {
     color: '#FFFFFF',
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: 'bold',
   },
   buttonContainer: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginTop: 24,
-    gap: 16,
+    marginTop: 16,
+    gap: 12,
+    flexWrap: 'wrap', // Permite que los botones bajen a otra línea si el ancho es insuficiente
+  },
+  buttonContainerColumn: {
+    flexDirection: 'column',
+    gap: 12,
   },
   backButton: {
     flex: 1,
     backgroundColor: '#333333',
     borderRadius: 4,
-    padding: 16,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    minHeight: 40,
     alignItems: 'center',
+    minWidth: 0, // Evita que el contenido fuerce el ancho y cause traslapes
   },
   backButtonText: {
     color: '#FFFFFF',
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: 'bold',
   },
   planCard: {
@@ -852,8 +879,8 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   imagePickerContainer: {
-    width: 120,
-    height: 120,
+    width: 96,
+    height: 96,
     borderRadius: 60,
     overflow: 'hidden',
     backgroundColor: '#333',
@@ -862,7 +889,7 @@ const styles = StyleSheet.create({
     borderStyle: 'dashed',
     justifyContent: 'center',
     alignItems: 'center',
-    marginVertical: 10,
+    marginVertical: 8,
     alignSelf: 'center',
   },
   imagePickerPlaceholder: {
@@ -874,7 +901,7 @@ const styles = StyleSheet.create({
   },
   imagePickerText: {
     color: '#8c8c8c',
-    fontSize: 12,
+    fontSize: 11,
     textAlign: 'center',
     paddingHorizontal: 10,
   },

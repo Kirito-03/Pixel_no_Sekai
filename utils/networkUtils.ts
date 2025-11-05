@@ -1,3 +1,16 @@
+/**
+ * Utilidades de red para construir URLs y gestionar candidatos de BASE_URL.
+ *
+ * ¿Para qué es?
+ * - Definir posibles URLs del backend según plataforma/entorno (localhost, 10.0.2.2, LAN via Expo).
+ * - Construir URLs completas a endpoints del servidor.
+ * - Mantener una configuración dinámica de red con persistencia.
+ *
+ * ¿Cómo funciona?
+ * - getCandidateBaseURLs combina la URL actual con candidatos y evita duplicados.
+ * - buildServerURL concatena path con la BASE_URL dinámica.
+ * - DYNAMIC_NETWORK_CONFIG expone getters/setters y se inicializa leyendo almacenamiento.
+ */
 import { Platform } from 'react-native';
 import { loadNetworkConfig, saveNetworkConfig } from './networkStorage';
 

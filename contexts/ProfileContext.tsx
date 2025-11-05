@@ -1,3 +1,17 @@
+/**
+ * Contexto de Perfil de usuario.
+ *
+ * ¿Para qué es?
+ * - Gestiona el perfil activo (id, nombre, avatar, usuario_id) y preferencias asociadas.
+ * - Persiste el perfil y la preferencia de contenido adulto (+18) en AsyncStorage.
+ *
+ * ¿Cómo funciona?
+ * - setCurrentProfile establece/borra el perfil y sincroniza almacenamiento.
+ * - loadCurrentProfile recupera el perfil guardado al iniciar la app y carga la preferencia +18.
+ * - clearCurrentProfile limpia perfil y restablece preferencias.
+ * - setAdultContentEnabled guarda y expone el flag por perfil (clave por id).
+ * - useProfile valida que el hook se use dentro del proveedor.
+ */
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 

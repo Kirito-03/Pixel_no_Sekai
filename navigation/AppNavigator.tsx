@@ -1,3 +1,23 @@
+/**
+ * Configuración de navegación principal de la app.
+ *
+ * ¿Para qué es?
+ * - Define el flujo de pantallas: autenticación, selección de perfil y pestañas principales.
+ * - Determina la ruta inicial según el estado de sesión y perfil guardado.
+ * - Integra colores y estilos desde el ThemeContext.
+ *
+ * ¿Cómo funciona?
+ * - AppNavigator usa useAuth para conocer el usuario e isLoading, y useProfile para cargar/ver el perfil actual.
+ * - determineInitialRoute decide entre 'Login', 'ProfileSelection' o 'Main' según la sesión y perfil.
+ * - Mientras se calcula la ruta inicial, muestra un ActivityIndicator.
+ * - MainTabs define el Tab Navigator con Home, Search, MyList y Profile.
+ * - HomeNavigator encapsula un stack interno para Home, Category y MyList.
+ *
+ * Detalles y consideraciones:
+ * - MainTabs sincroniza el perfil seleccionado con el contexto, evitando reemplazar datos más recientes (ej. avatar).
+ * - Se usa un pequeño setTimeout para esperar actualización de estado tras loadCurrentProfile.
+ * - Si AppearanceScreen se importa con require por dependencia circular, considera refactor para imports estáticos.
+ */
 import React, { useEffect } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';

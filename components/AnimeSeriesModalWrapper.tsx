@@ -1,3 +1,14 @@
+/**
+ * Wrapper para AnimeSeriesModal que controla el EpisodePlayer en un Modal separado.
+ *
+ * ¿Para qué es?
+ * - Mantener abierto el modal de detalles de anime mientras se reproduce un episodio.
+ * - Gestionar estados de episodio/season actual y navegación siguiente/anterior.
+ *
+ * ¿Cómo funciona?
+ * - Recibe el contenido y visibilidad; cuando se elige episodio, abre un Modal con EpisodePlayer.
+ * - Provee handlers onNextEpisode/onPreviousEpisode basados en el índice actual.
+ */
 import React, { useState } from 'react';
 import { Modal } from 'react-native';
 import AnimeSeriesModal from './AnimeSeriesModal';

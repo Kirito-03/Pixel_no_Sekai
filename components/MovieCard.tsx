@@ -1,3 +1,15 @@
+/**
+ * Tarjeta de contenido (película/serie/anime).
+ *
+ * ¿Para qué es?
+ * - Mostrar el póster del item con feedback al presionar y marcar si está en "Mi Lista".
+ * - Reutilizable en grillas y filas (MovieRow), con tamaños responsivos.
+ *
+ * ¿Cómo funciona?
+ * - Soporta fuentes TMDB y AniList: para TMDB usa getImageUrl; para AniList usa URL directa.
+ * - Determina tipo e id para consultar MyListContext y mostrar el badge si corresponde.
+ * - Aplica una animación de escala al press (spring) para mejorar la UX.
+ */
 import React, { useRef } from 'react';
 import { 
   TouchableOpacity, 

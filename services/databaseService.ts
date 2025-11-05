@@ -1,3 +1,22 @@
+/**
+ * Servicio de acceso al backend (HTTP) y gestión dinámica de red.
+ *
+ * ¿Para qué es?
+ * - Centraliza llamadas Axios al servidor (auth, perfiles, Mi Lista, etc.).
+ * - Ajusta automáticamente la BASE_URL según entorno (Android emulador, localhost) y salud del servidor.
+ * - Persiste y recupera la configuración de red para mejorar resiliencia.
+ *
+ * ¿Cómo funciona?
+ * - Crea dos instancias de Axios: una general y otra para uploads.
+ * - Interceptor de respuestas detecta errores de red y prueba URLs candidatas (getCandidateBaseURLs).
+ * - Al encontrar una URL funcional, actualiza baseURL global y reintenta la solicitud.
+ * - Expone funciones de negocio: register/login, validateUser, perfiles (get/create/update/delete), Mi Lista (get/add/remove), etc.
+ * - Provee utilidades para resetear/forzar BASE_URL y obtener la actual.
+ *
+ * Consideraciones:
+ * - Timeout ampliado y logs controlados para evitar spam.
+ * - En producción, validar seguridad (tokens, headers, manejo de errores). 
+ */
 import axios from 'axios';
 import { Platform } from 'react-native';
 import { loadNetworkConfig, saveNetworkConfig, clearNetworkConfig } from '../utils/networkStorage';
@@ -162,6 +181,21 @@ export const databaseService = {
     axiosFileUpload.defaults.baseURL = initial;
     axios.defaults.baseURL = initial;
     console.log('Configuración de red reiniciada. BASE_URL:', initial);
+  },
+  /**
+   * Establece la URL base explícitamente para esta sesión y la guarda.
+   */
+  setBaseURL(newURL: string) {
+    if (!newURL || typeof newURL !== 'string') return;
+    BASE_URL = newURL;
+    axiosInstance.defaults.baseURL = newURL;
+    axiosFileUpload.defaults.baseURL = newURL;
+    axios.defaults.baseURL = newURL;
+    // Guardar en almacenamiento para que DYNAMIC_NETWORK_CONFIG pueda leerla
+    saveNetworkConfig(newURL).catch((err) => {
+      console.warn('No se pudo guardar la configuración de red:', err);
+    });
+    console.log('BASE_URL actualizada manualmente a:', newURL);
   },
   /**
    * Registra un nuevo usuario.

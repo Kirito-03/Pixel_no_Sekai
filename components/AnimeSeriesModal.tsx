@@ -1,3 +1,21 @@
+/**
+ * Modal de detalles para contenido anime (y compatibilidad con películas/series).
+ *
+ * ¿Para qué es?
+ * - Mostrar información detallada del contenido (título, sinopsis, géneros, trailer).
+ * - Para animes: cargar seasons/episodes desde M3U (m3uParser) y reproducir episodios.
+ * - Integrar acciones de Mi Lista y Descargas por perfil.
+ *
+ * ¿Cómo funciona?
+ * - Normaliza el tipo de contenido según su fuente (TMDB/AniList) para estados y acciones.
+ * - Obtiene detalles via services/api y services/anilistService; para streaming usa services/m3uParser.
+ * - Maneja animaciones de entrada (fade/slide), trailer diferido y apertura de EpisodePlayer.
+ * - Requiere ProfileContext y MyListContext; usa databaseService para descargas.
+ *
+ * Notas:
+ * - Archivo extenso por requerimientos UI/UX; si crece más, considerar refactorizar en subcomponentes.
+ * - Evita logs y emojis innecesarios; mantener consistencia y rendimiento.
+ */
 import React, { useState, useEffect, useRef } from 'react';
 import {
   View,

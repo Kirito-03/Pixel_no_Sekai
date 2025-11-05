@@ -1,3 +1,13 @@
+/**
+ * Punto de entrada (bootstrap) de la app Expo.
+ *
+ * ¿Para qué es?
+ * - Registra el componente raíz App con Expo para inicializar correctamente el entorno.
+ *
+ * ¿Cómo funciona?
+ * - registerRootComponent se encarga de llamar AppRegistry.registerComponent y configurar el entorno
+ *   tanto en Expo Go como en builds nativos.
+ */
 import { registerRootComponent } from 'expo';
 
 import App from './App';
