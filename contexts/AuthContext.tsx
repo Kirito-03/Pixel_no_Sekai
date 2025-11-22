@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { subscribeAuth } from '../services/auth';
+import { subscribeAuth, logout as firebaseLogout } from '../services/auth';
 
 interface User {
   uid: string;
@@ -58,6 +58,9 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   const logout = async () => {
     console.log('AuthContext: Logging out user');
+    try {
+      await firebaseLogout();
+    } catch (e) {}
     setUser(null);
     await AsyncStorage.removeItem('userSession');
     // También limpiar el perfil actual

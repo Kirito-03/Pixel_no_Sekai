@@ -18,8 +18,11 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import databaseService from '../services/databaseService';
-import { loginGoogle, registerEmail, loginEmail } from '../services/auth';
-import { DYNAMIC_NETWORK_CONFIG } from '../utils/networkUtils';
+import { registerEmail, loginEmail, loginGoogle as loginGoogleProxy } from '../services/auth';
+import * as GoogleAuth from 'expo-auth-session/providers/google';
+import { GoogleAuthProvider, signInWithCredential } from 'firebase/auth';
+import { auth } from '../services/firebase';
+// import { DYNAMIC_NETWORK_CONFIG } from '../utils/networkUtils';
 
 interface RegisterScreenProps {
   navigation: any;
@@ -50,6 +53,7 @@ const RegisterScreen: React.FC<RegisterScreenProps> = ({ navigation }) => {
   // Eliminado flujo de plan/pago (no se requiere)
   const [profileName, setProfileName] = useState('');
   const [loading, setLoading] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
   const [errors, setErrors] = useState<{ [key: string]: string }>({});
   const [selectedImageUri, setSelectedImageUri] = useState<string | null>(null);
   const [uploadingImage, setUploadingImage] = useState(false);
@@ -194,11 +198,7 @@ const RegisterScreen: React.FC<RegisterScreenProps> = ({ navigation }) => {
       }
       
       if (Platform.OS === 'web' && selectedImageUri.startsWith('data:')) {
-        // En web, convertir data URL a File
-        const response = await fetch(selectedImageUri);
-        const blob = await response.blob();
-        const file = new File([blob], 'avatar.jpg', { type: 'image/jpeg' });
-        const uploadResult = await databaseService.uploadAvatar(file);
+        const uploadResult = await databaseService.uploadAvatar(selectedImageUri);
         avatarUrl = uploadResult.url;
       } else if (typeof selectedImageUri === 'string') {
         // En móvil, usar la URI directamente
@@ -265,15 +265,33 @@ const RegisterScreen: React.FC<RegisterScreenProps> = ({ navigation }) => {
     }
   };
 
+  const [googleRequest, googleResponse, googlePromptAsync] = GoogleAuth.useIdTokenAuthRequest({
+    clientId: process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID,
+    androidClientId: process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID_RELEASE || process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID,
+    webClientId: process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID,
+  });
+
   const handleLoginGoogle = async () => {
     try {
-      setLoading(true);
-      const cred = await loginGoogle();
-      navigation.reset({ index: 0, routes: [ { name: 'Main' } ] });
+      setGoogleLoading(true);
+      if (Platform.OS === 'web') {
+        const cred = await loginGoogleProxy();
+        navigation.reset({ index: 0, routes: [ { name: 'Main' } ] });
+        return;
+      }
+      const res = await googlePromptAsync();
+      if (res?.type === 'success' && res?.params?.id_token) {
+        const credential = GoogleAuthProvider.credential(res.params.id_token as string);
+        const cred = await signInWithCredential(auth, credential);
+        navigation.reset({ index: 0, routes: [ { name: 'Main' } ] });
+      } else {
+        const cred = await loginGoogleProxy();
+        navigation.reset({ index: 0, routes: [ { name: 'Main' } ] });
+      }
     } catch (e: any) {
       Alert.alert('Error', e?.message || 'No se pudo continuar con Google');
     } finally {
-      setLoading(false);
+      setGoogleLoading(false);
     }
   };
 
@@ -377,9 +395,21 @@ const RegisterScreen: React.FC<RegisterScreenProps> = ({ navigation }) => {
       >
         <Text style={styles.nextButtonText}>Siguiente</Text>
       </TouchableOpacity>
-      <TouchableOpacity style={styles.googleButton} onPress={handleLoginGoogle} disabled={loading}>
-        <Ionicons name="logo-google" size={20} color="#000" style={{ marginRight: 8 }} />
-        <Text style={styles.googleButtonText}>Continuar con Google</Text>
+      <TouchableOpacity style={[styles.googleButton, googleLoading && { opacity: 0.6 }]} onPress={handleLoginGoogle} disabled={googleLoading}>
+        {googleLoading ? (
+          <ActivityIndicator color="#000000" />
+        ) : (
+          <>
+            <Ionicons name="logo-google" size={20} color="#000" style={{ marginRight: 8 }} />
+            <Text style={styles.googleButtonText}>Continuar con Google</Text>
+          </>
+        )}
+      </TouchableOpacity>
+      <TouchableOpacity
+        style={styles.loginLink}
+        onPress={() => navigation.navigate('Login')}
+      >
+        <Text style={styles.loginLinkText}>¿Ya tienes cuenta? Inicia sesión</Text>
       </TouchableOpacity>
     </View>
   );
@@ -456,11 +486,11 @@ const RegisterScreen: React.FC<RegisterScreenProps> = ({ navigation }) => {
           <Text style={styles.backButtonText}>Atrás</Text>
         </TouchableOpacity>
         <TouchableOpacity
-          style={[styles.nextButton, (loading || uploadingImage) && styles.buttonDisabled]}
+          style={[styles.ctaButton, (loading || uploadingImage) && styles.buttonDisabled]}
           onPress={handleRegister}
           disabled={loading || uploadingImage}
         >
-          <Text style={styles.nextButtonText}>
+          <Text style={styles.nextButtonText} numberOfLines={1} ellipsizeMode="tail">
             {loading || uploadingImage ? 'Creando cuenta e iniciando sesión...' : 'Crear cuenta e iniciar sesión'}
           </Text>
         </TouchableOpacity>
@@ -508,23 +538,7 @@ const RegisterScreen: React.FC<RegisterScreenProps> = ({ navigation }) => {
                 {renderCurrentStep()}
               </View>
 
-              <TouchableOpacity
-                style={styles.loginLink}
-                onPress={() => navigation.navigate('Login')}
-              >
-                <Text style={styles.loginLinkText}>
-                  ¿Ya tienes cuenta? Inicia sesión
-                </Text>
-              </TouchableOpacity>
-
-              {/* Debug info - solo en desarrollo */}
-              {__DEV__ && (
-                <View style={styles.debugInfo}>
-                  <Text style={styles.debugText}>
-                    Debug: {DYNAMIC_NETWORK_CONFIG.getBaseURL()}
-                  </Text>
-                </View>
-              )}
+              
             </ScrollView>
           </KeyboardAvoidingView>
         </LinearGradient>
@@ -664,6 +678,15 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: 'bold',
   },
+  ctaButton: {
+    flex: 1,
+    backgroundColor: '#E50914',
+    borderRadius: 4,
+    paddingHorizontal: 16,
+    height: 48,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   googleButton: {
     backgroundColor: '#FFFFFF',
     borderRadius: 4,
@@ -688,7 +711,9 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#333333',
     borderRadius: 4,
-    padding: 16,
+    paddingHorizontal: 16,
+    height: 48,
+    justifyContent: 'center',
     alignItems: 'center',
   },
   backButtonText: {

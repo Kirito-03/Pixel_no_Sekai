@@ -19,9 +19,12 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../theme';
-import databaseService from '../services/databaseService';
 import { useAuth } from '../contexts/AuthContext';
-import { loginEmail, loginGoogle } from '../services/auth';
+import { loginEmail, requestPasswordReset, loginGoogle as loginGoogleProxy } from '../services/auth';
+import * as GoogleAuth from 'expo-auth-session/providers/google';
+import Constants from 'expo-constants';
+import { GoogleAuthProvider, signInWithCredential } from 'firebase/auth';
+import { auth } from '../services/firebase';
 
 type DynamicStyles = {
   scrollContent: ViewStyle;
@@ -40,17 +43,18 @@ export default function LoginScreen({ navigation }: any) {
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(true);
-  const [loading, setLoading] = useState(false);
+  const [emailLoading, setEmailLoading] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
+  const [googleRequest, googleResponse, googlePromptAsync] = GoogleAuth.useIdTokenAuthRequest({
+    clientId: process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID,
+    androidClientId: process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID_RELEASE || process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID,
+    webClientId: process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID,
+  });
 
   // --- Recuperación de contraseña ---
   const [forgotVisible, setForgotVisible] = useState(false);
-  const [resetVisible, setResetVisible] = useState(false);
   const [forgotEmail, setForgotEmail] = useState('');
   const [forgotLoading, setForgotLoading] = useState(false);
-  const [resetToken, setResetToken] = useState('');
-  const [newPassword1, setNewPassword1] = useState('');
-  const [newPassword2, setNewPassword2] = useState('');
-  const [resetLoading, setResetLoading] = useState(false);
 
   const handleLogin = useCallback(async () => {
     if (!email.trim() || !password.trim()) {
@@ -58,7 +62,7 @@ export default function LoginScreen({ navigation }: any) {
       return;
     }
 
-    setLoading(true);
+    setEmailLoading(true);
 
     try {
       const cred = await loginEmail(email.trim().toLowerCase(), password);
@@ -66,52 +70,54 @@ export default function LoginScreen({ navigation }: any) {
       navigation.replace('ProfileSelection');
       return;
     } catch (error: any) {
-      console.error('Error en login:', error);
-      const status = error?.response?.status;
-      const message = error?.response?.data?.message;
-      const isNetworkError = error.code === 'NETWORK_ERROR' || 
-                            error.code === 'ERR_NETWORK' || 
-                            error.message?.includes('Network Error') ||
-                            error.message?.includes('Network request failed');
-
-      if (status === 401 || message?.includes('Credenciales inválidas')) {
-        setTimeout(() => {
-          Alert.alert('Usuario o contraseña incorrecta', 'Verifica tus datos e inténtalo de nuevo.', [{ text: 'OK' }]);
-        }, 100);
-      } else if (status === 400) {
-        setTimeout(() => {
-          Alert.alert('Datos incompletos', 'Email y contraseña son requeridos.', [{ text: 'OK' }]);
-        }, 100);
-      } else if (isNetworkError) {
-        setTimeout(() => {
-          Alert.alert(
-            'Error de conexión', 
-            'No se pudo conectar con el servidor.\n\nVerifica que:\n• El servidor esté ejecutándose\n• Estés en la misma red\n• El firewall no esté bloqueando la conexión', 
-            [{ text: 'OK' }]
-          );
-        }, 100);
+      const code = error?.code || '';
+      if (code === 'auth/wrong-password' || code === 'auth/invalid-credential') {
+        Alert.alert('Usuario o contraseña incorrecta', 'Verifica tus datos e inténtalo de nuevo.');
+      } else if (code === 'auth/user-not-found') {
+        Alert.alert('Cuenta no encontrada', 'No existe un usuario con ese correo.');
+      } else if (code === 'auth/invalid-email') {
+        Alert.alert('Email inválido', 'Revisa el formato de tu correo.');
+      } else if (code === 'auth/too-many-requests') {
+        Alert.alert('Demasiados intentos', 'Acceso temporalmente bloqueado. Intenta más tarde o restablece tu contraseña.');
+      } else if (code === 'auth/network-request-failed') {
+        Alert.alert('Error de conexión', 'No se pudo conectar. Verifica tu red.');
+      } else if (error?.message) {
+        Alert.alert('Error', error.message);
       } else {
-        setTimeout(() => {
-          Alert.alert('Error Inesperado', `Ocurrió un problema: ${error.message || 'Error desconocido'}`, [{ text: 'OK' }]);
-        }, 100);
+        Alert.alert('Error', 'No se pudo iniciar sesión.');
       }
     } finally {
-      setLoading(false);
+      setEmailLoading(false);
     }
   }, [email, password, navigation]);
 
   const handleLoginGoogle = useCallback(async () => {
-    setLoading(true);
+    setGoogleLoading(true);
     try {
-      const cred = await loginGoogle();
-      await login({ uid: cred.user.uid, email: cred.user.email || '' });
-      navigation.replace('ProfileSelection');
+      if (Platform.OS === 'web') {
+        const cred = await loginGoogleProxy();
+        await login({ uid: cred.user.uid, email: cred.user.email || '' });
+        navigation.replace('ProfileSelection');
+        return;
+      }
+      const res = await googlePromptAsync();
+      if (res?.type === 'success' && res?.params?.id_token) {
+        const credential = GoogleAuthProvider.credential(res.params.id_token as string);
+        const cred = await signInWithCredential(auth, credential);
+        await login({ uid: cred.user.uid, email: cred.user.email || '' });
+        navigation.replace('ProfileSelection');
+      } else {
+        const cred = await loginGoogleProxy();
+        await login({ uid: cred.user.uid, email: cred.user.email || '' });
+        navigation.replace('ProfileSelection');
+      }
     } catch (error: any) {
-      Alert.alert('Error', error?.message || 'No se pudo iniciar sesión con Google');
+      const msg = error?.message || 'No se pudo iniciar sesión con Google';
+      Alert.alert('Error', msg);
     } finally {
-      setLoading(false);
+      setGoogleLoading(false);
     }
-  }, [navigation]);
+  }, [navigation, googlePromptAsync]);
 
   // MEJORA: Aplicar el tipo 'DynamicStyles' al hook useMemo para solucionar el error de TypeScript
   const dynamicStyles: DynamicStyles = useMemo(() => ({
@@ -212,15 +218,17 @@ export default function LoginScreen({ navigation }: any) {
                 </View>
 
                 <TouchableOpacity
-                  style={[styles.loginButton, loading && { opacity: 0.6 }]}
+                  style={[styles.loginButton, emailLoading && { opacity: 0.6 }]}
                   onPress={handleLogin}
-                  disabled={loading}
+                  disabled={emailLoading}
                   accessibilityRole="button"
                   accessibilityLabel="Iniciar sesión"
                 >
-                  <Text style={styles.loginButtonText}>
-                    {loading ? 'Iniciando sesión...' : 'Iniciar sesión'}
-                  </Text>
+                  {emailLoading ? (
+                    <ActivityIndicator color="#FFFFFF" />
+                  ) : (
+                    <Text style={styles.loginButtonText}>Iniciar sesión</Text>
+                  )}
                 </TouchableOpacity>
 
                 <View style={styles.separatorContainer}>
@@ -229,9 +237,15 @@ export default function LoginScreen({ navigation }: any) {
                   <View style={styles.separator} />
                 </View>
 
-                <TouchableOpacity style={styles.googleButton} onPress={handleLoginGoogle} disabled={loading}>
-                  <Ionicons name="logo-google" size={20} color="#000" style={{ marginRight: 8 }} />
-                  <Text style={styles.googleButtonText}>Iniciar sesión con Google</Text>
+                <TouchableOpacity style={[styles.googleButton, googleLoading && { opacity: 0.6 }]} onPress={handleLoginGoogle} disabled={googleLoading}>
+                  {googleLoading ? (
+                    <ActivityIndicator color="#000000" />
+                  ) : (
+                    <>
+                      <Ionicons name="logo-google" size={20} color="#000" style={{ marginRight: 8 }} />
+                      <Text style={styles.googleButtonText}>Iniciar sesión con Google</Text>
+                    </>
+                  )}
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={styles.forgotPassword}
@@ -291,7 +305,7 @@ export default function LoginScreen({ navigation }: any) {
               <View style={styles.modalContent}>
                 <Text style={styles.modalTitle}>Recuperar contraseña</Text>
                 <Text style={styles.modalDesc}>
-                  Ingresa tu correo asociado a la cuenta. Te enviaremos un código de recuperación.
+                  Ingresa tu correo asociado a la cuenta. Te enviaremos un enlace para restablecer tu contraseña.
                 </Text>
                 <TextInput
                   style={styles.modalInput}
@@ -320,36 +334,22 @@ export default function LoginScreen({ navigation }: any) {
                       }
                       setForgotLoading(true);
                       try {
-                        console.log('🔄 ForgotPassword: solicitando token para', emailToUse);
-                        const res = await databaseService.forgotPassword(emailToUse);
-                        console.log('✅ ForgotPassword: respuesta', res);
-                        // En entorno de desarrollo, el backend devuelve el token
-                        if (res?.token) {
-                          setResetToken(res.token);
-                          setResetVisible(true);
-                          setForgotVisible(false);
-                          Alert.alert(
-                            'Código generado',
-                            `Se generó un código de recuperación (dev):\n${res.token}\n\nVigencia: ${res.expires_in_minutes || 10} minutos.`
-                          );
-                        } else {
-                          Alert.alert(
-                            'Correo enviado',
-                            'Si el correo existe, se envió un código de recuperación.'
-                          );
-                          setForgotVisible(false);
-                          setResetVisible(true);
-                        }
-                        // Prefijar el email en el formulario de reseteo
+                        await requestPasswordReset(emailToUse);
+                        Alert.alert('Correo enviado', 'Revisa tu bandeja de entrada y sigue el enlace para restablecer tu contraseña.');
                         setEmail(emailToUse);
+                        setForgotVisible(false);
                       } catch (error: any) {
-                        console.error('❌ ForgotPassword error:', error?.response?.data || error.message);
-                        const status = error?.response?.status;
-                        const message = error?.response?.data?.message;
-                        if (status === 404 || message?.includes('no encontrado')) {
+                        const code = error?.code || '';
+                        if (code === 'auth/user-not-found') {
                           Alert.alert('Cuenta no encontrada', 'No existe un usuario con ese correo.');
+                        } else if (code === 'auth/invalid-email') {
+                          Alert.alert('Email inválido', 'Revisa el formato de tu correo.');
+                        } else if (code === 'auth/network-request-failed') {
+                          Alert.alert('Error de conexión', 'No se pudo conectar. Verifica tu red.');
+                        } else if (error?.message) {
+                          Alert.alert('Error', error.message);
                         } else {
-                          Alert.alert('Error', message || 'No se pudo procesar la solicitud.');
+                          Alert.alert('Error', 'No se pudo enviar el correo de recuperación.');
                         }
                       } finally {
                         setForgotLoading(false);
@@ -360,7 +360,7 @@ export default function LoginScreen({ navigation }: any) {
                     {forgotLoading ? (
                       <ActivityIndicator color="#FFFFFF" />
                     ) : (
-                      <Text style={styles.modalButtonText}>Enviar código</Text>
+                      <Text style={styles.modalButtonText}>Enviar enlace</Text>
                     )}
                   </TouchableOpacity>
                 </View>
@@ -368,113 +368,7 @@ export default function LoginScreen({ navigation }: any) {
             </View>
           </Modal>
 
-          {/* Modal: Ingresar código y nueva contraseña */}
-          <Modal
-            visible={resetVisible}
-            transparent
-            animationType="fade"
-            onRequestClose={() => setResetVisible(false)}
-          >
-            <View style={styles.modalOverlay}>
-              <View style={styles.modalContent}>
-                <Text style={styles.modalTitle}>Restablecer contraseña</Text>
-                <Text style={styles.modalDesc}>Ingresa el código recibido y tu nueva contraseña.</Text>
-
-                <TextInput
-                  style={styles.modalInput}
-                  placeholder="Código de recuperación"
-                  placeholderTextColor="#8c8c8c"
-                  value={resetToken}
-                  onChangeText={setResetToken}
-                  autoCapitalize="none"
-                />
-
-                <TextInput
-                  style={styles.modalInput}
-                  placeholder="Nueva contraseña"
-                  placeholderTextColor="#8c8c8c"
-                  value={newPassword1}
-                  onChangeText={setNewPassword1}
-                  secureTextEntry
-                  autoCapitalize="none"
-                />
-
-                <TextInput
-                  style={styles.modalInput}
-                  placeholder="Confirmar contraseña"
-                  placeholderTextColor="#8c8c8c"
-                  value={newPassword2}
-                  onChangeText={setNewPassword2}
-                  secureTextEntry
-                  autoCapitalize="none"
-                />
-
-                <View style={styles.modalActions}>
-                  <TouchableOpacity
-                    style={[styles.modalButton, styles.modalButtonSecondary]}
-                    onPress={() => setResetVisible(false)}
-                    disabled={resetLoading}
-                  >
-                    <Text style={styles.modalButtonText}>Cancelar</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.modalButton, resetLoading && { opacity: 0.7 }]}
-                    onPress={async () => {
-                      const emailToUse = (forgotEmail || email).trim().toLowerCase();
-                      if (!emailToUse) {
-                        Alert.alert('Email requerido', 'Completa tu correo primero.');
-                        return;
-                      }
-                      if (!resetToken.trim()) {
-                        Alert.alert('Código requerido', 'Ingresa el código de recuperación.');
-                        return;
-                      }
-                      if (newPassword1.length < 6) {
-                        Alert.alert('Contraseña insegura', 'La contraseña debe tener al menos 6 caracteres.');
-                        return;
-                      }
-                      if (newPassword1 !== newPassword2) {
-                        Alert.alert('Las contraseñas no coinciden', 'Verifica ambas entradas.');
-                        return;
-                      }
-                      setResetLoading(true);
-                      try {
-                        console.log('🔄 ResetPassword: reseteando contraseña para', emailToUse);
-                        const res = await databaseService.resetPassword(emailToUse, resetToken.trim(), newPassword1);
-                        console.log('✅ ResetPassword: respuesta', res);
-                        Alert.alert('Contraseña actualizada', 'Ahora puedes iniciar sesión con tu nueva contraseña.', [
-                          { text: 'OK', onPress: () => setResetVisible(false) },
-                        ]);
-                        // Rellenar el formulario de login y cerrar modales
-                        setEmail(emailToUse);
-                        setPassword(newPassword1);
-                        setForgotVisible(false);
-                        setResetVisible(false);
-                      } catch (error: any) {
-                        console.error('❌ ResetPassword error:', error?.response?.data || error.message);
-                        const status = error?.response?.status;
-                        const message = error?.response?.data?.message;
-                        if (status === 400 || message?.includes('Token inválido')) {
-                          Alert.alert('Código inválido', 'El código es incorrecto o ha expirado.');
-                        } else {
-                          Alert.alert('Error', message || 'No se pudo actualizar la contraseña.');
-                        }
-                      } finally {
-                        setResetLoading(false);
-                      }
-                    }}
-                    disabled={resetLoading}
-                  >
-                    {resetLoading ? (
-                      <ActivityIndicator color="#FFFFFF" />
-                    ) : (
-                      <Text style={styles.modalButtonText}>Actualizar contraseña</Text>
-                    )}
-                  </TouchableOpacity>
-                </View>
-              </View>
-            </View>
-          </Modal>
+          
         </LinearGradient>
       </ImageBackground>
     </View>

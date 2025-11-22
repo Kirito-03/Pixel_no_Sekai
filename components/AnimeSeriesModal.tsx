@@ -78,6 +78,8 @@ export default function AnimeSeriesModal({
   
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(height)).current;
+  const contentFadeAnim = useRef(new Animated.Value(1)).current;
+  const descSlideAnim = useRef(new Animated.Value(0)).current;
 
   // Verificar si el contenido actual está en Mi Lista
   // Normalizar el tipo según la fuente para la verificación de Mi Lista
@@ -93,6 +95,18 @@ export default function AnimeSeriesModal({
   useEffect(() => {
     if (content) {
       setCurrentContent(content);
+      setDetailData(null);
+      setStreamingInfo(null);
+      setSelectedSeason(null);
+      setTrailerKey(null);
+      descSlideAnim.setValue(12);
+      Animated.sequence([
+        Animated.timing(contentFadeAnim, { toValue: 0, duration: 160, useNativeDriver: true }),
+        Animated.parallel([
+          Animated.timing(contentFadeAnim, { toValue: 1, duration: 220, useNativeDriver: true }),
+          Animated.timing(descSlideAnim, { toValue: 0, duration: 220, useNativeDriver: true }),
+        ]),
+      ]).start();
     }
   }, [content]);
 
@@ -151,6 +165,22 @@ export default function AnimeSeriesModal({
     if (!detailData) return;
     loadStreamingInfo();
   }, [detailData, visible, currentContent]);
+
+  useEffect(() => {
+    if (!currentContent) return;
+    setDetailData(null);
+    setStreamingInfo(null);
+    setSelectedSeason(null);
+    setTrailerKey(null);
+    descSlideAnim.setValue(12);
+    Animated.sequence([
+      Animated.timing(contentFadeAnim, { toValue: 0, duration: 160, useNativeDriver: true }),
+      Animated.parallel([
+        Animated.timing(contentFadeAnim, { toValue: 1, duration: 220, useNativeDriver: true }),
+        Animated.timing(descSlideAnim, { toValue: 0, duration: 220, useNativeDriver: true }),
+      ]),
+    ]).start();
+  }, [currentContent?.id]);
 
   const loadContentDetails = async () => {
     if (!currentContent) return;
@@ -727,7 +757,7 @@ export default function AnimeSeriesModal({
       <Animated.View style={[styles.container, { opacity: fadeAnim }]}>
         <StatusBar style="light" translucent />
         
-        <View style={styles.content}>
+        <Animated.View style={[styles.content, { opacity: contentFadeAnim }]}>
           {/* Botón cerrar estilo Netflix */}
           {!(trailerDelay && trailerKey && !trailerFinished) && (
             <TouchableOpacity style={styles.closeButton} onPress={handleClose}>
@@ -879,13 +909,23 @@ export default function AnimeSeriesModal({
                     )}
 
                     {/* Descripción después de los botones */}
-                    <Text style={styles.heroOverview} numberOfLines={6}>
-                      {cleanDescription(
-                        currentContent?.type === 'anime' && detailData && 'description' in detailData
-                          ? (detailData as AnimeDetail).description || currentContent?.overview || 'Sin descripción disponible'
-                          : currentContent?.overview || 'Sin descripción disponible'
+                    <Animated.View style={{ transform: [{ translateY: descSlideAnim }] }}>
+                      {currentContent?.type === 'anime' && (loading || !detailData) ? (
+                        <View style={styles.skeletonContainer}>
+                          <View style={styles.skeletonLine} />
+                          <View style={styles.skeletonLine} />
+                          <View style={[styles.skeletonLine, { width: '60%' }]} />
+                        </View>
+                      ) : (
+                        <Text style={styles.heroOverview} numberOfLines={6}>
+                          {cleanDescription(
+                            currentContent?.type === 'anime' && detailData && 'description' in detailData
+                              ? (detailData as AnimeDetail).description || currentContent?.overview || 'Sin descripción disponible'
+                              : currentContent?.overview || 'Sin descripción disponible'
+                          )}
+                        </Text>
                       )}
-                    </Text>
+                    </Animated.View>
                   </View>
                 </View>
               )}
@@ -1232,7 +1272,7 @@ export default function AnimeSeriesModal({
                   )}
             </View>
           </ScrollView>
-        </View>
+        </Animated.View>
       </Animated.View>
 
     </Modal>
@@ -1372,6 +1412,17 @@ const styles = StyleSheet.create({
     textShadowOffset: { width: 0, height: 2 },
     textShadowRadius: 4,
     fontWeight: '400',
+  },
+  skeletonContainer: {
+    marginTop: 0,
+    marginBottom: 16,
+    gap: 8,
+  },
+  skeletonLine: {
+    height: 16,
+    backgroundColor: '#2A2A2A',
+    borderRadius: 4,
+    width: '90%',
   },
   actionButtons: {
     flexDirection: 'row',

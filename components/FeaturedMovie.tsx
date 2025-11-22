@@ -9,6 +9,8 @@ import { colors, spacing } from '../theme';
 import { useProfile } from '../contexts/ProfileContext';
 import { useMyList } from '../contexts/MyListContext';
 
+const stripHtml = (html?: string) => html ? html.replace(/<[^>]*>/g, '') : '';
+
 interface Props {
   movie: MovieDetail | AnimeDetail;
   onWatch: () => void;
@@ -196,7 +198,7 @@ export default function FeaturedMovie({ movie, onWatch, onAddList }: Props) {
             
             {/* Descripción */}
             <Text style={dynamicStyles.description} numberOfLines={5}>
-              {isAnime ? (movie as any).description : (movie as any).overview}
+              {isAnime ? stripHtml((movie as any).description) : stripHtml((movie as any).overview)}
             </Text>
             
             {/* Botones */}

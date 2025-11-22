@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { View, Image, Text, TouchableOpacity, StyleSheet, SafeAreaView, Animated, useWindowDimensions } from 'react-native';
+import { View, Image, Text, TouchableOpacity, StyleSheet, SafeAreaView, Animated, useWindowDimensions, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../theme';
 import CategoriesMenu from './CategoriesMenu';
@@ -16,6 +16,7 @@ interface HeaderProps {
 export default function Header({ black = false, onProfilePress, onSearchPress, onFilterChange, onCategorySelect, currentCategoryId }: HeaderProps) {
   const { width } = useWindowDimensions();
   const isSmallScreen = width < 768;
+  const isWeb = Platform.OS === 'web';
   const [selectedFilter, setSelectedFilter] = useState<'series' | 'movies' | 'anime' | 'all' | null>('anime');
   const [showCategoriesMenu, setShowCategoriesMenu] = useState(false);
   
@@ -61,11 +62,11 @@ export default function Header({ black = false, onProfilePress, onSearchPress, o
       zIndex: 999,
     },
     header: {
-      height: isSmallScreen ? 60 : 70,
+      height: isSmallScreen ? (isWeb ? 86 : 60) : (isWeb ? 100 : 70),
       flexDirection: 'row' as const,
       justifyContent: 'space-between' as const,
       alignItems: 'center' as const,
-      paddingHorizontal: isSmallScreen ? 12 : 20,
+      paddingHorizontal: isSmallScreen ? 22 : 30,
     },
     logoContainer: {
       height: isSmallScreen ? 25 : 30,
@@ -123,7 +124,7 @@ export default function Header({ black = false, onProfilePress, onSearchPress, o
         </View>
 
         {/* Filtros: Anime y Categorías */}
-        <View style={styles.filtersContainer}>
+        <View style={[styles.filtersContainer, isWeb ? { marginTop: -22, paddingBottom: 14 } : null]}>
           <TouchableOpacity 
             style={[styles.filterButton, selectedFilter === 'anime' && styles.filterButtonActive]}
             onPress={() => handleFilterPress('anime')}
@@ -168,6 +169,7 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-start',
     paddingHorizontal: 12,
     paddingBottom: 10,
+    marginTop: 0,
     gap: 12,
   },
   filterButton: {

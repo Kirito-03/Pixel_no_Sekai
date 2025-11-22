@@ -603,6 +603,37 @@ export const databaseService = {
     const path = `avatars/${uid}/${filename}`;
     const sref = storageRef(storage, path);
     let dataUrlForFallback: string | null = null;
+    if (Platform.OS === 'web') {
+      try {
+        if (typeof imageSource === 'string') {
+          if (imageSource.startsWith('data:')) {
+            return { url: imageSource, filename };
+          }
+          try {
+            const blob = await fetch(imageSource).then(r => r.blob());
+            const reader = new (globalThis as any).FileReader();
+            const dataUrl = await new Promise<string>((resolve, reject) => {
+              reader.onload = () => resolve(reader.result as string);
+              reader.onerror = reject;
+              reader.readAsDataURL(blob);
+            });
+            return { url: dataUrl, filename };
+          } catch (_) {
+            return { url: imageSource, filename };
+          }
+        } else {
+          const reader = new (globalThis as any).FileReader();
+          const dataUrl = await new Promise<string>((resolve, reject) => {
+            reader.onload = () => resolve(reader.result as string);
+            reader.onerror = reject;
+            reader.readAsDataURL(imageSource as any);
+          });
+          return { url: dataUrl, filename };
+        }
+      } catch (_) {
+        return { url: typeof imageSource === 'string' ? imageSource : '', filename };
+      }
+    }
     try {
       if (typeof imageSource === 'string') {
         if (imageSource.startsWith('data:')) {

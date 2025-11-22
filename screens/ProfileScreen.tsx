@@ -12,6 +12,7 @@ import {
   Alert,
   ActivityIndicator,
   Platform,
+  Modal,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
@@ -21,6 +22,8 @@ import { useTheme } from '../contexts/ThemeContext';
 import { useProfile } from '../contexts/ProfileContext';
 import { useAuth } from '../contexts/AuthContext';
 import databaseService from '../services/databaseService';
+import { requestPasswordReset, requestEmailVerification } from '../services/auth';
+import { auth } from '../services/firebase';
 
 export default function ProfileScreen({ navigation }: any) {
   const { colors, theme } = useTheme();
@@ -34,6 +37,9 @@ export default function ProfileScreen({ navigation }: any) {
   
   const { width } = useWindowDimensions();
   const isSmallScreen = width < 768;
+  const [accountModalVisible, setAccountModalVisible] = useState(false);
+  const [logoutVisible, setLogoutVisible] = useState(false);
+  const [logoutLoading, setLogoutLoading] = useState(false);
 
   // Añade un parámetro de cache-busting a la URL para forzar refresco en Android
   const appendCacheBust = (url: string) => {
@@ -331,6 +337,90 @@ export default function ProfileScreen({ navigation }: any) {
     logoutText: {
       color: '#e50914',
     },
+    modalOverlay: {
+      flex: 1,
+      backgroundColor: 'rgba(0,0,0,0.6)',
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    modalContent: {
+      backgroundColor: theme === 'dark' ? '#1f1f1f' : '#fff',
+      borderRadius: 12,
+      padding: spacing.lg,
+      width: '90%',
+      maxWidth: 420,
+    },
+    infoRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      paddingVertical: spacing.sm,
+      borderBottomWidth: 1,
+      borderBottomColor: theme === 'dark' ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.08)',
+    },
+    infoLabel: {
+      color: colors.textGray,
+      fontSize: 14,
+      fontWeight: '600',
+    },
+    infoValue: {
+      color: colors.text,
+      fontSize: 14,
+    },
+    modalButtons: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      gap: 12,
+      marginTop: spacing.lg,
+    },
+    cancelButton: {
+      flex: 1,
+      backgroundColor: theme === 'dark' ? '#666' : '#e5e7eb',
+      borderRadius: 8,
+      padding: spacing.md,
+      alignItems: 'center',
+    },
+    cancelButtonText: {
+      color: theme === 'dark' ? '#fff' : '#111827',
+      fontSize: 16,
+      fontWeight: 'bold',
+    },
+    createButton: {
+      flex: 1,
+      backgroundColor: '#e50914',
+      borderRadius: 8,
+      padding: spacing.md,
+      alignItems: 'center',
+    },
+    buttonDisabled: {
+      opacity: 0.6,
+    },
+    createButtonText: {
+      color: '#fff',
+      fontSize: 16,
+      fontWeight: 'bold',
+    },
+    actionContainer: {
+      marginTop: spacing.md,
+      gap: 10,
+    },
+    actionButton: {
+      backgroundColor: colors.primary,
+      borderRadius: 8,
+      padding: spacing.md,
+      alignItems: 'center',
+    },
+    actionButtonSecondary: {
+      backgroundColor: theme === 'dark' ? '#374151' : '#e5e7eb',
+      borderRadius: 8,
+      padding: spacing.md,
+      alignItems: 'center',
+    },
+    actionButtonText: {
+      color: theme === 'dark' ? '#fff' : '#111827',
+      fontSize: 14,
+      fontWeight: '600',
+    },
   });
 
   return (
@@ -414,14 +504,13 @@ export default function ProfileScreen({ navigation }: any) {
             )}
           </View>
           <Text style={styles.username}>{currentProfile?.name || 'Usuario'}</Text>
-          <Text style={styles.email}>{currentProfile?.name || 'admin'}</Text>
         </View>
 
         {/* Sección CUENTA */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>CUENTA</Text>
           
-          <TouchableOpacity style={styles.menuItem}>
+          <TouchableOpacity style={styles.menuItem} onPress={() => setAccountModalVisible(true)}>
             <View style={styles.menuContent}>
               <Text style={styles.menuTitle}>Información de la cuenta</Text>
               <Text style={styles.menuSubtitle}>administra tu información</Text>
@@ -562,7 +651,7 @@ export default function ProfileScreen({ navigation }: any) {
         <View style={styles.section}>
           <TouchableOpacity 
             style={[styles.menuItem, styles.logoutButton]} 
-            onPress={handleLogout}
+            onPress={() => setLogoutVisible(true)}
           >
             <View style={styles.menuContent}>
               <Text style={[styles.menuTitle, styles.logoutText]}>Cerrar sesión</Text>
@@ -570,6 +659,123 @@ export default function ProfileScreen({ navigation }: any) {
             <Ionicons name="log-out-outline" size={24} color="#e50914" />
           </TouchableOpacity>
         </View>
+
+        <Modal
+          visible={accountModalVisible}
+          transparent
+          animationType="slide"
+          onRequestClose={() => setAccountModalVisible(false)}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalContent}>
+              <Text style={styles.sectionTitle}>Información de la cuenta</Text>
+              <View style={styles.infoRow}>
+                <Text style={styles.infoLabel}>Email</Text>
+                <Text style={styles.infoValue}>{user?.email || '—'}</Text>
+              </View>
+              
+              <View style={styles.infoRow}>
+                <Text style={styles.infoLabel}>Proveedor</Text>
+                <Text style={styles.infoValue}>{(() => {
+                  const cu = auth.currentUser;
+                  const providers = cu?.providerData?.map((p: any) => p.providerId) || [];
+                  const isGoogle = providers.includes('google.com');
+                  const isEmail = providers.includes('password');
+                  return isGoogle ? 'Google' : (isEmail ? 'Email y contraseña' : (providers[0] || '—'));
+                })()}</Text>
+              </View>
+              <View style={styles.actionContainer}>
+                {(() => {
+                  const cu = auth.currentUser;
+                  const providers = cu?.providerData?.map((p: any) => p.providerId) || [];
+                  const isEmail = providers.includes('password');
+                  const emailVerified = !!auth.currentUser?.emailVerified;
+                  return (
+                    <>
+                      {isEmail && (
+                        <TouchableOpacity
+                          style={styles.actionButton}
+                          onPress={async () => {
+                            const email = user?.email;
+                            if (!email) { Alert.alert('Error', 'No hay email asociado'); return; }
+                            try { await requestPasswordReset(email); Alert.alert('Listo', 'Revisa tu correo para restablecer la contraseña'); } catch (e: any) { Alert.alert('Error', e?.message || 'No se pudo enviar el correo'); }
+                          }}
+                        >
+                          <Text style={styles.actionButtonText}>Restablecer contraseña</Text>
+                        </TouchableOpacity>
+                      )}
+                      {!emailVerified && (
+                        <TouchableOpacity
+                          style={styles.actionButtonSecondary}
+                          onPress={async () => {
+                            try { await requestEmailVerification(); Alert.alert('Listo', 'Enviamos un correo de verificación'); } catch (e: any) { Alert.alert('Error', e?.message || 'No se pudo enviar verificación'); }
+                          }}
+                        >
+                          <Text style={styles.actionButtonText}>Enviar verificación de email</Text>
+                        </TouchableOpacity>
+                      )}
+                    </>
+                  );
+                })()}
+              </View>
+              <View style={styles.infoRow}>
+                <Text style={styles.infoLabel}>Email verificado</Text>
+                <Text style={styles.infoValue}>{auth.currentUser?.emailVerified ? 'Sí' : 'No'}</Text>
+              </View>
+              <View style={styles.infoRow}>
+                <Text style={styles.infoLabel}>Creación</Text>
+                <Text style={styles.infoValue}>{auth.currentUser?.metadata?.creationTime || '—'}</Text>
+              </View>
+              <View style={styles.infoRow}>
+                <Text style={styles.infoLabel}>Último acceso</Text>
+                <Text style={styles.infoValue}>{auth.currentUser?.metadata?.lastSignInTime || '—'}</Text>
+              </View>
+              <View style={styles.modalButtons}>
+                <TouchableOpacity style={styles.cancelButton} onPress={() => setAccountModalVisible(false)}>
+                  <Text style={styles.cancelButtonText}>Cerrar</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
+
+        <Modal
+          visible={logoutVisible}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setLogoutVisible(false)}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalContent}>
+              <Text style={styles.sectionTitle}>Cerrar sesión</Text>
+              <Text style={styles.menuSubtitle}>¿Estás seguro de que quieres cerrar sesión?</Text>
+              <View style={styles.modalButtons}>
+                <TouchableOpacity style={styles.cancelButton} onPress={() => setLogoutVisible(false)}>
+                  <Text style={styles.cancelButtonText}>Cancelar</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.createButton, logoutLoading && styles.buttonDisabled]}
+                  onPress={async () => {
+                    setLogoutLoading(true);
+                    try {
+                      await clearCurrentProfile();
+                      await logout();
+                      navigation.replace('Login');
+                    } catch (e) {
+                      Alert.alert('Error', 'No se pudo cerrar sesión');
+                    } finally {
+                      setLogoutLoading(false);
+                      setLogoutVisible(false);
+                    }
+                  }}
+                  disabled={logoutLoading}
+                >
+                  <Text style={styles.createButtonText}>{logoutLoading ? 'Saliendo...' : 'Cerrar sesión'}</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
 
         {/* Espaciado inferior */}
         <View style={{ height: 100 }} />

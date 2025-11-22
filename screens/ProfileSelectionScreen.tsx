@@ -50,7 +50,7 @@ const AVAILABLE_AVATARS = [
 ];
 
 const ProfileSelectionScreen: React.FC<ProfileSelectionScreenProps> = ({ navigation, route }) => {
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
   const { setCurrentProfile } = useProfile();
   const userId = route.params?.userId || user?.uid;
   const [profiles, setProfiles] = useState<Profile[]>([]);
@@ -65,6 +65,16 @@ const ProfileSelectionScreen: React.FC<ProfileSelectionScreenProps> = ({ navigat
   const [selectedImageUri, setSelectedImageUri] = useState<string | null>(null);
   const [uploadingImage, setUploadingImage] = useState(false);
   const fileInputRef = React.useRef<any>(null);
+  const [menuProfileId, setMenuProfileId] = useState<number | null>(null);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editProfile, setEditProfile] = useState<Profile | null>(null);
+  const [editName, setEditName] = useState('');
+  const [editImageUri, setEditImageUri] = useState<string | null>(null);
+  const [editing, setEditing] = useState(false);
+  const editFileInputRef = React.useRef<any>(null);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [deleteTargetId, setDeleteTargetId] = useState<number | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     loadProfiles();
@@ -302,26 +312,8 @@ const ProfileSelectionScreen: React.FC<ProfileSelectionScreenProps> = ({ navigat
   };
 
   const handleDeleteProfile = (profileId: number) => {
-    Alert.alert(
-      'Eliminar perfil',
-      '¿Estás seguro de que quieres eliminar este perfil?',
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        {
-          text: 'Eliminar',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await databaseService.deleteProfile(profileId);
-              await loadProfiles();
-            } catch (error) {
-              console.error('Error al eliminar perfil:', error);
-              Alert.alert('Error', 'No se pudo eliminar el perfil');
-            }
-          },
-        },
-      ]
-    );
+    setDeleteTargetId(profileId);
+    setShowDeleteModal(true);
   };
 
   if (loading) {
@@ -381,6 +373,13 @@ const ProfileSelectionScreen: React.FC<ProfileSelectionScreenProps> = ({ navigat
                   ) : (
                     <Text style={styles.avatarEmoji}>{getAvatarById('1').emoji}</Text>
                   )}
+                  <TouchableOpacity
+                    style={styles.menuBadge}
+                    onPress={() => setMenuProfileId(profile.id!)}
+                    accessibilityLabel="Opciones del perfil"
+                  >
+                    <Ionicons name="ellipsis-vertical" size={16} color="#fff" />
+                  </TouchableOpacity>
                   {/* Indicador de niños eliminado */}
                 </View>
                 <Text style={styles.profileName}>{profile.name}</Text>
@@ -404,11 +403,211 @@ const ProfileSelectionScreen: React.FC<ProfileSelectionScreenProps> = ({ navigat
 
         <TouchableOpacity
           style={styles.logoutButton}
-          onPress={() => navigation.replace('Login')}
+          onPress={async () => {
+            await logout();
+            navigation.replace('Login');
+          }}
         >
           <Text style={styles.logoutText}>Cerrar sesión</Text>
         </TouchableOpacity>
       </ScrollView>
+
+      <Modal
+        visible={showDeleteModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowDeleteModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Eliminar perfil</Text>
+            <Text style={styles.subtitle}>¿Seguro que quieres eliminar este perfil?</Text>
+            <View style={styles.modalButtons}>
+              <TouchableOpacity
+                style={styles.cancelButton}
+                onPress={() => { setShowDeleteModal(false); setDeleteTargetId(null); }}
+              >
+                <Text style={styles.cancelButtonText}>Cancelar</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.createButton, deleting && styles.buttonDisabled]}
+                disabled={deleting}
+                onPress={async () => {
+                  if (deleteTargetId == null) return;
+                  setDeleting(true);
+                  try {
+                    await databaseService.deleteProfile(deleteTargetId);
+                    setShowDeleteModal(false);
+                    setDeleteTargetId(null);
+                    await loadProfiles();
+                    Alert.alert('Eliminado', 'El perfil fue eliminado correctamente');
+                  } catch (error) {
+                    const msg = (error as any)?.message || 'No se pudo eliminar el perfil';
+                    Alert.alert('Error', msg);
+                  } finally {
+                    setDeleting(false);
+                  }
+                }}
+              >
+                <Text style={styles.createButtonText}>{deleting ? 'Eliminando...' : 'Eliminar'}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={menuProfileId !== null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setMenuProfileId(null)}
+      >
+        <View style={styles.menuOverlay}>
+          <View style={styles.menuBox}>
+            <TouchableOpacity
+              style={styles.menuItemButton}
+              onPress={() => {
+                const p = profiles.find(x => x.id === menuProfileId) || null;
+                setMenuProfileId(null);
+                if (!p) return;
+                setEditProfile(p);
+                setEditName(p.name);
+                setEditImageUri(p.avatar_url || null);
+                setShowEditModal(true);
+              }}
+            >
+              <Text style={styles.menuItemText}>Editar perfil</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.menuItemButton, styles.menuItemDelete]}
+              onPress={() => {
+                const id = menuProfileId;
+                setMenuProfileId(null);
+                if (id != null) {
+                  setDeleteTargetId(id);
+                  setShowDeleteModal(true);
+                }
+              }}
+            >
+              <Text style={[styles.menuItemText, styles.menuItemDeleteText]}>Eliminar perfil</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.menuItemButton} onPress={() => setMenuProfileId(null)}>
+              <Text style={styles.menuItemText}>Cancelar</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={showEditModal}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowEditModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Editar perfil</Text>
+
+            <TextInput
+              style={styles.nameInput}
+              placeholder="Nombre del perfil"
+              placeholderTextColor="#666"
+              value={editName}
+              onChangeText={setEditName}
+              maxLength={20}
+            />
+
+            <Text style={styles.sectionTitle}>Foto de perfil:</Text>
+            <TouchableOpacity
+              style={styles.imagePickerContainer}
+              onPress={async () => {
+                if (Platform.OS === 'web') {
+                  if (editFileInputRef.current) editFileInputRef.current.click();
+                  return;
+                }
+                try {
+                  const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+                  if (status !== 'granted') return;
+                  const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'] as any, allowsEditing: true, aspect: [1,1], quality: 0.8 });
+                  if (result.canceled || !result.assets || result.assets.length === 0) return;
+                  setEditImageUri(result.assets[0].uri);
+                } catch {}
+              }}
+              disabled={editing}
+            >
+              {editImageUri ? (
+                <Image source={{ uri: editImageUri }} style={styles.previewImage} />
+              ) : (
+                <View style={styles.imagePickerPlaceholder}>
+                  <Ionicons name="camera" size={40} color="#666" />
+                  <Text style={styles.imagePickerText}>Toca para seleccionar imagen</Text>
+                </View>
+              )}
+            </TouchableOpacity>
+            {Platform.OS === 'web' && (
+              <input
+                ref={(el: HTMLInputElement) => { editFileInputRef.current = el; }}
+                type="file"
+                accept="image/*"
+                style={{ display: 'none' }}
+                onChange={async (event: any) => {
+                  const file = event.target?.files?.[0];
+                  if (!file) return;
+                  if (!file.type.startsWith('image/')) return;
+                  if (file.size > 5 * 1024 * 1024) return;
+                  const reader = new FileReader();
+                  reader.onload = (e) => setEditImageUri(e.target?.result as string);
+                  reader.readAsDataURL(file);
+                  if (editFileInputRef.current) editFileInputRef.current.value = '';
+                }}
+              />
+            )}
+
+            <View style={styles.modalButtons}>
+              <TouchableOpacity style={styles.cancelButton} onPress={() => setShowEditModal(false)}>
+                <Text style={styles.cancelButtonText}>Cancelar</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.createButton, editing && styles.buttonDisabled]}
+                onPress={async () => {
+                  if (!editProfile) return;
+                  setEditing(true);
+                  try {
+                    let avatarUrl = editProfile.avatar_url || '';
+                    if (editImageUri) {
+                      if (Platform.OS === 'web' && editImageUri.startsWith('data:')) {
+                        const response = await fetch(editImageUri);
+                        const blob = await response.blob();
+                        const file = new File([blob], 'avatar.jpg', { type: 'image/jpeg' });
+                        const uploadResult = await databaseService.uploadAvatar(file);
+                        avatarUrl = uploadResult.url;
+                      } else if (typeof editImageUri === 'string') {
+                        const uploadResult = await databaseService.uploadAvatar(editImageUri);
+                        avatarUrl = uploadResult.url;
+                      }
+                    }
+                    await databaseService.updateProfile(editProfile.id, { name: editName.trim() || editProfile.name, avatar_url: avatarUrl });
+                    setShowEditModal(false);
+                    setEditProfile(null);
+                    setEditImageUri(null);
+                    setEditName('');
+                    await loadProfiles();
+                    Alert.alert('Guardado', 'Perfil actualizado correctamente');
+                  } catch (error) {
+                    const msg = (error as any)?.message || 'No se pudo actualizar el perfil';
+                    Alert.alert('Error', msg);
+                  } finally {
+                    setEditing(false);
+                  }
+                }}
+                disabled={editing}
+              >
+                <Text style={styles.createButtonText}>{editing ? 'Guardando...' : 'Guardar'}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
       {/* Modal para crear nuevo perfil */}
       <Modal
@@ -548,6 +747,50 @@ const styles = StyleSheet.create({
   },
   avatarEmoji: {
     fontSize: 32,
+  },
+  menuBadge: {
+    position: 'absolute',
+    top: -6,
+    right: -6,
+    backgroundColor: '#444',
+    borderRadius: 12,
+    width: 24,
+    height: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: '#222',
+    zIndex: 10,
+  },
+  menuOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  menuBox: {
+    backgroundColor: '#1f1f1f',
+    borderRadius: 10,
+    padding: 16,
+    width: '90%',
+    maxWidth: 320,
+  },
+  menuItemButton: {
+    paddingVertical: 12,
+  },
+  menuItemText: {
+    color: '#fff',
+    fontSize: 16,
+    textAlign: 'center',
+  },
+  menuItemDelete: {
+    borderTopWidth: 1,
+    borderBottomWidth: 1,
+    borderColor: '#333',
+  },
+  menuItemDeleteText: {
+    color: '#e50914',
+    fontWeight: 'bold',
   },
   // Indicador de niños eliminado
   profileName: {

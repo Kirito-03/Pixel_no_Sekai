@@ -222,7 +222,33 @@ export const animeToContentItem = (anime: Anime): ContentItem => {
   const releaseYear = anime?.startDate?.year ?? null;
   // Detectar contenido adulto según géneros de AniList
   const genres = Array.isArray(anime?.genres) ? anime.genres : [];
-  const normalizedGenres = genres.map(g => (g || '').toString().toLowerCase());
+  const genreMap: Record<string, string> = {
+    'Action': 'Acción',
+    'Adventure': 'Aventura',
+    'Comedy': 'Comedia',
+    'Drama': 'Drama',
+    'Fantasy': 'Fantasía',
+    'Horror': 'Terror',
+    'Romance': 'Romance',
+    'Sci-Fi': 'Ciencia ficción',
+    'Slice of Life': 'Costumbrista',
+    'Sports': 'Deportes',
+    'Supernatural': 'Sobrenatural',
+    'Thriller': 'Thriller',
+    'Mystery': 'Misterio',
+    'Psychological': 'Psicológico',
+    'Mecha': 'Mecha',
+    'Music': 'Música',
+    'School': 'Escolar',
+    'Military': 'Militar',
+    'Historical': 'Histórico',
+    'Seinen': 'Seinen',
+    'Shounen': 'Shōnen',
+    'Shoujo': 'Shōjo',
+    'Josei': 'Josei'
+  };
+  const spanishGenres = genres.map(g => genreMap[g] || g);
+  const normalizedGenres = spanishGenres.map(g => (g || '').toString().toLowerCase());
   const isAdult = normalizedGenres.includes('hentai') || normalizedGenres.includes('ecchi');
 
   return {
@@ -235,7 +261,7 @@ export const animeToContentItem = (anime: Anime): ContentItem => {
     release_date: releaseYear ? String(releaseYear) : '',
     vote_average: AniListService.getAnimeScore(anime?.averageScore),
     source: 'anilist',
-    genres,
+    genres: spanishGenres,
     isAdult,
   };
 };

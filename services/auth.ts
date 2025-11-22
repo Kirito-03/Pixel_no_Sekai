@@ -1,5 +1,5 @@
 import { auth, db } from './firebase'
-import { onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, User, GoogleAuthProvider, signInWithPopup, signInWithCredential } from 'firebase/auth'
+import { onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, User, GoogleAuthProvider, signInWithPopup, signInWithCredential, sendPasswordResetEmail, sendEmailVerification } from 'firebase/auth'
 import { doc, getDoc, setDoc, serverTimestamp, collection, getDocs } from 'firebase/firestore'
 import * as AuthSession from 'expo-auth-session'
 import * as WebBrowser from 'expo-web-browser'
@@ -45,25 +45,15 @@ export const loginGoogle = async () => {
     await ensureUserProfile(cred.user)
     return cred
   }
-  const clientId = process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID as string
-  if (!clientId) throw new Error('GOOGLE_CLIENT_ID_MISSING')
-  // Intento 1: usar Proxy de Expo (más simple en desarrollo)
+  const expoClientId = (process.env.EXPO_PUBLIC_GOOGLE_EXPO_CLIENT_ID || process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID) as string
+  if (!expoClientId) throw new Error('GOOGLE_CLIENT_ID_MISSING')
   const proxyRedirect = (AuthSession.makeRedirectUri as any)({ useProxy: true })
-  console.log('Google OAuth proxy redirect URI:', proxyRedirect)
+  console.log('Google OAuth redirect URI', proxyRedirect)
   const buildAuthUrl = (redirect: string) =>
-    `https://accounts.google.com/o/oauth2/v2/auth?client_id=${encodeURIComponent(clientId)}&response_type=id_token&scope=${encodeURIComponent('openid email profile')}&redirect_uri=${encodeURIComponent(redirect)}&nonce=${Date.now()}`
+    `https://accounts.google.com/o/oauth2/v2/auth?client_id=${encodeURIComponent(expoClientId)}&response_type=id_token&scope=${encodeURIComponent('openid email profile')}&redirect_uri=${encodeURIComponent(redirect)}&prompt=consent&nonce=${Date.now()}`
 
-  let result: any = await WebBrowser.openAuthSessionAsync(buildAuthUrl(proxyRedirect), proxyRedirect)
-  let url: string = (result && result.url) ? result.url : ''
-
-  // Fallback: usar esquema nativo si el proxy no funciona en bare/dev-client
-  if (result.type !== 'success' || !url.includes('id_token=')) {
-    const nativeRedirect = (AuthSession.makeRedirectUri as any)({ scheme: 'netflixapp' })
-    console.log('Google OAuth native redirect URI:', nativeRedirect)
-    result = await WebBrowser.openAuthSessionAsync(buildAuthUrl(nativeRedirect), nativeRedirect)
-    url = (result && result.url) ? result.url : ''
-  }
-
+  const result: any = await WebBrowser.openAuthSessionAsync(buildAuthUrl(proxyRedirect), proxyRedirect)
+  const url: string = (result && result.url) ? result.url : ''
   if (result.type !== 'success' || !url) throw new Error('GOOGLE_AUTH_CANCELED')
   const match = url.match(/id_token=([^&]+)/)
   const idToken = match ? decodeURIComponent(match[1]) : ''
@@ -76,3 +66,14 @@ export const loginGoogle = async () => {
 }
 
 export const logout = () => signOut(auth)
+
+export const requestPasswordReset = async (email: string) => {
+  await sendPasswordResetEmail(auth, email)
+  return { ok: true }
+}
+
+export const requestEmailVerification = async () => {
+  if (!auth.currentUser) throw new Error('No user logged in')
+  await sendEmailVerification(auth.currentUser)
+  return { ok: true }
+}

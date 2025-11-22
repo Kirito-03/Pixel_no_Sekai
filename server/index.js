@@ -197,6 +197,40 @@ app.get('/health/db', async (req, res) => {
   }
 });
 
+app.post('/proxy/translate', async (req, res) => {
+  const { q, target, source, format } = req.body || {};
+  if (!q || !target) return res.status(400).json({ message: 'q y target requeridos' });
+  const provider = (process.env.TRANSLATE_PROVIDER || 'libre').toLowerCase();
+  try {
+    if (provider === 'libre') {
+      const { data } = await axios.post('https://libretranslate.com/translate', {
+        q,
+        source: source || 'auto',
+        target,
+        format: format || 'text'
+      }, {
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' }
+      });
+      return res.json({ translatedText: data?.translatedText || '' });
+    }
+    if (provider === 'deepl') {
+      const key = process.env.DEEPL_API_KEY;
+      if (!key) return res.status(500).json({ message: 'DEEPL_API_KEY faltante' });
+      const params = new URLSearchParams();
+      params.set('auth_key', key);
+      params.set('text', q);
+      params.set('target_lang', String(target || 'es').toUpperCase());
+      if (source) params.set('source_lang', String(source).toUpperCase());
+      const { data } = await axios.post('https://api.deepl.com/v2/translate', params);
+      const text = data?.translations?.[0]?.text || '';
+      return res.json({ translatedText: text });
+    }
+    return res.status(400).json({ message: 'Proveedor no soportado' });
+  } catch (e) {
+    return res.status(500).json({ message: 'Error de traducción', error: e.message });
+  }
+});
+
 // Auth: register
 app.post('/auth/register', async (req, res) => {
   const { email, password } = req.body || {};
@@ -816,5 +850,16 @@ app.post('/transcode/hls', async (req, res) => {
     return res.json({ ok: true, id, playlist_url: playlistUrl });
   } catch (e) {
     return res.status(500).json({ message: 'Error transcodificando', error: e.message });
+  }
+});
+
+app.post('/proxy/anilist', async (req, res) => {
+  try {
+    const { data } = await axios.post('https://graphql.anilist.co', req.body, {
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' }
+    });
+    res.json(data);
+  } catch (e) {
+    res.status(500).json({ message: 'Error proxy AniList', error: e.message });
   }
 });

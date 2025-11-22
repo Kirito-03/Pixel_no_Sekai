@@ -4,6 +4,30 @@ import { getCurrentBaseURL } from './databaseService';
 
 const ANILIST_API_URL = 'https://graphql.anilist.co';
 
+const stripHtml = (html?: string) => html ? html.replace(/<[^>]*>/g, '') : '';
+const translationCache: Map<string, string> = new Map();
+const translateText = async (text: string, target: string = 'es'): Promise<string> => {
+  const sourceText = stripHtml(text || '').trim();
+  if (!sourceText) return '';
+  const cached = translationCache.get(sourceText);
+  if (cached) return cached;
+  const useProxy = Platform.OS === 'web';
+  const url = useProxy ? `${getCurrentBaseURL()}/proxy/translate` : 'https://libretranslate.com/translate';
+  const body = { q: sourceText, source: 'auto', target, format: 'text' };
+  try {
+    const response = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' }, body: JSON.stringify(body) });
+    if (!response.ok) {
+      return sourceText;
+    }
+    const data = await response.json();
+    const translated = data?.translatedText || sourceText;
+    translationCache.set(sourceText, translated);
+    return translated;
+  } catch {
+    return sourceText;
+  }
+};
+
 // Limitar tasa de peticiones para evitar 429 y añadir reintentos con backoff
 const REQUEST_INTERVAL_MS = 350; // mínimo ~3 peticiones/segundo
 let lastRequestTimestamp = 0;
@@ -337,19 +361,31 @@ const normalizeAnimeDetail = (anime: any): AnimeDetail => ({
 // Obtener anime populares
 export const getPopularAnime = async (page: number = 1, perPage: number = 12): Promise<Anime[]> => {
   const data = await graphqlRequest(POPULAR_ANIME_QUERY, { page, perPage });
-  return data.Page.media.map(normalizeAnime);
+  const items: Anime[] = data.Page.media.map(normalizeAnime);
+  await Promise.all(items.map(async a => {
+    a.description = await translateText(a.description || '', 'es');
+  }));
+  return items;
 };
 
 // Obtener anime mejor puntuados
 export const getTopRatedAnime = async (page: number = 1, perPage: number = 12): Promise<Anime[]> => {
   const data = await graphqlRequest(TOP_RATED_ANIME_QUERY, { page, perPage });
-  return data.Page.media.map(normalizeAnime);
+  const items: Anime[] = data.Page.media.map(normalizeAnime);
+  await Promise.all(items.map(async a => {
+    a.description = await translateText(a.description || '', 'es');
+  }));
+  return items;
 };
 
 // Obtener anime en emisión
 export const getAiringAnime = async (page: number = 1, perPage: number = 12): Promise<Anime[]> => {
   const data = await graphqlRequest(AIRING_ANIME_QUERY, { page, perPage });
-  return data.Page.media.map(normalizeAnime);
+  const items: Anime[] = data.Page.media.map(normalizeAnime);
+  await Promise.all(items.map(async a => {
+    a.description = await translateText(a.description || '', 'es');
+  }));
+  return items;
 };
 
 // Obtener detalles de un anime
@@ -364,6 +400,7 @@ export const getAnimeDetails = async (id: number): Promise<AnimeDetail> => {
 
   const data = await graphqlRequest(ANIME_DETAILS_QUERY, { id });
   const normalized = normalizeAnimeDetail(data.Media);
+  normalized.description = await translateText(normalized.description || '', 'es');
   cache.set(id, normalized);
   return normalized;
 };
@@ -371,13 +408,21 @@ export const getAnimeDetails = async (id: number): Promise<AnimeDetail> => {
 // Buscar anime
 export const searchAnime = async (query: string, page: number = 1, perPage: number = 10): Promise<Anime[]> => {
   const data = await graphqlRequest(SEARCH_ANIME_QUERY, { search: query, page, perPage });
-  return data.Page.media.map(normalizeAnime);
+  const items: Anime[] = data.Page.media.map(normalizeAnime);
+  await Promise.all(items.map(async a => {
+    a.description = await translateText(a.description || '', 'es');
+  }));
+  return items;
 };
 
 // Obtener anime por género
 export const getAnimeByGenre = async (genre: string, page: number = 1, perPage: number = 20): Promise<Anime[]> => {
   const data = await graphqlRequest(ANIME_BY_GENRE_QUERY, { genre, page, perPage });
-  return data.Page.media.map(normalizeAnime);
+  const items: Anime[] = data.Page.media.map(normalizeAnime);
+  await Promise.all(items.map(async a => {
+    a.description = await translateText(a.description || '', 'es');
+  }));
+  return items;
 };
 
 // Obtener anime similares (usando recomendaciones)
@@ -420,7 +465,7 @@ export const getAnimeImageUrl = (imageUrl: string): string => {
 
 // Función auxiliar para obtener título preferido
 export const getAnimeTitle = (titleObj: { romaji: string; english?: string; native: string }): string => {
-  return titleObj.english || titleObj.romaji || titleObj.native;
+  return titleObj.romaji || titleObj.native || titleObj.english || '';
 };
 
 // Función auxiliar para obtener año de lanzamiento
