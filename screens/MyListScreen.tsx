@@ -76,14 +76,8 @@ export default function MyListScreen({ navigation }: Props) {
           if (typeRaw === 'movie' || typeRaw === 'tv' || typeRaw === 'anime') {
             type = typeRaw as 'movie' | 'tv' | 'anime';
           } else {
-            // Fallback de inferencia: si el backend devuelve tipo vacío, verificamos el estado global
-            if (myListItems?.has(`anime:${item.content_id}`)) {
-              type = 'anime';
-              console.warn(`⚠️ MyListScreen: content_type vacío para ID ${item.content_id}. Inferido como 'anime' basado en myListItems.`);
-            } else {
-              type = 'movie';
-              console.warn(`⚠️ MyListScreen: content_type inválido ('${typeRaw}') para ID ${item.content_id}. Usando fallback 'movie'.`);
-            }
+            type = 'movie';
+            console.warn(`⚠️ MyListScreen: content_type inválido ('${typeRaw}') para ID ${item.content_id}. Usando fallback 'movie'.`);
           }
           const source = type === 'anime' ? 'anilist' : 'tmdb';
           

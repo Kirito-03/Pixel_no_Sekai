@@ -18,6 +18,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import databaseService from '../services/databaseService';
+import { loginGoogle, registerEmail, loginEmail } from '../services/auth';
 import { DYNAMIC_NETWORK_CONFIG } from '../utils/networkUtils';
 
 interface RegisterScreenProps {
@@ -113,7 +114,7 @@ const RegisterScreen: React.FC<RegisterScreenProps> = ({ navigation }) => {
       }
 
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        mediaTypes: ['images'] as any,
         allowsEditing: true,
         aspect: [1, 1],
         quality: 0.8,
@@ -170,43 +171,19 @@ const RegisterScreen: React.FC<RegisterScreenProps> = ({ navigation }) => {
     }
   };
 
-  const testConnection = async () => {
-    try {
-      const response = await fetch(DYNAMIC_NETWORK_CONFIG.getHealthURL());
-      const data = await response.json();
-  console.log('Conexión exitosa:', data);
-      return true;
-    } catch (error) {
-  console.error('Error de conexión:', error);
-      return false;
-    }
-  };
+  const testConnection = async () => true;
 
   const handleRegister = async () => {
     if (!validateProfile()) return;
 
     setLoading(true);
     
-    // Probar conexión antes del registro
-    const isConnected = await testConnection();
-    if (!isConnected) {
-      Alert.alert(
-        'Error de Conexión',
-        `No se puede conectar al servidor.\n\nURL: ${DYNAMIC_NETWORK_CONFIG.getBaseURL()}\n\nVerifica que el servidor esté ejecutándose.`,
-        [{ text: 'OK' }]
-      );
-      setLoading(false);
-      return;
-    }
+    // Registro sin backend: usamos Firebase directamente
 
     try {
       // Registrar el usuario
-      const registerResult = await databaseService.register(email.trim().toLowerCase(), password);
-  console.log('Usuario registrado:', registerResult);
-      
-      // Iniciar sesión automáticamente
-      const loginResult = await databaseService.login(email.trim().toLowerCase(), password);
-  console.log('Login automático exitoso:', loginResult);
+      const cred = await registerEmail(email.trim().toLowerCase(), password);
+  console.log('Usuario registrado (Firebase):', cred.user?.uid);
       
       // Subir la imagen del perfil primero
       setUploadingImage(true);
@@ -235,14 +212,14 @@ const RegisterScreen: React.FC<RegisterScreenProps> = ({ navigation }) => {
       
       // Crear un perfil automáticamente con el nombre y avatar proporcionado
       const profileResult = await databaseService.createProfile({
-        usuario_id: loginResult.id,
+        usuario_id: 0,
         name: profileName.trim() || 'Mi Perfil',
         avatar_url: avatarUrl,
       });
   console.log('Perfil creado:', profileResult);
       
       // Obtener el perfil creado para pasarlo a la pantalla principal
-      const profiles = await databaseService.getProfiles(loginResult.id);
+      const profiles = await databaseService.getProfiles(0);
       const createdProfile = profiles.find((p: any) => p.id === profileResult.id);
       
       if (createdProfile) {
@@ -254,7 +231,6 @@ const RegisterScreen: React.FC<RegisterScreenProps> = ({ navigation }) => {
               name: 'Main',
               params: {
                 selectedProfile: createdProfile,
-                userId: loginResult.id,
               },
             },
           ],
@@ -264,10 +240,7 @@ const RegisterScreen: React.FC<RegisterScreenProps> = ({ navigation }) => {
         navigation.reset({
           index: 0,
           routes: [
-            {
-              name: 'ProfileSelection',
-              params: { userId: loginResult.id },
-            },
+            { name: 'ProfileSelection' },
           ],
         });
       }
@@ -280,86 +253,25 @@ const RegisterScreen: React.FC<RegisterScreenProps> = ({ navigation }) => {
       let title = 'Error';
       let body = 'No se pudo crear tu cuenta. Intenta de nuevo.';
 
-      if (status === 409 || message?.includes('Email ya registrado')) {
-        // Flujo: ofrecer restablecer contraseña directamente desde aquí
-        try {
-          const fp = await databaseService.forgotPassword(email.trim().toLowerCase());
-          Alert.alert(
-            'Email en uso',
-            'Este email ya está registrado. ¿Quieres restablecer la contraseña ahora usando la que ingresaste?',
-            [
-              { text: 'Cancelar', style: 'cancel' },
-              {
-                text: 'Restablecer',
-                onPress: async () => {
-                  try {
-                    setLoading(true);
-                    // Aplicar reset con el token dev
-                    await databaseService.resetPassword(email.trim().toLowerCase(), fp.token, password);
-                    // Continuar con login y creación de perfil como en registro
-                    const loginResult = await databaseService.login(email.trim().toLowerCase(), password);
-                    setUploadingImage(true);
-                    let avatarUrl: string;
-                    if (!selectedImageUri) {
-                      throw new Error('Debes seleccionar una foto de perfil');
-                    }
-                    if (Platform.OS === 'web' && selectedImageUri.startsWith('data:')) {
-                      const response = await fetch(selectedImageUri);
-                      const blob = await response.blob();
-                      const file = new File([blob], 'avatar.jpg', { type: 'image/jpeg' });
-                      const uploadResult = await databaseService.uploadAvatar(file);
-                      avatarUrl = uploadResult.url;
-                    } else if (typeof selectedImageUri === 'string') {
-                      const uploadResult = await databaseService.uploadAvatar(selectedImageUri);
-                      avatarUrl = uploadResult.url;
-                    } else {
-                      throw new Error('Tipo de imagen no soportado');
-                    }
-                    setUploadingImage(false);
-                    const profileResult = await databaseService.createProfile({
-                      usuario_id: loginResult.id,
-                      name: profileName.trim() || 'Mi Perfil',
-                      avatar_url: avatarUrl,
-                    });
-                    const profiles = await databaseService.getProfiles(loginResult.id);
-                    const createdProfile = profiles.find((p: any) => p.id === profileResult.id);
-                    if (createdProfile) {
-                      navigation.reset({
-                        index: 0,
-                        routes: [
-                          { name: 'Main', params: { selectedProfile: createdProfile, userId: loginResult.id } },
-                        ],
-                      });
-                    } else {
-                      navigation.reset({ index: 0, routes: [ { name: 'ProfileSelection', params: { userId: loginResult.id } } ] });
-                    }
-                  } catch (e: any) {
-                    const msg = e?.response?.data?.message || e?.message || 'No se pudo restablecer la contraseña';
-                    Alert.alert('Error', msg);
-                  } finally {
-                    setLoading(false);
-                  }
-                }
-              }
-            ]
-          );
-        } catch (fpErr: any) {
-          const fpStatus = fpErr?.response?.status;
-          if (fpStatus === 404) {
-            title = 'Usuario no encontrado';
-            body = 'No existe una cuenta con ese email. Intenta con otro email.';
-          } else {
-            title = 'Error';
-            body = 'No se pudo iniciar el proceso de recuperación.';
-          }
-        }
-      } else if (error.message?.includes('Network request failed')) {
-        title = 'Sin conexión';
-        body = `Error de conexión.\n\nURL: ${DYNAMIC_NETWORK_CONFIG.getBaseURL()}\n\nVerifica que el servidor esté ejecutándose.`;
+      if (error?.code === 'auth/email-already-in-use') {
+        title = 'Email en uso';
+        body = 'Este email ya está registrado. Inicia sesión o usa otro email.';
       }
       if (title && body) {
         Alert.alert(title, body, [{ text: 'OK' }]);
       }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleLoginGoogle = async () => {
+    try {
+      setLoading(true);
+      const cred = await loginGoogle();
+      navigation.reset({ index: 0, routes: [ { name: 'Main' } ] });
+    } catch (e: any) {
+      Alert.alert('Error', e?.message || 'No se pudo continuar con Google');
     } finally {
       setLoading(false);
     }
@@ -464,6 +376,10 @@ const RegisterScreen: React.FC<RegisterScreenProps> = ({ navigation }) => {
         disabled={loading}
       >
         <Text style={styles.nextButtonText}>Siguiente</Text>
+      </TouchableOpacity>
+      <TouchableOpacity style={styles.googleButton} onPress={handleLoginGoogle} disabled={loading}>
+        <Ionicons name="logo-google" size={20} color="#000" style={{ marginRight: 8 }} />
+        <Text style={styles.googleButtonText}>Continuar con Google</Text>
       </TouchableOpacity>
     </View>
   );
@@ -746,6 +662,20 @@ const styles = StyleSheet.create({
   nextButtonText: {
     color: '#FFFFFF',
     fontSize: 16,
+    fontWeight: 'bold',
+  },
+  googleButton: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 4,
+    padding: 16,
+    alignItems: 'center',
+    marginTop: 12,
+    flexDirection: 'row',
+    justifyContent: 'center',
+  },
+  googleButtonText: {
+    color: '#000000',
+    fontSize: 14,
     fontWeight: 'bold',
   },
   buttonContainer: {

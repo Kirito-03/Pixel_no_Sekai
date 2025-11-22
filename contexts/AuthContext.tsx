@@ -1,10 +1,10 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import databaseService from '../services/databaseService';
+import { subscribeAuth } from '../services/auth';
 
 interface User {
-  id: number;
-  email: string;
+  uid: string;
+  email: string | null;
 }
 
 interface AuthContextType {
@@ -28,32 +28,22 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const loadSession = async () => {
     try {
       console.log('AuthContext: Loading session...');
-      const userData = await AsyncStorage.getItem('userSession');
-      console.log('AuthContext: User data from storage:', userData);
-      if (userData) {
-        const parsedUser = JSON.parse(userData);
-        console.log('AuthContext: Parsed user:', parsedUser);
-        // Validar contra backend para evitar sesiones fantasma
-        try {
-          const valid = await databaseService.validateUser(parsedUser.id);
-          if (valid) {
-            console.log('AuthContext: Server validated user session');
-            setUser(parsedUser);
-          } else {
-            console.warn('AuthContext: Stored session user no longer exists. Clearing session.');
-            await AsyncStorage.removeItem('userSession');
-            await AsyncStorage.removeItem('currentProfile');
-            setUser(null);
-          }
-        } catch (validationError) {
-          console.error('AuthContext: Error validating session with server:', validationError);
-          // En caso de error 404 ya se maneja como null arriba
-          // Para otros errores de red, mantener comportamiento previo (no bloquear el uso offline)
-          setUser(parsedUser);
-        }
-      } else {
-        console.log('AuthContext: No session found in storage');
+      const stored = await AsyncStorage.getItem('userSession');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        setUser(parsed);
       }
+      subscribeAuth(async (firebaseUser) => {
+        if (firebaseUser) {
+          const u: User = { uid: firebaseUser.uid, email: firebaseUser.email };
+          setUser(u);
+          await AsyncStorage.setItem('userSession', JSON.stringify(u));
+        } else {
+          setUser(null);
+          await AsyncStorage.removeItem('userSession');
+          await AsyncStorage.removeItem('currentProfile');
+        }
+      });
     } catch (error) {
       console.error('Error loading session:', error);
     } finally {
@@ -62,10 +52,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   };
 
   const login = async (userData: User) => {
-    console.log('AuthContext: Logging in user:', userData);
     setUser(userData);
     await AsyncStorage.setItem('userSession', JSON.stringify(userData));
-    console.log('AuthContext: Session saved to AsyncStorage');
   };
 
   const logout = async () => {

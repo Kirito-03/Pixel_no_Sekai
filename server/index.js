@@ -2,12 +2,13 @@ import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import mysql from 'mysql2/promise';
-import { readFileSync, mkdirSync } from 'fs';
+import { readFileSync, mkdirSync, existsSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import multer from 'multer';
 import crypto from 'crypto';
 import axios from 'axios';
+import { spawn } from 'child_process';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -69,6 +70,19 @@ app.use(express.urlencoded({ extended: true }));
 
 // SERVIR ESTÁTICAMENTE LA CARPETA videos
 app.use('/videos', express.static(join(__dirname, 'videos')));
+app.use('/hls', express.static(join(__dirname, 'hls'), {
+  setHeaders: (res, filePath) => {
+    if (filePath.endsWith('.m3u8')) {
+      res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
+      res.setHeader('Cache-Control', 'no-store');
+    } else if (filePath.endsWith('.ts')) {
+      res.setHeader('Content-Type', 'video/mp2t');
+      res.setHeader('Cache-Control', 'public, max-age=86400');
+    } else if (filePath.endsWith('.m4s')) {
+      res.setHeader('Cache-Control', 'public, max-age=86400');
+    }
+  }
+}));
 // SERVIR ESTÁTICAMENTE LA CARPETA uploads
 app.use('/uploads', express.static(join(__dirname, 'uploads')));
 
@@ -720,13 +734,13 @@ app.post('/proxy/anilist', async (req, res) => {
   }
 });
 
-// Videos: serve M3U file
-app.get('/videos/animes madre.m3u', (req, res) => {
+// Videos: serve M3U file (updated filename)
+app.get('/videos/animes_madre.m3u', (req, res) => {
   try {
-    const m3uPath = join(__dirname, 'videos', 'animes madre.m3u');
+    const m3uPath = join(__dirname, 'videos', 'animes_madre.m3u');
     const content = readFileSync(m3uPath, 'utf-8');
     res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
-    res.setHeader('Content-Disposition', 'inline; filename="animes madre.m3u"');
+    res.setHeader('Content-Disposition', 'inline; filename="animes_madre.m3u"');
     res.send(content);
   } catch (e) {
     res.status(500).json({ message: 'Error al obtener archivo M3U', error: e.message });
@@ -752,5 +766,55 @@ app.get('/users/:id', async (req, res) => {
     res.json(rows[0]);
   } catch (e) {
     res.status(500).json({ message: 'Error al obtener usuario', error: e.message });
+  }
+});
+
+app.post('/transcode/hls', async (req, res) => {
+  try {
+    const src = (req.body && req.body.src) || (req.query && req.query.src) || '';
+    if (!src) return res.status(400).json({ message: 'src requerido' });
+    const id = crypto.createHash('md5').update(src).digest('hex');
+    const outDir = join(__dirname, 'hls', id);
+    try { mkdirSync(outDir, { recursive: true }); } catch {}
+    const playlistPath = join(outDir, 'index.m3u8');
+    if (existsSync(playlistPath)) {
+      const base = `${req.protocol}://${req.get('host')}`;
+      const playlistUrl = `${base}/hls/${id}/index.m3u8`;
+      return res.json({ ok: true, id, playlist_url: playlistUrl });
+    }
+    const segmentPattern = join(outDir, 'segment%03d.ts');
+    const isMp4 = /\.mp4(\?|$)/i.test(src);
+    const ffArgs = [
+      '-loglevel', 'error',
+      '-y',
+      '-i', src,
+      ...(isMp4 ? ['-c:v','copy','-c:a','copy'] : ['-c:v','libx264','-preset','veryfast','-c:a','aac','-b:a','128k']),
+      '-f', 'hls',
+      '-hls_time', '6',
+      '-hls_list_size', '0',
+      '-hls_playlist_type', 'vod',
+      '-hls_segment_filename', segmentPattern,
+      playlistPath,
+    ];
+    const ff = spawn(process.env.FFMPEG_PATH || 'ffmpeg', ffArgs, { stdio: ['ignore','ignore','pipe'] });
+    let errBuf = '';
+    ff.stderr.on('data', (d) => { try { errBuf += d.toString(); } catch {} });
+    let exitCode = null;
+    ff.on('close', (code) => { exitCode = code; });
+    let attempts = 0;
+    const maxAttempts = 100;
+    const wait = () => new Promise(r => setTimeout(r, 300));
+    while (!existsSync(playlistPath) && attempts < maxAttempts) {
+      await wait();
+      attempts++;
+    }
+    if (!existsSync(playlistPath)) {
+      return res.status(500).json({ message: 'No se pudo crear playlist HLS', error: errBuf.slice(-4000), code: exitCode });
+    }
+    const base = `${req.protocol}://${req.get('host')}`;
+    const playlistUrl = `${base}/hls/${id}/index.m3u8`;
+    return res.json({ ok: true, id, playlist_url: playlistUrl });
+  } catch (e) {
+    return res.status(500).json({ message: 'Error transcodificando', error: e.message });
   }
 });

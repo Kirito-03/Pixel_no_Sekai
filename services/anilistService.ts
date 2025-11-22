@@ -20,8 +20,8 @@ const waitForSlot = async () => {
 
 // Función auxiliar para hacer consultas GraphQL
 const graphqlRequest = async (query: string, variables: any = {}) => {
-  // En web, usar el backend como proxy para evitar CORS
-  const url = Platform.OS === 'web' ? `${getCurrentBaseURL()}/proxy/anilist` : ANILIST_API_URL;
+  const useProxy = Platform.OS === 'web';
+  let url = useProxy ? `${getCurrentBaseURL()}/proxy/anilist` : ANILIST_API_URL;
   // Reintentos con backoff exponencial en caso de 429 u otros errores transitorios
   const maxAttempts = 3;
   let attempt = 0;
@@ -64,6 +64,9 @@ const graphqlRequest = async (query: string, variables: any = {}) => {
       return data?.data ?? data;
     } catch (err: any) {
       lastError = err;
+      if (useProxy) {
+        url = ANILIST_API_URL;
+      }
       // Backoff exponencial con jitter para otros errores transitorios
       const baseDelay = 400 * attempt;
       const jitter = Math.floor(Math.random() * 200);

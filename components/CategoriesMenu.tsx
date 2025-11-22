@@ -9,18 +9,12 @@ interface CategoriesMenuProps {
   currentCategoryId?: string;
 }
 
-// Categorías con contenido disponible (sincronizadas con ENHANCED_CATEGORIES)
 const categories = [
   { id: 'inicio', label: 'Inicio' },
   { id: 'mi-lista', label: 'Mi lista' },
-  { id: 'popular_all', label: 'Popular Ahora' },
-  { id: 'top_rated_all', label: 'Mejor Valorado' },
-  { id: 'current_all', label: 'En Emisión/Cartelera' },
   { id: 'popular_anime', label: 'Anime Popular' },
   { id: 'airing_anime', label: 'Anime en Emisión' },
   { id: 'top_anime', label: 'Mejor Anime' },
-  { id: 'popular_movies', label: 'Películas Populares' },
-  { id: 'popular_tv', label: 'Series Populares' },
 ];
 
 export default function CategoriesMenu({ visible, onClose, onSelectCategory, currentCategoryId }: CategoriesMenuProps) {

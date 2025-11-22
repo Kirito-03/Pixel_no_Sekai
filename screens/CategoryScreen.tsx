@@ -21,6 +21,8 @@ import {
   getTVShowsByGenre,
   GENRES
 } from '../services/api';
+import * as AniListService from '../services/anilistService';
+import { animeToContentItem } from '../services/api';
 
 type RootStackParamList = {
   Category: { categoryId: string; categoryName: string };
@@ -65,6 +67,8 @@ export default function CategoryScreen({ navigation, route }: Props) {
   const [selectedContent, setSelectedContent] = useState<ContentItem | null>(null);
   const [modalVisible, setModalVisible] = useState(false);
   const [showCategoriesMenu, setShowCategoriesMenu] = useState(false);
+  const isAnimeCategory = categoryId === 'popular_anime' || categoryId === 'airing_anime' || categoryId === 'top_anime';
+  const [animeItems, setAnimeItems] = useState<ContentItem[]>([]);
 
   useEffect(() => {
     loadCategoryContent();
@@ -73,6 +77,21 @@ export default function CategoryScreen({ navigation, route }: Props) {
   const loadCategoryContent = async () => {
     try {
       setLoading(true);
+      if (isAnimeCategory) {
+        let list: ContentItem[] = [];
+        if (categoryId === 'popular_anime') {
+          const res = await AniListService.getPopularAnime();
+          list = res.map(animeToContentItem);
+        } else if (categoryId === 'airing_anime') {
+          const res = await AniListService.getAiringAnime();
+          list = res.map(animeToContentItem);
+        } else if (categoryId === 'top_anime') {
+          const res = await AniListService.getTopRatedAnime();
+          list = res.map(animeToContentItem);
+        }
+        setAnimeItems(list);
+        return;
+      }
       const categoryConfig = categoryToGenreMap[categoryId];
 
       if (!categoryConfig) {
@@ -223,8 +242,21 @@ export default function CategoryScreen({ navigation, route }: Props) {
         style={styles.scrollView}
         showsVerticalScrollIndicator={false}
       >
+        {isAnimeCategory && animeItems.length > 0 && (
+          <MovieRow
+            title={categoryName}
+            movies={animeItems.filter((item: any) => adultContentEnabled || !item.isAdult)}
+            onMoviePress={(id) => {
+              const item = animeItems.find((m: any) => m.id === id);
+              if (item) {
+                setSelectedContent(item);
+                setModalVisible(true);
+              }
+            }}
+          />
+        )}
         {/* Películas principales */}
-        {content.movies.length > 0 && (
+        {!isAnimeCategory && content.movies.length > 0 && (
           <MovieRow
             title={`${categoryName} - Películas`}
             movies={content.movies.filter((item: any) => adultContentEnabled || !item.isAdult)}
@@ -236,7 +268,7 @@ export default function CategoryScreen({ navigation, route }: Props) {
         )}
 
         {/* Series */}
-        {content.tvShows.length > 0 && (
+        {!isAnimeCategory && content.tvShows.length > 0 && (
           <MovieRow
             title={`${categoryName} - Series`}
             movies={content.tvShows.filter((item: any) => adultContentEnabled || !item.isAdult)}
@@ -248,7 +280,7 @@ export default function CategoryScreen({ navigation, route }: Props) {
         )}
 
         {/* Mejor valoradas */}
-        {content.topRated.length > 0 && (
+        {!isAnimeCategory && content.topRated.length > 0 && (
           <MovieRow
             title="Mejor Valoradas"
             movies={content.topRated.filter((item: any) => adultContentEnabled || !item.isAdult)}
@@ -260,7 +292,7 @@ export default function CategoryScreen({ navigation, route }: Props) {
         )}
 
         {/* Series mejor valoradas */}
-        {content.topRatedTV.length > 0 && (
+        {!isAnimeCategory && content.topRatedTV.length > 0 && (
           <MovieRow
             title="Series Mejor Valoradas"
             movies={content.topRatedTV.filter((item: any) => adultContentEnabled || !item.isAdult)}

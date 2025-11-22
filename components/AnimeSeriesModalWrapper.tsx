@@ -81,6 +81,7 @@ export default function AnimeSeriesModalWrapper({
           <EpisodePlayer
             episode={selectedEpisode}
             animeTitle={getTitle()}
+            seasonNumber={selectedSeason.season}
             onClose={handleCloseEpisodePlayer}
             onNextEpisode={handleNextEpisode}
             onPreviousEpisode={handlePreviousEpisode}

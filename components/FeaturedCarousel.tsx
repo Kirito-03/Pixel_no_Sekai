@@ -1,12 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { View, FlatList, StyleSheet, useWindowDimensions } from 'react-native';
 import FeaturedMovie from './FeaturedMovie';
-import { MovieDetail } from '../types';
+import { MovieDetail, AnimeDetail } from '../types';
 import { colors } from '../theme';
 
 interface Props {
-  movies: MovieDetail[];
-  onWatch: (movie: MovieDetail) => void;
+  movies: (MovieDetail | AnimeDetail)[];
+  onWatch: (movie: MovieDetail | AnimeDetail) => void;
 }
 
 /**
@@ -17,7 +17,7 @@ interface Props {
  */
 export default function FeaturedCarousel({ movies, onWatch }: Props) {
   const { width } = useWindowDimensions();
-  const listRef = useRef<FlatList<MovieDetail>>(null);
+  const listRef = useRef<FlatList<MovieDetail | AnimeDetail>>(null);
   const [currentIndex, setCurrentIndex] = useState(0);
 
   // Autoplay: avanza cada 6s si hay más de 1 película

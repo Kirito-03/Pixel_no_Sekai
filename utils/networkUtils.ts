@@ -34,6 +34,8 @@ const deriveLanURLFromExpo = (): string => {
 const BASE_CANDIDATES: string[] = [
   // Local en web/iOS simulador
   'http://localhost:3001',
+  // Loopback explícito
+  'http://127.0.0.1:3001',
   // Emulador Android accede al host con 10.0.2.2
   Platform.OS === 'android' ? 'http://10.0.2.2:3001' : '',
   // Intento de LAN usando datos de Expo (útil para dispositivo físico en la misma red)
@@ -46,7 +48,10 @@ const BASE_CANDIDATES: string[] = [
  * Almacenamiento dinámico para la URL base actual.
  * Se inicializa con una URL por defecto y se puede actualizar dinámicamente.
  */
-let currentBaseURL: string = BASE_CANDIDATES[0];
+let currentBaseURL: string = (() => {
+  const envBase = (process.env.EXPO_PUBLIC_SERVER_BASE_URL || '').trim();
+  return envBase || BASE_CANDIDATES[0];
+})();
 
 /**
  * Devuelve las URLs candidatas para que otros módulos puedan probar la conexión.
@@ -98,8 +103,11 @@ export const DYNAMIC_NETWORK_CONFIG = {
    */
   initialize: async (): Promise<void> => {
     const savedURL = await loadNetworkConfig();
+    const envBase = (process.env.EXPO_PUBLIC_SERVER_BASE_URL || '').trim();
     if (savedURL) {
       currentBaseURL = savedURL;
+    } else if (envBase) {
+      currentBaseURL = envBase;
     }
   },
 };

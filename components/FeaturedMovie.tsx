@@ -2,17 +2,16 @@ import React, { useState } from 'react';
 import { View, Image, Text, TouchableOpacity, StyleSheet, useWindowDimensions, Alert } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import { MovieDetail } from '../types';
+import { MovieDetail, AnimeDetail } from '../types';
 import { getImageUrl } from '../services/api';
+import { getAnimeImageUrl, getAnimeTitle, getAnimeYear, getAnimeScore } from '../services/anilistService';
 import { colors, spacing } from '../theme';
 import { useProfile } from '../contexts/ProfileContext';
 import { useMyList } from '../contexts/MyListContext';
 
 interface Props {
-  movie: MovieDetail;
+  movie: MovieDetail | AnimeDetail;
   onWatch: () => void;
-  // Mantener compatibilidad: si el padre pasa un handler, lo usamos;
-  // en caso contrario, usamos el contexto para toggle.
   onAddList?: () => void;
 }
 
@@ -23,10 +22,11 @@ export default function FeaturedMovie({ movie, onWatch, onAddList }: Props) {
   const { isInMyList, toggleMyList, addToMyList } = useMyList();
   const [isToggling, setIsToggling] = useState(false);
 
-  const releaseYear = movie.release_date ? new Date(movie.release_date).getFullYear() : '';
-  const genres = movie.genres ? movie.genres.map(g => g.name).join(', ') : '';
-  const voteAverage = movie.vote_average ? movie.vote_average.toFixed(1) : '0';
-  const inMyList = isInMyList(movie.id, 'movie');
+  const isAnime = !('release_date' in movie);
+  const releaseYear = isAnime ? getAnimeYear((movie as AnimeDetail).startDate) : (movie.release_date ? new Date(movie.release_date).getFullYear() : '');
+  const genres = isAnime ? ((movie as AnimeDetail).genres?.join(', ') || '') : (movie.genres ? movie.genres.map(g => g.name).join(', ') : '');
+  const voteAverage = isAnime ? getAnimeScore((movie as AnimeDetail).averageScore).toFixed(1) : (movie.vote_average ? movie.vote_average.toFixed(1) : '0');
+  const inMyList = isInMyList(movie.id, isAnime ? 'anime' : 'movie');
 
   const handleMyListPress = async () => {
     // Si el padre provee un handler específico, usarlo (para compatibilidad)
@@ -40,8 +40,7 @@ export default function FeaturedMovie({ movie, onWatch, onAddList }: Props) {
     if (isToggling) return;
     setIsToggling(true);
     try {
-      // FeaturedMovie siempre es una película
-      await toggleMyList(movie.id, 'movie');
+      await toggleMyList(movie.id, isAnime ? 'anime' : 'movie');
     } catch (err) {
       console.error('FeaturedMovie: Error al actualizar Mi Lista', err);
       Alert.alert('Error', 'No se pudo actualizar Mi Lista.');
@@ -164,7 +163,7 @@ export default function FeaturedMovie({ movie, onWatch, onAddList }: Props) {
   return (
     <View style={dynamicStyles.container}>
       <Image
-        source={{ uri: getImageUrl(movie.backdrop_path, 'original') }}
+        source={{ uri: isAnime ? getAnimeImageUrl((movie as AnimeDetail).bannerImage || (movie as AnimeDetail).coverImage?.large) : getImageUrl(movie.backdrop_path, 'original') }}
         style={dynamicStyles.image}
       />
       
@@ -184,20 +183,20 @@ export default function FeaturedMovie({ movie, onWatch, onAddList }: Props) {
         >
           <View style={dynamicStyles.content}>
             {/* Título */}
-            <Text style={dynamicStyles.title}>{movie.title}</Text>
+            <Text style={dynamicStyles.title}>{isAnime ? getAnimeTitle((movie as AnimeDetail).title) : movie.title}</Text>
             
             {/* Info: Puntos, Año, Duración */}
             <View style={dynamicStyles.info}>
               <Text style={dynamicStyles.points}>{voteAverage} puntos</Text>
               <Text style={dynamicStyles.year}>{releaseYear}</Text>
-              {movie.runtime && (
-                <Text style={dynamicStyles.seasons}>{movie.runtime} min</Text>
+              {!isAnime && (movie as MovieDetail).runtime && (
+                <Text style={dynamicStyles.seasons}>{(movie as MovieDetail).runtime} min</Text>
               )}
             </View>
             
             {/* Descripción */}
             <Text style={dynamicStyles.description} numberOfLines={5}>
-              {movie.overview}
+              {isAnime ? (movie as any).description : (movie as any).overview}
             </Text>
             
             {/* Botones */}

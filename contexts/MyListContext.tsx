@@ -1,6 +1,8 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { useProfile } from './ProfileContext';
 import databaseService from '../services/databaseService';
+import { db, auth } from '../services/firebase';
+import { collection, onSnapshot, query, orderBy } from 'firebase/firestore';
 
 interface MyListContextType {
   // Guardamos claves compuestas con el tipo para evitar colisiones entre TMDB y AniList
@@ -31,6 +33,26 @@ export const MyListProvider: React.FC<MyListProviderProps> = ({ children }) => {
     } else {
       setMyListItems(new Set());
     }
+  }, [currentProfile]);
+
+  useEffect(() => {
+    if (!currentProfile) return;
+    if (!auth.currentUser) return;
+    const profileDocId = auth.currentUser.uid;
+    const ref = collection(db, `profiles/${profileDocId}/mylist`);
+    const q = query(ref, orderBy('added_at', 'desc'));
+    const unsub = onSnapshot(q, (snap) => {
+      const keyed = new Set<string>(
+        snap.docs.map((d) => {
+          const data = d.data() as { content_id: number; content_type: 'movie' | 'tv' | 'anime' };
+          const typeRaw = String(data.content_type ?? '').toLowerCase();
+          const type = typeRaw === 'movie' || typeRaw === 'tv' || typeRaw === 'anime' ? typeRaw : 'movie';
+          return `${type}:${data.content_id}`;
+        })
+      );
+      setMyListItems(keyed);
+    });
+    return () => unsub();
   }, [currentProfile]);
 
   const refreshMyList = async () => {

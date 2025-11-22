@@ -1,5 +1,6 @@
 {
   "expo": {
+    "scheme": "netflixapp",
     "name": "Proyecto_Netflix",
     "slug": "Proyecto_Netflix",
     "version": "1.0.0",

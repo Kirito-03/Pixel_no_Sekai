@@ -20,6 +20,7 @@ const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 interface EpisodePlayerProps {
   episode: AnimeEpisode;
   animeTitle: string;
+  seasonNumber: number;
   onClose: () => void;
   onNextEpisode?: () => void;
   onPreviousEpisode?: () => void;
@@ -30,6 +31,7 @@ interface EpisodePlayerProps {
 const EpisodePlayer: React.FC<EpisodePlayerProps> = ({
   episode,
   animeTitle,
+  seasonNumber,
   onClose,
   onNextEpisode,
   onPreviousEpisode,
@@ -44,6 +46,7 @@ const EpisodePlayer: React.FC<EpisodePlayerProps> = ({
   const [showControls, setShowControls] = useState(true);
   const [isPlaying, setIsPlaying] = useState(false);
   const webViewRef = useRef<WebView>(null);
+  const webVideoRef = useRef<any>(null);
 
   useEffect(() => {
     console.log('EpisodePlayer mounted for episode:', episode.id, episode.title);
@@ -66,6 +69,45 @@ const EpisodePlayer: React.FC<EpisodePlayerProps> = ({
     console.log('EpisodePlayer state changed - loading:', loading, 'error:', error);
   }, [loading, error]);
 
+  useEffect(() => {
+    if (Platform.OS !== 'web') return;
+    const videoEl = webVideoRef.current as any;
+    const url = selectedSource?.url || '';
+    if (!videoEl || !url) return;
+    const isM3U8 = /\.m3u8(\?|$)/i.test(url);
+    let hls: any = null;
+    function initHls() {
+      hls = new (window as any).Hls({ enableWorker: true });
+      hls.loadSource(url);
+      hls.attachMedia(videoEl);
+      hls.on((window as any).Hls?.Events?.ERROR, (_event: any, data: any) => {
+        if (data?.fatal) {
+          setError('Error al reproducir HLS');
+        }
+      });
+    }
+    if (isM3U8) {
+      if (videoEl.canPlayType && videoEl.canPlayType('application/vnd.apple.mpegurl')) {
+        videoEl.src = url;
+        videoEl.load();
+      } else if ((window as any).Hls) {
+        initHls();
+      } else {
+        const script = document.createElement('script');
+        script.src = 'https://cdn.jsdelivr.net/npm/hls.js@latest';
+        script.async = true;
+        script.onload = initHls;
+        script.onerror = () => setError('HLS no soportado');
+        document.head.appendChild(script);
+      }
+    }
+    return () => {
+      if (hls) {
+        try { hls.destroy(); } catch {}
+      }
+    };
+  }, [selectedSource]);
+
   const loadEpisodeSources = async () => {
     try {
       setLoading(true);
@@ -73,21 +115,17 @@ const EpisodePlayer: React.FC<EpisodePlayerProps> = ({
       
       console.log('Loading sources for episode:', episode.id);
       
-      // Intentar primero con la API real
-      // Si el episodio tiene URL directa (del M3U), usarla directamente
-      if (episode.url) {
-        console.log('Using direct episode URL from M3U:', episode.url);
-        const directSources: VideoSource[] = [{
-          url: episode.url
-        }];
+      // Intentar primero con URL directa solo si parece ser un stream de video (excluye mkv para forzar HLS)
+      if (episode.url && /\.(m3u8|mp4|webm|mov)(\?|$)/i.test(episode.url)) {
+        console.log('Using direct episode video URL:', episode.url);
+        const directSources: VideoSource[] = [{ url: episode.url }];
         setSources(directSources);
         setSelectedSource(directSources[0]);
         return;
       }
       
       try {
-        // Extraer información del anime del título si está disponible
-        const episodeSources = await getEpisodeSources(episode.id);
+        const episodeSources = await getEpisodeSources(episode.id, animeTitle, seasonNumber, episode.number);
         console.log('Episode sources received:', episodeSources);
         
         if (episodeSources.length > 0) {
@@ -100,51 +138,8 @@ const EpisodePlayer: React.FC<EpisodePlayerProps> = ({
         console.log('API error, using fallback sources:', apiError);
       }
       
-      // Si no hay fuentes reales, usar fuentes de video que funcionan
-      console.log('No real sources found, checking if episode has URL');
-      
-      // Verificar si el episodio tiene una URL directa
-      if (episode.url) {
-        console.log('Found direct episode URL:', episode.url);
-        const directSources: VideoSource[] = [{
-          url: episode.url
-        }];
-        setSources(directSources);
-        setSelectedSource(directSources[0]);
-        return;
-      }
-      
-      console.log('No direct URL found, using working video sources');
-      
-      // Videos de prueba más variados para simular diferentes episodios
-      const testVideos = [
-        'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
-        'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4',
-        'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
-        'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4',
-        'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerFun.mp4',
-        'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyrides.mp4',
-        'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerMeltdowns.mp4',
-        'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4',
-        'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4',
-        'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/VolkswagenGTIReview.mp4',
-      ];
-      
-      // Seleccionar un video basado en el número del episodio para máxima variedad
-      const videoIndex = (episode.number - 1) % testVideos.length;
-      const selectedTestVideo = testVideos[videoIndex];
-      
-      console.log(`Using test video ${videoIndex + 1}/${testVideos.length} for episode ${episode.number}:`, selectedTestVideo);
-      
-      const workingSources: VideoSource[] = [
-        {
-          url: selectedTestVideo
-        }
-      ];
-      
-      setSources(workingSources);
-      setSelectedSource(workingSources[0]);
-      console.log('Using test video:', selectedTestVideo);
+      setError('No se encontraron fuentes reales para este episodio');
+      return;
       
     } catch (err) {
       console.error('Error loading episode sources:', err);
@@ -186,6 +181,20 @@ const EpisodePlayer: React.FC<EpisodePlayerProps> = ({
 
     // Usar la URL real del episodio si está disponible, sino usar la URL del source
     const videoUrl = selectedSource.url || 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4';
+    const isHls = /\.m3u8(\?|$)/.test(videoUrl);
+    const urlNoQuery = videoUrl.split('?')[0];
+    const ext = (urlNoQuery.split('.').pop() || '').toLowerCase();
+    const mime = ext === 'm3u8'
+      ? 'application/vnd.apple.mpegurl'
+      : ext === 'mp4'
+      ? 'video/mp4'
+      : ext === 'webm'
+      ? 'video/webm'
+      : ext === 'mov'
+      ? 'video/quicktime'
+      : ext === 'mkv'
+      ? 'video/x-matroska'
+      : '';
     console.log('Using video URL:', videoUrl);
     
     // Para web, usar un elemento video HTML nativo
@@ -193,25 +202,11 @@ const EpisodePlayer: React.FC<EpisodePlayerProps> = ({
       return (
         <View style={styles.videoContainer}>
           <video
-            ref={(ref) => {
-              if (ref) {
-                ref.addEventListener('play', () => setIsPlaying(true));
-                ref.addEventListener('pause', () => setIsPlaying(false));
-                ref.addEventListener('ended', () => {
-                  setIsPlaying(false);
-                  if (hasNextEpisode && onNextEpisode) {
-                    onNextEpisode();
-                  }
-                });
-                ref.addEventListener('error', (e) => {
-                  console.error('Video error:', e);
-                  setError('Error al reproducir el video');
-                });
-              }
-            }}
+            ref={webVideoRef}
             controls
             style={styles.webVideo}
             preload="metadata"
+            crossOrigin="anonymous"
             playsInline
             webkit-playsinline="true"
             onPlay={() => setIsPlaying(true)}
@@ -227,7 +222,11 @@ const EpisodePlayer: React.FC<EpisodePlayerProps> = ({
               setError('Error al reproducir el video');
             }}
           >
-            <source src={videoUrl} type="video/mp4" />
+            {!isHls && (mime ? (
+              <source src={videoUrl} type={mime} />
+            ) : (
+              <source src={videoUrl} />
+            ))}
             <Text style={styles.placeholderText}>
               Tu navegador no soporta el elemento video.
             </Text>
@@ -298,13 +297,18 @@ const EpisodePlayer: React.FC<EpisodePlayerProps> = ({
             webkit-playsinline
             style="display: none;"
           >
-            <source src="${safeVideoUrl}" type="video/mp4" />
+            ${isHls ? '' : `<source src="${safeVideoUrl}" ${mime ? `type="${mime}"` : ''} />`}
             <p style="color: white; text-align: center; padding: 20px;">
               Tu navegador no soporta el elemento video.
             </p>
           </video>
           
           <script>
+            ${isHls ? `
+            var script = document.createElement('script');
+            script.src = 'https://cdn.jsdelivr.net/npm/hls.js@latest';
+            document.head.appendChild(script);
+            ` : ''}
             const video = document.getElementById('videoPlayer');
             const loading = document.getElementById('loading');
             
@@ -358,10 +362,31 @@ const EpisodePlayer: React.FC<EpisodePlayerProps> = ({
             });
             
             // Load the video when ready
-            setTimeout(() => {
-              console.log('Loading video...');
-              video.load();
-            }, 500);
+            function initPlayer() {
+              if (${isHls ? 'true' : 'false'}) {
+                if (video.canPlayType('application/vnd.apple.mpegurl')) {
+                  video.src = '${safeVideoUrl}';
+                  video.load();
+                } else if (window.Hls) {
+                  const hls = new window.Hls({ enableWorker: true });
+                  hls.loadSource('${safeVideoUrl}');
+                  hls.attachMedia(video);
+                } else {
+                  loading.innerHTML = 'HLS no soportado';
+                }
+              } else {
+                video.load();
+              }
+            }
+            if (${isHls ? 'true' : 'false'}) {
+              if (window.Hls) {
+                initPlayer();
+              } else {
+                script.onload = initPlayer;
+              }
+            } else {
+              initPlayer();
+            }
           </script>
         </body>
       </html>

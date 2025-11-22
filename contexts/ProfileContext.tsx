@@ -1,5 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { auth, db } from '../services/firebase';
+import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 
 interface Profile {
   id: number;
@@ -98,10 +100,30 @@ export const ProfileProvider: React.FC<ProfileProviderProps> = ({ children }) =>
         console.warn('ProfileContext: No se pudo guardar preferencia +18');
       }
     }
+    const uid = auth.currentUser?.uid;
+    if (uid) {
+      try {
+        await setDoc(doc(db, 'profiles', uid), { adultContentEnabled: enabled, updatedAt: serverTimestamp() }, { merge: true });
+      } catch {}
+    }
   };
 
   useEffect(() => {
     loadCurrentProfile();
+  }, []);
+
+  useEffect(() => {
+    const uid = auth.currentUser?.uid;
+    if (!uid) return;
+    (async () => {
+      try {
+        const snap = await getDoc(doc(db, 'profiles', uid));
+        const remote = snap.data() as any;
+        if (remote && typeof remote.adultContentEnabled === 'boolean') {
+          setAdultContentEnabledState(Boolean(remote.adultContentEnabled));
+        }
+      } catch {}
+    })();
   }, []);
 
   const value: ProfileContextType = {

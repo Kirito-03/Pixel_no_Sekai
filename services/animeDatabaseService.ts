@@ -1,4 +1,15 @@
-import { M3UAnime, M3UEpisode } from './m3uParser';
+interface M3UEpisode {
+  season: number;
+  episode: number;
+  title: string;
+  url: string;
+}
+
+interface M3UAnime {
+  title: string;
+  logo?: string;
+  episodes: M3UEpisode[];
+}
 
 export interface DatabaseAnime {
   id: number;
@@ -42,7 +53,7 @@ export class AnimeDatabaseService {
    * Convierte un anime M3U a formato de base de datos
    */
   private static m3uAnimeToDatabase(anime: M3UAnime): Partial<DatabaseAnime> {
-    const totalSeasons = Math.max(...anime.episodes.map(ep => ep.season));
+    const totalSeasons = Math.max(...anime.episodes.map((ep: M3UEpisode) => ep.season));
     const totalEpisodes = anime.episodes.length;
     
     return {

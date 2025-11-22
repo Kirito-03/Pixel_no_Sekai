@@ -1,12 +1,14 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { View, ScrollView, StyleSheet, ActivityIndicator, Platform, Dimensions, Alert } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { HomeStackParamList, MovieDetail, TVShowDetail, ContentItem, Movie, TVShow } from '../types';
+import { HomeStackParamList, MovieDetail, TVShowDetail, ContentItem, Movie, TVShow, AnimeDetail } from '../types';
 import {
     getMovieDetails,
     ENHANCED_CATEGORIES,
-    fetchCategoryPage
+    fetchCategoryPage,
+    animeToContentItem
 } from '../services/api';
+import { getAnimeDetails } from '../services/anilistService';
 import { colors } from '../theme';
 import Header from '../components/Header';
 import FeaturedMovie from '../components/FeaturedMovie';
@@ -27,12 +29,12 @@ export default function HomeScreen({ navigation }: Props) {
     const [contentSections, setContentSections] = useState<{[key: string]: ContentItem[]}>({});
 
     // Estados de la UI
-    const [featuredMovies, setFeaturedMovies] = useState<MovieDetail[]>([]);
+    const [featuredMovies, setFeaturedMovies] = useState<(MovieDetail | AnimeDetail)[]>([]);
     const [selectedContent, setSelectedContent] = useState<ContentItem | null>(null);
     const [modalVisible, setModalVisible] = useState(false);
     const [loading, setLoading] = useState(true);
     const [blackHeader, setBlackHeader] = useState(false);
-    const [contentFilter, setContentFilter] = useState<'all' | 'movies' | 'series' | 'anime'>('all');
+    const [contentFilter, setContentFilter] = useState<'all' | 'movies' | 'series' | 'anime'>('anime');
     
     // NOTA: 'selectedCategory' parecía no usarse correctamente.
     // La lógica actual se basa en el filtro principal (todo, películas, series).
@@ -108,17 +110,25 @@ export default function HomeScreen({ navigation }: Props) {
 
             setContentSections(newContentSections);
 
-            // Cargar varias películas destacadas del contenido popular (top 5)
-            const popularContent = newContentSections['popular_all'];
-            if (popularContent && popularContent.length > 0) {
-                const popularMovies = popularContent.filter(item => item.type === 'movie').slice(0, 5);
-                if (popularMovies.length > 0) {
-                    try {
-                        const details = await Promise.all(popularMovies.map(m => getMovieDetails(m.id)));
-                        setFeaturedMovies(details);
-                    } catch (error) {
-                        console.error('Error loading featured movies:', error);
-                    }
+            const airingAnime = newContentSections['airing_anime'];
+            const popularAnime = newContentSections['popular_anime'];
+            const selectFrom = (list?: ContentItem[]) => {
+                if (!list || list.length === 0) return [] as ContentItem[];
+                const onlyAnime = list.filter(item => item.type === 'anime');
+                const filtered = adultContentEnabled ? onlyAnime : onlyAnime.filter(i => !i.isAdult);
+                return filtered.slice(0, 5);
+            };
+
+            let topFeatured = selectFrom(airingAnime);
+            if (topFeatured.length === 0) {
+                topFeatured = selectFrom(popularAnime);
+            }
+            if (topFeatured.length > 0) {
+                try {
+                    const details = await Promise.all(topFeatured.map(a => getAnimeDetails(a.id)));
+                    setFeaturedMovies(details);
+                } catch (error) {
+                    console.error('Error loading featured anime:', error);
                 }
             }
         } catch (error) {
@@ -330,20 +340,27 @@ export default function HomeScreen({ navigation }: Props) {
                 scrollEventThrottle={16}
                 showsVerticalScrollIndicator={false}
             >
-                {contentFilter !== 'series' && contentFilter !== 'anime' && featuredMovies.length > 0 && (
+                {featuredMovies.length > 0 && (
                     <FeaturedCarousel
                         movies={featuredMovies}
-                        onWatch={(movie) => handleContentNavigation({
-                            id: movie.id,
-                            type: 'movie',
-                            title: movie.title,
-                            overview: movie.overview,
-                            poster_path: movie.poster_path,
-                            backdrop_path: movie.backdrop_path,
-                            release_date: movie.release_date,
-                            vote_average: movie.vote_average,
-                            source: 'tmdb'
-                        })}
+                        onWatch={(movie) => {
+                            if ('release_date' in movie) {
+                                handleContentNavigation({
+                                    id: movie.id,
+                                    type: 'movie',
+                                    title: movie.title,
+                                    overview: movie.overview,
+                                    poster_path: movie.poster_path,
+                                    backdrop_path: movie.backdrop_path,
+                                    release_date: movie.release_date,
+                                    vote_average: movie.vote_average,
+                                    source: 'tmdb'
+                                });
+                            } else {
+                                const contentItem = animeToContentItem(movie as AnimeDetail);
+                                handleContentNavigation(contentItem);
+                            }
+                        }}
                     />
                 )}
 

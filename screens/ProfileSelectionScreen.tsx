@@ -15,7 +15,8 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
-import databaseService, { getCurrentBaseURL } from '../services/databaseService';
+import databaseService from '../services/databaseService';
+import { useProfile } from '../contexts/ProfileContext';
 import { useFocusEffect } from '@react-navigation/native';
 import { useAuth } from '../contexts/AuthContext';
 // DYNAMIC_NETWORK_CONFIG is not used in this file; remove the import to fix the missing module error
@@ -50,7 +51,8 @@ const AVAILABLE_AVATARS = [
 
 const ProfileSelectionScreen: React.FC<ProfileSelectionScreenProps> = ({ navigation, route }) => {
   const { user } = useAuth();
-  const userId = route.params?.userId || user?.id;
+  const { setCurrentProfile } = useProfile();
+  const userId = route.params?.userId || user?.uid;
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [loading, setLoading] = useState(true);
   // Versión de perfiles para cache-busting de imágenes en Android
@@ -73,17 +75,12 @@ const ProfileSelectionScreen: React.FC<ProfileSelectionScreenProps> = ({ navigat
     React.useCallback(() => {
       loadProfiles();
       return undefined;
-    }, [userId])
+    }, [])
   );
 
   const loadProfiles = async () => {
     try {
-      if (!userId) {
-        Alert.alert('Error', 'Usuario no identificado');
-        setLoading(false);
-        return;
-      }
-      const rows = await databaseService.getProfiles(userId);
+      const rows = await databaseService.getProfiles(0);
       const mapped: Profile[] = rows.map((p: any) => ({
         id: p.id,
         name: p.name,
@@ -133,7 +130,7 @@ const ProfileSelectionScreen: React.FC<ProfileSelectionScreenProps> = ({ navigat
       }
 
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        mediaTypes: ['images'] as any,
         allowsEditing: true,
         aspect: [1, 1],
         quality: 0.8,
@@ -196,18 +193,14 @@ const ProfileSelectionScreen: React.FC<ProfileSelectionScreenProps> = ({ navigat
     setCreating(true);
     setUploadingImage(true);
     try {
-      // Subir la imagen primero
       let avatarUrl: string;
-      
       if (Platform.OS === 'web' && selectedImageUri.startsWith('data:')) {
-        // En web, convertir data URL a File
         const response = await fetch(selectedImageUri);
         const blob = await response.blob();
         const file = new File([blob], 'avatar.jpg', { type: 'image/jpeg' });
         const uploadResult = await databaseService.uploadAvatar(file);
         avatarUrl = uploadResult.url;
       } else if (typeof selectedImageUri === 'string') {
-        // En móvil, usar la URI directamente
         const uploadResult = await databaseService.uploadAvatar(selectedImageUri);
         avatarUrl = uploadResult.url;
       } else {
@@ -218,7 +211,7 @@ const ProfileSelectionScreen: React.FC<ProfileSelectionScreenProps> = ({ navigat
       
       // Crear el perfil con la URL del avatar subido
       await databaseService.createProfile({
-        usuario_id: userId!,
+        usuario_id: 0,
         name: newProfileName.trim(),
         avatar_url: avatarUrl,
       });
@@ -230,7 +223,7 @@ const ProfileSelectionScreen: React.FC<ProfileSelectionScreenProps> = ({ navigat
       await loadProfiles();
       
       // Obtener el perfil recién creado
-      const updatedProfiles = await databaseService.getProfiles(userId!);
+      const updatedProfiles = await databaseService.getProfiles(0);
       const createdProfile = updatedProfiles.find((p: any) => p.avatar_url === avatarUrl);
       
       if (createdProfile) {
@@ -240,6 +233,7 @@ const ProfileSelectionScreen: React.FC<ProfileSelectionScreenProps> = ({ navigat
           name: createdProfile.name,
           avatar_url: createdProfile.avatar_url,
         };
+        await setCurrentProfile(mappedProfile as any);
         navigation.reset({
           index: 0,
           routes: [
@@ -247,7 +241,6 @@ const ProfileSelectionScreen: React.FC<ProfileSelectionScreenProps> = ({ navigat
               name: 'Main',
               params: {
                 selectedProfile: mappedProfile,
-                userId: userId,
               },
             },
           ],
@@ -288,40 +281,13 @@ const ProfileSelectionScreen: React.FC<ProfileSelectionScreenProps> = ({ navigat
   const getCorrectedAvatarUrl = (avatarUrl: string | undefined): string | null => {
     if (!avatarUrl) return null;
     
-    // Si la URL ya es completa (empieza con http)
-    if (avatarUrl.startsWith('http')) {
-      // Obtener el BASE_URL real actualizado
-      const realBaseURL = getCurrentBaseURL();
-      
-      // Si la URL contiene localhost/127.0.0.1 pero el BASE_URL real no, corregirla
-      const hasLocalhost = avatarUrl.includes('localhost') || avatarUrl.includes('127.0.0.1');
-      const baseURLIsNotLocalhost = realBaseURL && !realBaseURL.includes('localhost') && !realBaseURL.includes('127.0.0.1');
-      
-      if (hasLocalhost && baseURLIsNotLocalhost) {
-        // Extraer la ruta del archivo (todo después de /uploads/)
-        const urlMatch = avatarUrl.match(/\/uploads\/(.+)$/);
-        if (urlMatch) {
-          const filePath = urlMatch[1];
-          const correctedUrl = `${realBaseURL}/uploads/${filePath}`;
-          console.log('URL corregida en selección de perfil:', {
-            original: avatarUrl,
-            corrected: correctedUrl
-          });
-          return appendCacheBust(correctedUrl);
-        }
-      }
-      // No requiere corrección; aplicar cache-busting igualmente
-      return appendCacheBust(avatarUrl);
-    }
-    
-    // URL relativa: construir con BASE_URL y añadir cache-busting
-    const baseURL = getCurrentBaseURL();
-    const constructed = `${baseURL}${avatarUrl.startsWith('/') ? '' : '/'}${avatarUrl}`;
-    return appendCacheBust(constructed);
+    if (avatarUrl.startsWith('data:')) return avatarUrl;
+    if (avatarUrl.startsWith('http')) return appendCacheBust(avatarUrl);
+    return avatarUrl;
   };
 
-  const handleSelectProfile = (profile: Profile) => {
-    // Navegar a la pantalla principal con el perfil seleccionado
+  const handleSelectProfile = async (profile: Profile) => {
+    await setCurrentProfile(profile as any);
     navigation.reset({
       index: 0,
       routes: [
@@ -329,7 +295,6 @@ const ProfileSelectionScreen: React.FC<ProfileSelectionScreenProps> = ({ navigat
           name: 'Main',
           params: {
             selectedProfile: profile,
-            userId: userId,
           },
         },
       ],
@@ -397,7 +362,7 @@ const ProfileSelectionScreen: React.FC<ProfileSelectionScreenProps> = ({ navigat
                           source={{ uri: corrected }}
                           style={{ width: 80, height: 80, borderRadius: 40 }}
                           onLoadStart={() => {
-                            console.log('ProfileSelection: Iniciando carga de avatar', { id: profile.id, url: corrected, baseURL: getCurrentBaseURL() });
+                            console.log('ProfileSelection: Iniciando carga de avatar', { id: profile.id, url: corrected });
                           }}
                           onLoad={() => {
                             console.log('ProfileSelection: Avatar cargado', { id: profile.id, url: corrected });

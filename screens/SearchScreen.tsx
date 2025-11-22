@@ -160,7 +160,7 @@ export default function SearchScreen() {
       <View style={styles.inputWrapper}>
         <TextInput
           style={styles.input}
-          placeholder="Buscar películas..."
+        placeholder="Buscar anime..."
           placeholderTextColor={colors.textGray}
           value={query}
           onChangeText={handleSearch}

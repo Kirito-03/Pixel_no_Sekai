@@ -21,6 +21,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../theme';
 import databaseService from '../services/databaseService';
 import { useAuth } from '../contexts/AuthContext';
+import { loginEmail, loginGoogle } from '../services/auth';
 
 type DynamicStyles = {
   scrollContent: ViewStyle;
@@ -60,10 +61,9 @@ export default function LoginScreen({ navigation }: any) {
     setLoading(true);
 
     try {
-      const user = await databaseService.login(email.trim().toLowerCase(), password);
-      // Guardar la sesión en el contexto
-      await login({ id: user.id, email: user.email || email.trim().toLowerCase() });
-      navigation.replace('ProfileSelection', { userId: user.id });
+      const cred = await loginEmail(email.trim().toLowerCase(), password);
+      await login({ uid: cred.user.uid, email: cred.user.email || email.trim().toLowerCase() });
+      navigation.replace('ProfileSelection');
       return;
     } catch (error: any) {
       console.error('Error en login:', error);
@@ -99,6 +99,19 @@ export default function LoginScreen({ navigation }: any) {
       setLoading(false);
     }
   }, [email, password, navigation]);
+
+  const handleLoginGoogle = useCallback(async () => {
+    setLoading(true);
+    try {
+      const cred = await loginGoogle();
+      await login({ uid: cred.user.uid, email: cred.user.email || '' });
+      navigation.replace('ProfileSelection');
+    } catch (error: any) {
+      Alert.alert('Error', error?.message || 'No se pudo iniciar sesión con Google');
+    } finally {
+      setLoading(false);
+    }
+  }, [navigation]);
 
   // MEJORA: Aplicar el tipo 'DynamicStyles' al hook useMemo para solucionar el error de TypeScript
   const dynamicStyles: DynamicStyles = useMemo(() => ({
@@ -216,12 +229,10 @@ export default function LoginScreen({ navigation }: any) {
                   <View style={styles.separator} />
                 </View>
 
-                <TouchableOpacity style={styles.codeButton}>
-                  <Text style={styles.codeButtonText}>
-                    Usar un código de inicio de sesión
-                  </Text>
+                <TouchableOpacity style={styles.googleButton} onPress={handleLoginGoogle} disabled={loading}>
+                  <Ionicons name="logo-google" size={20} color="#000" style={{ marginRight: 8 }} />
+                  <Text style={styles.googleButtonText}>Iniciar sesión con Google</Text>
                 </TouchableOpacity>
-
                 <TouchableOpacity
                   style={styles.forgotPassword}
                   onPress={() => {
@@ -542,6 +553,20 @@ const styles = StyleSheet.create({
   codeButtonText: {
     color: '#FFFFFF',
     fontSize: 14,
+  },
+  googleButton: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 4,
+    padding: 16,
+    alignItems: 'center',
+    marginBottom: 12,
+    flexDirection: 'row',
+    justifyContent: 'center',
+  },
+  googleButtonText: {
+    color: '#000000',
+    fontSize: 14,
+    fontWeight: 'bold',
   },
   forgotPassword: {
     alignItems: 'center',

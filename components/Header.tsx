@@ -16,7 +16,7 @@ interface HeaderProps {
 export default function Header({ black = false, onProfilePress, onSearchPress, onFilterChange, onCategorySelect, currentCategoryId }: HeaderProps) {
   const { width } = useWindowDimensions();
   const isSmallScreen = width < 768;
-  const [selectedFilter, setSelectedFilter] = useState<'series' | 'movies' | 'anime' | 'all' | null>(null);
+  const [selectedFilter, setSelectedFilter] = useState<'series' | 'movies' | 'anime' | 'all' | null>('anime');
   const [showCategoriesMenu, setShowCategoriesMenu] = useState(false);
   
   const backgroundOpacity = useRef(new Animated.Value(0)).current;
@@ -122,35 +122,8 @@ export default function Header({ black = false, onProfilePress, onSearchPress, o
           </View>
         </View>
 
-        {/* Filtros: Todo, Películas, Series, Anime, Categorías */}
+        {/* Filtros: Anime y Categorías */}
         <View style={styles.filtersContainer}>
-          <TouchableOpacity 
-            style={[styles.filterButton, selectedFilter === 'all' && styles.filterButtonActive]}
-            onPress={() => handleFilterPress('all')}
-          >
-            <Text style={[styles.filterText, selectedFilter === 'all' && styles.filterTextActive]}>
-              Todo
-            </Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity 
-            style={[styles.filterButton, selectedFilter === 'movies' && styles.filterButtonActive]}
-            onPress={() => handleFilterPress('movies')}
-          >
-            <Text style={[styles.filterText, selectedFilter === 'movies' && styles.filterTextActive]}>
-              Películas
-            </Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity 
-            style={[styles.filterButton, selectedFilter === 'series' && styles.filterButtonActive]}
-            onPress={() => handleFilterPress('series')}
-          >
-            <Text style={[styles.filterText, selectedFilter === 'series' && styles.filterTextActive]}>
-              Series
-            </Text>
-          </TouchableOpacity>
-
           <TouchableOpacity 
             style={[styles.filterButton, selectedFilter === 'anime' && styles.filterButtonActive]}
             onPress={() => handleFilterPress('anime')}

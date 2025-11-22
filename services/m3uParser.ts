@@ -42,22 +42,11 @@ function normalizeTitle(title: string): string {
  * Extrae el número de temporada y episodio del nombre del episodio
  */
 function parseEpisodeInfo(tvgName: string): { season?: number; episode?: number; episodeDecimal?: string } {
-  // Buscar patrones como "S01 E01", "S01E01", "S1 E1", "1x01", "01x01", "S02 E14.5"
-  const seasonMatch = tvgName.match(/S(\d+)|(\d+)x/);
-  const episodeMatch = tvgName.match(/E(\d+)(?:\.(\d+))?|x(\d+)(?:\.(\d+))?/);
-  
-  const season = seasonMatch 
-    ? parseInt(seasonMatch[1] || seasonMatch[2] || '1', 10)
-    : undefined;
-  
-  const episode = episodeMatch
-    ? parseInt(episodeMatch[1] || episodeMatch[3] || '0', 10)
-    : undefined;
-    
-  const episodeDecimal = episodeMatch && (episodeMatch[2] || episodeMatch[4])
-    ? episodeMatch[2] || episodeMatch[4]
-    : undefined;
-  
+  const seasonMatch = tvgName.match(/S(\d+)|Season\s*(\d+)|Temporada\s*(\d+)|T\s*(\d+)|(\d+)\s*x/i);
+  const episodeMatch = tvgName.match(/E(\d+)(?:\.(\d+))?|Episode\s*(\d+)(?:\.(\d+))?|Episodio\s*(\d+)(?:\.(\d+))?|Cap(?:i|í)tulo\s*(\d+)(?:\.(\d+))?|Especial\s*(\d+)(?:\.(\d+))?|x(\d+)(?:\.(\d+))?/i);
+  const season = seasonMatch ? parseInt(seasonMatch[1] || seasonMatch[2] || seasonMatch[3] || seasonMatch[4] || seasonMatch[5] || '1', 10) : undefined;
+  const episode = episodeMatch ? parseInt(episodeMatch[1] || episodeMatch[3] || episodeMatch[5] || episodeMatch[7] || episodeMatch[9] || episodeMatch[11] || '0', 10) : undefined;
+  const episodeDecimal = episodeMatch && (episodeMatch[2] || episodeMatch[4] || episodeMatch[6] || episodeMatch[8] || episodeMatch[10] || episodeMatch[12]) ? (episodeMatch[2] || episodeMatch[4] || episodeMatch[6] || episodeMatch[8] || episodeMatch[10] || episodeMatch[12]) : undefined;
   return { season, episode, episodeDecimal };
 }
 
@@ -65,16 +54,8 @@ function parseEpisodeInfo(tvgName: string): { season?: number; episode?: number;
  * Extrae el título del episodio (sin el prefijo de temporada/episodio)
  */
 function extractEpisodeTitle(tvgName: string): string {
-  // Eliminar prefijos como "S01 E01", "S01E01", etc.
-  let title = tvgName.replace(/S\d+\s*E\d+/i, '').trim();
-  title = title.replace(/^\d+x\d+\s*/, '').trim();
-  
-  // Si no quedó nada útil, usar el título original
-  if (!title || title.length < 2) {
-    return tvgName;
-  }
-  
-  return title;
+  const title = tvgName.replace(/^(S\d+\s*E\d+|\d+\s*x\s*\d+)\s*[-:–—]?\s*/i, '').trim();
+  return !title || title.length < 2 ? tvgName : title;
 }
 
 /**
@@ -129,7 +110,8 @@ export async function parseM3UFile(m3uUrl?: string): Promise<ParsedM3UData> {
   // URL por defecto para obtener el archivo M3U desde el servidor
   // Usar la misma configuración de red que el resto de la aplicación
   const serverUrl = buildServerURL();
-  const defaultUrl = m3uUrl || `${serverUrl}/videos/animes%20madre.m3u`;
+  const envUrl = (process.env.EXPO_PUBLIC_M3U_URL || '').trim();
+  const defaultUrl = m3uUrl || (envUrl ? envUrl : `${serverUrl}/videos/animes_madre.m3u`);
   
   try {
     // Si ya tenemos el cache, devolverlo (podríamos mejorar esto con cache con expiración)
@@ -141,9 +123,12 @@ export async function parseM3UFile(m3uUrl?: string): Promise<ParsedM3UData> {
     console.log('Fetching M3U file from server:', defaultUrl);
 
     // Intentar múltiples candidatos si falla el primero (móvil físico vs emulador)
-    const candidateBases = getCandidateBaseURLs();
-    const candidateUrls = [defaultUrl, ...candidateBases.map(b => `${b}/videos/animes%20madre.m3u`)]
-      .filter((v, i, a) => a.indexOf(v) === i);
+  const candidateBases = getCandidateBaseURLs();
+  const candidateUrls = [
+    defaultUrl,
+    ...(envUrl ? [] : candidateBases.map(b => `${b}/videos/animes_madre.m3u`))
+  ]
+    .filter((v, i, a) => a.indexOf(v) === i);
 
     let content: string | null = null;
     let lastError: any = null;
@@ -356,15 +341,25 @@ export async function getEpisodeSourcesFromM3U(
   if (!animeData) {
     return null;
   }
-  
-  const episode = animeData.episodes.find(
-    ep => (ep.season || 1) === season && (ep.episode || 0) === episodeNumber
-  );
-  
+  // Filtrar por temporada primero
+  const seasonEpisodes = animeData.episodes.filter(ep => (ep.season || 1) === season);
+
+  if (seasonEpisodes.length === 0) {
+    return null;
+  }
+
+  // Intentar coincidencia directa por número de episodio si está presente
+  const directMatch = seasonEpisodes.find(ep => ep.episode === episodeNumber);
+
+  // Si no hay número de episodio en M3U, usar la posición ordenada dentro de la temporada
+  const byIndex = seasonEpisodes[episodeNumber - 1];
+
+  const episode = directMatch || byIndex;
+
   if (!episode) {
     return null;
   }
-  
+
   return [{
     url: episode.url
   }];
@@ -418,7 +413,8 @@ export const debugM3U = async (): Promise<void> => {
     if (!m3uData) {
   console.log('DEBUG: No M3U data found');
       return;
-    }
+}
+
     
   console.log(`DEBUG: M3U file parsed successfully. Found ${Object.keys(m3uData).length} animes`);
     
@@ -456,4 +452,28 @@ export const debugM3U = async (): Promise<void> => {
   } catch (error) {
   console.error('DEBUG: M3U test failed:', error);
   }
+};
+
+export const validateM3U = async (): Promise<{
+  totalAnimes: number;
+  totalEpisodes: number;
+  issues: { title: string; missingSeason: number; missingEpisode: number; total: number }[];
+}> => {
+  const data = await parseM3UFile();
+  const keys = Object.keys(data);
+  const issues: { title: string; missingSeason: number; missingEpisode: number; total: number }[] = [];
+  let totalEpisodes = 0;
+  for (const k of keys) {
+    const d = data[k];
+    const missingSeason = d.episodes.filter(e => e.season == null).length;
+    const missingEpisode = d.episodes.filter(e => e.episode == null).length;
+    const total = d.episodes.length;
+    totalEpisodes += total;
+    if (missingSeason > 0 || missingEpisode > 0) {
+      issues.push({ title: d.title, missingSeason, missingEpisode, total });
+    }
+  }
+  issues.sort((a, b) => (b.missingSeason + b.missingEpisode) - (a.missingSeason + a.missingEpisode));
+  console.log('M3U validation summary', { totalAnimes: keys.length, totalEpisodes, issuesPreview: issues.slice(0, 5) });
+  return { totalAnimes: keys.length, totalEpisodes, issues };
 };

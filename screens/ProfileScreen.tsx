@@ -20,7 +20,7 @@ import { spacing } from '../theme';
 import { useTheme } from '../contexts/ThemeContext';
 import { useProfile } from '../contexts/ProfileContext';
 import { useAuth } from '../contexts/AuthContext';
-import databaseService, { getCurrentBaseURL } from '../services/databaseService';
+import databaseService from '../services/databaseService';
 
 export default function ProfileScreen({ navigation }: any) {
   const { colors, theme } = useTheme();
@@ -54,39 +54,13 @@ export default function ProfileScreen({ navigation }: any) {
       return appendCacheBust('https://upload.wikimedia.org/wikipedia/commons/0/0b/Netflix-avatar.png');
     }
     
-    // Si la URL ya es completa (empieza con http)
+    if (currentProfile.avatar_url.startsWith('data:')) {
+      return currentProfile.avatar_url;
+    }
     if (currentProfile.avatar_url.startsWith('http')) {
-      // Obtener el BASE_URL real actualizado
-      const realBaseURL = getCurrentBaseURL();
-      
-      // Si la URL contiene localhost/127.0.0.1 pero el BASE_URL real no, corregirla
-      const hasLocalhost = currentProfile.avatar_url.includes('localhost') || currentProfile.avatar_url.includes('127.0.0.1');
-      const baseURLIsNotLocalhost = realBaseURL && !realBaseURL.includes('localhost') && !realBaseURL.includes('127.0.0.1');
-      
-      if (hasLocalhost && baseURLIsNotLocalhost) {
-        // Extraer la ruta del archivo (todo después de /uploads/)
-        const urlMatch = currentProfile.avatar_url.match(/\/uploads\/(.+)$/);
-        if (urlMatch) {
-          const filePath = urlMatch[1];
-          const correctedUrl = `${realBaseURL}/uploads/${filePath}`;
-          console.log('URL corregida automáticamente:', {
-            original: currentProfile.avatar_url,
-            corrected: correctedUrl,
-            baseURL: realBaseURL
-          });
-          return appendCacheBust(correctedUrl);
-        }
-      }
-      
-      console.log('URL del avatar (completa, sin corrección necesaria):', currentProfile.avatar_url);
       return appendCacheBust(currentProfile.avatar_url);
     }
-    
-    // Si es relativa, construirla con BASE_URL
-    const baseURL = getCurrentBaseURL();
-    const constructedUrl = `${baseURL}${currentProfile.avatar_url.startsWith('/') ? '' : '/'}${currentProfile.avatar_url}`;
-    console.log('URL del avatar (construida):', constructedUrl);
-    return appendCacheBust(constructedUrl);
+    return currentProfile.avatar_url;
   };
 
   // Función para manejar la imagen seleccionada (común para web y móvil)
@@ -214,7 +188,7 @@ export default function ProfileScreen({ navigation }: any) {
 
       // Abrir el picker de imágenes
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        mediaTypes: ['images'] as any,
         allowsEditing: true,
         aspect: [1, 1],
         quality: 0.8,
@@ -402,7 +376,7 @@ export default function ProfileScreen({ navigation }: any) {
                         console.error('Error al cargar imagen del avatar');
                         console.error('URL intentada:', avatarUrl);
                         console.error('URL original:', currentProfile?.avatar_url);
-                        console.error('BASE_URL actual:', getCurrentBaseURL());
+                        // BASE_URL ya no aplica; avatares vienen de Firebase Storage o data-url
                         if (error?.nativeEvent) {
                           console.error('Error nativo:', JSON.stringify(error.nativeEvent, null, 2));
                         }
@@ -496,7 +470,7 @@ export default function ProfileScreen({ navigation }: any) {
                         {
                           name: 'ProfileSelection',
                           // Usar el id del usuario (o fallback al usuario_id del perfil actual)
-                          params: { userId: user?.id ?? currentProfile?.usuario_id },
+                          params: { },
                         },
                       ],
                     })
@@ -509,7 +483,7 @@ export default function ProfileScreen({ navigation }: any) {
                       routes: [
                         {
                           name: 'ProfileSelection',
-                          params: { userId: user?.id ?? currentProfile?.usuario_id },
+                          params: { },
                         },
                       ],
                     })
@@ -527,7 +501,7 @@ export default function ProfileScreen({ navigation }: any) {
                       routes: [
                         {
                           name: 'ProfileSelection',
-                          params: { userId: user?.id ?? currentProfile?.usuario_id },
+                          params: { },
                         },
                       ],
                     })

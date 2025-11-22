@@ -16,15 +16,16 @@ import {
   RefreshControl,
   Alert,
   Pressable,
+  Linking,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 import { WebView } from 'react-native-webview';
 import { ContentItem, MovieDetail, TVShowDetail, AnimeDetail, Anime, StreamingInfo, AnimeEpisode, AnimeSeason } from '../types';
-import { getImageUrl, getMovieDetails, getTVShowDetails, animeToContentItem, tmdbToContentItem } from '../services/api';
+import { getImageUrl, getMovieDetails, getTVShowDetails, animeToContentItem, tmdbToContentItem, searchMovies, searchTVShows } from '../services/api';
 import { getAnimeDetails, getSimilarAnime, getAnimeImageUrl, getAnimeTitle, getAnimeYear, getAnimeScore, getAnimeByGenre } from '../services/anilistService';
-import { createMockStreamingInfo } from '../services/animeStreamingService';
-import { getStreamingInfoFromM3U, debugM3U, resetM3UCache } from '../services/m3uParser';
+import { createMockStreamingInfo, getAnimeStreamingInfo } from '../services/animeStreamingService';
+import { debugM3U, resetM3UCache } from '../services/m3uParser';
 import databaseService from '../services/databaseService';
 import { useProfile } from '../contexts/ProfileContext';
 import { useMyList } from '../contexts/MyListContext';
@@ -115,12 +116,9 @@ export default function AnimeSeriesModal({
       loadContentDetails();
       loadRelatedContent();
       
-      // Cargar información de streaming solo para animes reales (no películas)
-      if (currentContent.type === 'anime' && isRealAnime()) {
-        console.log('Loading streaming info for anime series');
+      if (currentContent.type === 'anime') {
+        console.log('Loading streaming info for anime');
         loadStreamingInfo();
-      } else if (currentContent.type === 'anime') {
-        console.log('Skipping streaming info for anime movie');
       }
 
       // Verificar estado de Descargas al abrir
@@ -130,15 +128,7 @@ export default function AnimeSeriesModal({
           .catch(() => setCurrentInDownloads(false));
       }
       
-      // Delay de 3 segundos para mostrar el trailer en el fondo
-      const trailerTimer = setTimeout(() => {
-        if (trailerKey && !trailerFinished) {
-          setTrailerDelay(true);
-        }
-      }, 3000);
-      
       return () => {
-        clearTimeout(trailerTimer);
         if (!visible) {
           setTrailerDelay(false);
           setTrailerFinished(false);
@@ -153,6 +143,14 @@ export default function AnimeSeriesModal({
       setTrailerFinished(false);
     }
   }, [visible, currentContent, trailerKey]);
+
+  useEffect(() => {
+    if (!visible) return;
+    if (!currentContent) return;
+    if (currentContent.type !== 'anime') return;
+    if (!detailData) return;
+    loadStreamingInfo();
+  }, [detailData, visible, currentContent]);
 
   const loadContentDetails = async () => {
     if (!currentContent) return;
@@ -223,40 +221,50 @@ export default function AnimeSeriesModal({
     
     setLoadingStreaming(true);
     try {
-      // ÚNICAMENTE: Buscar en el archivo M3U local
-    console.log('Looking for anime in M3U file:', currentContent.title);
-      const m3uData = await getStreamingInfoFromM3U(currentContent.title);
-      
-      if (m3uData && m3uData.seasons && m3uData.seasons.length > 0) {
-    console.log('Found anime in M3U file!');
-        
-        // Crear StreamingInfo desde los datos del M3U
-        const streamingInfo: StreamingInfo = {
-          animeId: `m3u-${currentContent.id}`,
-          title: currentContent.title,
-          // En anime, preferimos la descripción de AniList si está disponible
-          description:
-            (detailData && 'description' in detailData
-              ? (detailData as AnimeDetail).description || ''
-              : currentContent.overview || ''),
-          image: m3uData.image || currentContent.poster_path || '',
-          genres: detailData?.genres?.map((g: any) => typeof g === 'string' ? g : g.name) || [],
-          status: detailData && 'status' in detailData ? (detailData as any).status : 'UNKNOWN',
-          totalEpisodes: m3uData.totalEpisodes,
-          seasons: m3uData.seasons
+      const info = await getAnimeStreamingInfo(String(currentContent.id), currentContent.title);
+      if (info && info.seasons && info.seasons.length > 0) {
+        let desc = '';
+        const baseDesc = (detailData && 'description' in detailData
+          ? (detailData as AnimeDetail).description || ''
+          : currentContent.overview || '');
+        const isSpanish = (text: string) => {
+          const t = (text || '').toLowerCase();
+          if (!t) return false;
+          const marks = ['á','é','í','ó','ú','ñ'];
+          const words = [' el ',' la ',' los ',' las ',' de ',' del ',' y ',' que ',' para ',' con '];
+          const mCount = marks.reduce((c, m) => c + (t.includes(m) ? 1 : 0), 0);
+          const wCount = words.reduce((c, w) => c + (t.includes(w) ? 1 : 0), 0);
+          return mCount + wCount >= 3;
         };
-        
+        if (isSpanish(baseDesc)) {
+          desc = baseDesc;
+        } else {
+          const q = currentContent.title || '';
+          let alt: any = null;
+          if (isAnimeMovie()) {
+            const res = await searchMovies(q).catch(() => []);
+            alt = Array.isArray(res) && res.length ? res[0] : null;
+          } else {
+            const res = await searchTVShows(q).catch(() => []);
+            alt = Array.isArray(res) && res.length ? res[0] : null;
+          }
+          desc = (alt?.overview || baseDesc || '').toString();
+        }
+        const streamingInfo: StreamingInfo = {
+          animeId: info.animeId,
+          title: info.title,
+          description: desc || info.description || currentContent.overview || '',
+          image: info.image || currentContent.poster_path || '',
+          genres: detailData?.genres?.map((g: any) => typeof g === 'string' ? g : g.name) || info.genres || [],
+          status: detailData && 'status' in detailData ? (detailData as any).status : info.status || 'UNKNOWN',
+          totalEpisodes: info.totalEpisodes,
+          seasons: info.seasons
+        };
         setStreamingInfo(streamingInfo);
         setSelectedSeason(streamingInfo.seasons[0]);
-    console.log('Successfully loaded M3U streaming data');
+        console.log('Streaming info loaded via unified service');
         return;
       }
-      
-      // Si no está en M3U, mostrar mensaje informativo
-    console.log('Anime not found in M3U file:', currentContent.title);
-    console.log('Only M3U data is available. External APIs are disabled.');
-      
-      // Crear datos mock básicos para mostrar la interfaz
       const realEpisodeCount = detailData && 'episodes' in detailData ? (detailData as any).episodes : 12;
       const mockData = createMockStreamingInfo(currentContent.title, realEpisodeCount);
       setStreamingInfo(mockData);
@@ -265,8 +273,7 @@ export default function AnimeSeriesModal({
       }
       
     } catch (error) {
-    console.error('Error loading M3U data:', error);
-    console.log('Only M3U data is available. External APIs are disabled.');
+    console.error('Error loading streaming data:', error);
       
       // Crear datos mock básicos para mostrar la interfaz
       const realEpisodeCount = detailData && 'episodes' in detailData ? (detailData as any).episodes : 12;
@@ -435,7 +442,7 @@ export default function AnimeSeriesModal({
     // Series de anime: reproducir primer episodio de la primera temporada
     if (
       currentContent?.type === 'anime' &&
-      isRealAnime() &&
+      streamingInfo &&
       streamingInfo &&
       Array.isArray(streamingInfo.seasons) &&
       streamingInfo.seasons.length > 0
@@ -459,6 +466,20 @@ export default function AnimeSeriesModal({
     }
 
     Alert.alert('Contenido no disponible', 'No hay episodios disponibles para reproducir.');
+  };
+
+  const handlePlayTrailer = () => {
+    if (!trailerKey) {
+      Alert.alert('Sin trailer', 'No hay trailer disponible para este título.');
+      return;
+    }
+    setTrailerFinished(false);
+    setTrailerDelay(true);
+  };
+
+  const handleCloseTrailer = () => {
+    setTrailerDelay(false);
+    setTrailerFinished(true);
   };
 
   const handleToggleList = async () => {
@@ -565,7 +586,13 @@ export default function AnimeSeriesModal({
       try {
         window.open(`https://www.youtube.com/watch?v=${key}`, '_blank');
       } catch (e) {
-        // Ignorar errores de apertura
+        
+      }
+    } else {
+      try {
+        Linking.openURL(`https://www.youtube.com/watch?v=${key}`);
+      } catch (e) {
+        
       }
     }
   };
@@ -702,9 +729,11 @@ export default function AnimeSeriesModal({
         
         <View style={styles.content}>
           {/* Botón cerrar estilo Netflix */}
-          <TouchableOpacity style={styles.closeButton} onPress={handleClose}>
-            <Ionicons name="close" size={28} color="#FFFFFF" />
-          </TouchableOpacity>
+          {!(trailerDelay && trailerKey && !trailerFinished) && (
+            <TouchableOpacity style={styles.closeButton} onPress={handleClose}>
+              <Ionicons name="close" size={28} color="#FFFFFF" />
+            </TouchableOpacity>
+          )}
 
           <ScrollView 
             showsVerticalScrollIndicator={false} 
@@ -728,6 +757,10 @@ export default function AnimeSeriesModal({
               {/* Imagen de fondo o trailer */}
               {trailerDelay && trailerKey && !trailerFinished ? (
                 <View style={styles.trailerBackground}>
+                  <TouchableOpacity style={styles.trailerCloseButton} onPress={handleCloseTrailer}>
+                    <Ionicons name="close" size={20} color="#FFFFFF" />
+                    <Text style={styles.trailerCloseText}>Cerrar</Text>
+                  </TouchableOpacity>
                   {Platform.OS === 'web' ? (
                     <iframe
                       style={{
@@ -765,9 +798,9 @@ export default function AnimeSeriesModal({
                       mediaPlaybackRequiresUserAction={false}
                       scalesPageToFit={true}
                       onError={() => {
-                        // Si el trailer falla, ocultarlo y volver al backdrop
                         setTrailerDelay(false);
                         setTrailerFinished(true);
+                        openExternalTrailer(trailerKey);
                       }}
                       onLoadEnd={() => {
                         setTimeout(() => {
@@ -837,6 +870,10 @@ export default function AnimeSeriesModal({
                         <TouchableOpacity style={styles.playButton} onPress={handleWatchNow}>
                           <Ionicons name="play" size={20} color="#000" />
                           <Text style={styles.playButtonText}>Ver ahora</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity style={styles.trailerButton} onPress={handlePlayTrailer} disabled={!trailerKey}>
+                          <Ionicons name="play-circle" size={20} color="#FFFFFF" />
+                          <Text style={styles.trailerButtonText}>Ver trailer</Text>
                         </TouchableOpacity>
                       </View>
                     )}
@@ -916,50 +953,10 @@ export default function AnimeSeriesModal({
                 )}
               </View>
 
-              {/* Botones de acción para PELÍCULAS de anime (Mi lista y Descargas) */}
-              {currentContent?.type === 'anime' && isAnimeMovie() && (
-                <View style={styles.streamingSection}>
-                  <View style={styles.actionButtons}>
-                    {/* Mi Lista */}
-                    <TouchableOpacity 
-                      style={[styles.myListButton, isTogglingMyList && { opacity: 0.6 }]}
-                      onPress={handleToggleList}
-                      disabled={isTogglingMyList}
-                    >
-                      {isTogglingMyList ? (
-                        <ActivityIndicator size="small" color="#FFFFFF" />
-                      ) : (
-                        <Ionicons 
-                          name={currentInMyList ? "checkmark" : "add"} 
-                          size={20} 
-                          color="#FFFFFF" 
-                        />
-                      )}
-                      <Text style={styles.myListButtonText}>
-                        {isTogglingMyList ? "Procesando..." : (currentInMyList ? "En mi lista" : "Mi lista")}
-                      </Text>
-                    </TouchableOpacity>
+              {/* Botones de acción específicos para películas eliminados para evitar duplicados */}
 
-                    {/* Descargas (no disponible para películas de anime) */}
-                    <TouchableOpacity 
-                      style={[styles.downloadButton, { opacity: 0.5 }]}
-                      disabled
-                    >
-                      <Ionicons 
-                        name={"download-outline"}
-                        size={20} 
-                        color="#FFFFFF" 
-                      />
-                      <Text style={styles.downloadButtonText}>
-                        No disponible
-                      </Text>
-                    </TouchableOpacity>
-                  </View>
-                </View>
-              )}
-
-              {/* Streaming Episodes for Anime - Solo para animes reales */}
-              {currentContent?.type === 'anime' && isRealAnime() && (
+              {/* Streaming Episodes for Anime - mostrar si hay datos del M3U */}
+              {currentContent?.type === 'anime' && streamingInfo && Array.isArray(streamingInfo.seasons) && streamingInfo.seasons.length > 0 && (
                 <View style={styles.streamingSection}>
                   <View style={styles.streamingHeader}>
                     <Text style={styles.streamingTitle}>Episodios</Text>
@@ -972,7 +969,7 @@ export default function AnimeSeriesModal({
                     )}
                   </View>
 
-                  {/* Botones de acción reubicados: Mi Lista y Descargas arriba de las temporadas */}
+                  {/* Botones de acción: Mi Lista y Descargas arriba de las temporadas */}
                   <View style={styles.actionButtons}>
                     <TouchableOpacity 
                       style={[styles.myListButton, isTogglingMyList && { opacity: 0.6 }]}
@@ -995,9 +992,9 @@ export default function AnimeSeriesModal({
 
                     {/* Botón de Descargas */}
                     <TouchableOpacity 
-                      style={[styles.downloadButton, isTogglingDownloads && { opacity: 0.6 }]}
+                      style={[styles.downloadButton, (isTogglingDownloads || isAnimeMovie()) && { opacity: 0.6 }]}
                       onPress={() => currentInDownloads ? handleRemoveFromDownloads() : handleDownloadOptions()}
-                      disabled={isTogglingDownloads}
+                      disabled={isTogglingDownloads || isAnimeMovie()}
                     >
                       {isTogglingDownloads ? (
                         <ActivityIndicator size="small" color="#FFFFFF" />
@@ -1009,7 +1006,11 @@ export default function AnimeSeriesModal({
                         />
                       )}
                       <Text style={styles.downloadButtonText}>
-                        {isTogglingDownloads ? "Procesando..." : (currentInDownloads ? "En descargas" : "Descargar")}
+                        {isTogglingDownloads 
+                          ? "Procesando..." 
+                          : isAnimeMovie() 
+                            ? "No disponible" 
+                            : (currentInDownloads ? "En descargas" : "Descargar")}
                       </Text>
                     </TouchableOpacity>
                   </View>
@@ -1103,13 +1104,31 @@ export default function AnimeSeriesModal({
                   ) : (
                     <View style={styles.noEpisodesContainer}>
                       <Text style={styles.noEpisodesText}>
-                        Este anime no está disponible en la biblioteca M3U
+                        No se encontraron episodios para este anime
                       </Text>
                       <Text style={styles.noEpisodesSubtext}>
-                        Solo se muestran animes del archivo M3U local
+                        Intenta nuevamente o prueba con otro título
                       </Text>
                     </View>
                   )}
+                </View>
+              )}
+              {currentContent?.type === 'anime' && (!streamingInfo || !Array.isArray(streamingInfo.seasons) || streamingInfo.seasons.length === 0) && (
+                <View style={styles.streamingSection}>
+                  <View style={styles.streamingHeader}>
+                    <Text style={styles.streamingTitle}>Episodios</Text>
+                  </View>
+                  <View style={{ paddingHorizontal: 20, paddingVertical: 12 }}>
+                    <Text style={{ color: '#b3b3b3', marginBottom: 12 }}>
+                      No se pudieron cargar los episodios. Verifica tu conexión o la URL del M3U.
+                    </Text>
+                    <View style={styles.actionButtons}>
+                      <TouchableOpacity style={styles.myListButton} onPress={handleRefresh}>
+                        <Ionicons name="refresh" size={20} color="#FFFFFF" />
+                        <Text style={styles.myListButtonText}>Reintentar</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
                 </View>
               )}
 
@@ -1160,51 +1179,57 @@ export default function AnimeSeriesModal({
 
             {/* Contenido relacionado */}
             <View style={styles.relatedSection}>
-              <Text style={styles.relatedTitle}>
-                {currentContent?.type === 'movie' ? 'Más películas similares' :
-                 currentContent?.type === 'tv' ? 'Más series similares' :
-                 currentContent?.type === 'anime' && isRealAnime() ? 'Más anime similar' :
-                 currentContent?.type === 'anime' ? 'Más películas de anime similares' :
-                 'Más títulos similares'}
-              </Text>
-                
-              {loadingRelated ? (
-                <View style={styles.relatedLoading}>
-                  <ActivityIndicator size="small" color="#E50914" />
-                </View>
-              ) : relatedContent.length > 0 ? (
-                <FlatList
-                  data={relatedContent}
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  keyExtractor={(item) => `${item.source}-${item.type}-${item.id}`}
-                  renderItem={({ item }) => (
-                    <TouchableOpacity
-                      style={styles.relatedCard}
-                      onPress={() => {
-                        setCurrentContent(item);
-                        setTrailerDelay(false);
-                        setTrailerFinished(false);
-                        loadContentDetails();
-                        loadRelatedContent();
-                      }}
-                    >
-                      <Image
-                        source={{ uri: item.source === 'anilist' ? getAnimeImageUrl(item.poster_path) : getImageUrl(item.poster_path, 'w500') }}
-                        style={styles.relatedPoster}
-                        resizeMode="cover"
-                      />
-                    </TouchableOpacity>
-                  )}
-                  contentContainerStyle={{ paddingHorizontal: 20 }}
-                />
-              ) : (
-                <View style={styles.noRelatedContainer}>
-                  <Text style={styles.noRelatedText}>
-                    No hay contenido relacionado disponible
+                  <Text style={styles.relatedTitle}>
+                    {currentContent?.type === 'movie' ? 'Más películas similares' :
+                     currentContent?.type === 'tv' ? 'Más series similares' :
+                     currentContent?.type === 'anime' && isRealAnime() ? 'Más anime similar' :
+                     currentContent?.type === 'anime' ? 'Más películas de anime similares' :
+                     'Más títulos similares'}
                   </Text>
-                </View>
-              )}
+                  
+                  {loadingRelated ? (
+                    <View style={styles.relatedLoading}>
+                      <ActivityIndicator size="small" color="#E50914" />
+                    </View>
+                  ) : relatedContent.length > 0 ? (
+                    <FlatList
+                      data={relatedContent}
+                      horizontal
+                      showsHorizontalScrollIndicator={false}
+                      nestedScrollEnabled={true}
+                      scrollEnabled={true}
+                      decelerationRate="fast"
+                      snapToAlignment="start"
+                      snapToInterval={132}
+                      disableIntervalMomentum={true}
+                      keyExtractor={(item) => `${item.source}-${item.type}-${item.id}`}
+                      renderItem={({ item }) => (
+                        <TouchableOpacity
+                          style={styles.relatedCard}
+                          onPress={() => {
+                            setCurrentContent(item);
+                            setTrailerDelay(false);
+                            setTrailerFinished(false);
+                            loadContentDetails();
+                            loadRelatedContent();
+                          }}
+                        >
+                          <Image
+                            source={{ uri: item.source === 'anilist' ? getAnimeImageUrl(item.poster_path) : getImageUrl(item.poster_path, 'w500') }}
+                            style={styles.relatedPoster}
+                            resizeMode="cover"
+                          />
+                        </TouchableOpacity>
+                      )}
+                      contentContainerStyle={{ paddingHorizontal: 20 }}
+                    />
+                  ) : (
+                    <View style={styles.noRelatedContainer}>
+                      <Text style={styles.noRelatedText}>
+                        No hay contenido relacionado disponible
+                      </Text>
+                    </View>
+                  )}
             </View>
           </ScrollView>
         </View>
@@ -1252,7 +1277,7 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     flexGrow: 1,
-    paddingBottom: 100, // Más espacio al final para scroll completo
+    paddingBottom: 16,
   },
   heroSection: {
     height: 400, // Altura fija en lugar de porcentaje
@@ -1410,6 +1435,24 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 16,
     fontWeight: '600',
+  },
+  trailerCloseButton: {
+    position: 'absolute',
+    top: 16,
+    right: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 20,
+    zIndex: 2,
+  },
+  trailerCloseText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '600',
+    marginLeft: 6,
   },
   detailsSection: {
     padding: 20,

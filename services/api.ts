@@ -2,7 +2,7 @@ import axios from 'axios';
 import { Movie, MovieDetail, TVShow, TVShowDetail, Anime, AnimeDetail, ContentItem } from '../types';
 import * as AniListService from './anilistService';
 
-const API_KEY = 'fdb82cd7ca3f789281b9484719b26df2';
+const API_KEY = process.env.EXPO_PUBLIC_TMDB_API_KEY as string;
 const BASE_URL = 'https://api.themoviedb.org/3';
 const IMAGE_BASE = 'https://image.tmdb.org/t/p';
 
@@ -243,17 +243,9 @@ export const animeToContentItem = (anime: Anime): ContentItem => {
 // Obtener contenido popular combinado (películas, series y anime)
 export const getAllPopularContent = async (page: number = 1): Promise<ContentItem[]> => {
   try {
-    const [movies, tvShows, anime] = await Promise.all([
-      getPopularMovies(page),
-      getPopularTVShows(page),
-      AniListService.getPopularAnime(page),
-    ]);
-
-    const movieItems = movies.slice(0, 6).map(movie => tmdbToContentItem(movie, 'movie'));
-    const tvItems = tvShows.slice(0, 6).map(show => tmdbToContentItem(show, 'tv'));
-    const animeItems = anime.slice(0, 8).map(animeToContentItem);
-
-    return [...movieItems, ...tvItems, ...animeItems];
+    const anime = await AniListService.getPopularAnime(page);
+    const animeItems = anime.map(animeToContentItem);
+    return animeItems;
   } catch (error) {
     console.error('Error fetching all popular content:', error);
     return [];
@@ -263,17 +255,9 @@ export const getAllPopularContent = async (page: number = 1): Promise<ContentIte
 // Obtener contenido mejor valorado combinado
 export const getAllTopRatedContent = async (page: number = 1): Promise<ContentItem[]> => {
   try {
-    const [movies, tvShows, anime] = await Promise.all([
-      getTopRatedMovies(page),
-      getTopRatedTVShows(page),
-      AniListService.getTopRatedAnime(page),
-    ]);
-
-    const movieItems = movies.slice(0, 6).map(movie => tmdbToContentItem(movie, 'movie'));
-    const tvItems = tvShows.slice(0, 6).map(show => tmdbToContentItem(show, 'tv'));
-    const animeItems = anime.slice(0, 8).map(animeToContentItem);
-
-    return [...movieItems, ...tvItems, ...animeItems];
+    const anime = await AniListService.getTopRatedAnime(page);
+    const animeItems = anime.map(animeToContentItem);
+    return animeItems;
   } catch (error) {
     console.error('Error fetching all top rated content:', error);
     return [];
@@ -282,47 +266,22 @@ export const getAllTopRatedContent = async (page: number = 1): Promise<ContentIt
 
 // Búsqueda unificada en todas las APIs
 export const searchAllContent = async (query: string): Promise<ContentItem[]> => {
-  // Hacer la búsqueda resiliente: si AniList falla (p.ej. por CORS en web),
-  // devolver al menos resultados de TMDB.
   const normalizedQuery = (query ?? '').toString().trim().toLowerCase();
-  const results = await Promise.allSettled([
-    searchMovies(normalizedQuery),
-    searchTVShows(normalizedQuery),
-    // Reducir presión sobre AniList: limitar por página a 8
-    AniListService.searchAnime(normalizedQuery, 1, 8),
-  ]);
-
-  const movies = results[0].status === 'fulfilled' ? results[0].value : [];
-  const tvShows = results[1].status === 'fulfilled' ? results[1].value : [];
-  const anime = results[2].status === 'fulfilled' ? results[2].value : [];
-
-  if (results[2].status === 'rejected') {
-    const err = (results[2] as PromiseRejectedResult).reason;
-    // Log más discreto para no spamear la consola durante la escritura
-    console.warn('AniList search falló, continuando solo con TMDB:', err?.message || err);
+  try {
+    const anime = await AniListService.searchAnime(normalizedQuery, 1, 16);
+    return anime.map(animeToContentItem);
+  } catch (error) {
+    console.error('Error searching anime content:', error);
+    return [];
   }
-
-  const movieItems = movies.map(movie => tmdbToContentItem(movie, 'movie'));
-  const tvItems = tvShows.map(show => tmdbToContentItem(show, 'tv'));
-  const animeItems = anime.map(animeToContentItem);
-
-  return [...movieItems, ...tvItems, ...animeItems];
 };
 
 // Obtener contenido en emisión/cartelera
 export const getCurrentContent = async (page: number = 1): Promise<ContentItem[]> => {
   try {
-    const [movies, tvShows, anime] = await Promise.all([
-      getNowPlayingMovies(page),
-      getOnTheAirTVShows(page),
-      AniListService.getAiringAnime(page),
-    ]);
-
-    const movieItems = movies.slice(0, 6).map(movie => tmdbToContentItem(movie, 'movie'));
-    const tvItems = tvShows.slice(0, 6).map(show => tmdbToContentItem(show, 'tv'));
-    const animeItems = anime.slice(0, 8).map(animeToContentItem);
-
-    return [...movieItems, ...tvItems, ...animeItems];
+    const anime = await AniListService.getAiringAnime(page);
+    const animeItems = anime.map(animeToContentItem);
+    return animeItems;
   } catch (error) {
     console.error('Error fetching current content:', error);
     return [];

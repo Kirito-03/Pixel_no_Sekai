@@ -1,9 +1,9 @@
 import { Anime, AnimeDetail, VideoSource, StreamingInfo, AnimeEpisode, AnimeSeason } from '../types';
 import { getStreamingInfoFromM3U, getEpisodeSourcesFromM3U, getAvailableAnimes } from './m3uParser';
 import { Platform } from 'react-native';
+import { buildServerURL } from '../utils/networkUtils';
 
-// Flag: usar únicamente M3U (desactivar todas las APIs externas)
-const USE_EXTERNAL_PROVIDERS = false;
+const USE_EXTERNAL_PROVIDERS = true;
 
 // Base URLs for different providers
 const CONSUMET_BASE_URL = 'https://cors.nganime.my.id/https://api.consumet.org';
@@ -14,11 +14,12 @@ const ANIME_API_ALT_URL = 'https://anime-api.canelacho.com';
 const ANIMEFLIX_BASE_URL = 'https://api.animeflix.live';
 const ANIME_API_NEW_URL = 'https://api.animeapi.xyz';
 const ANIME_API_EXTRA_URL = 'https://api.animeapi.net';
+const ANBUANIME_BASE_URL = 'https://anbuanime.onrender.com';
 
 // Types imported from ../types unify streaming data across the app
 
 // Function to make API requests with multiple providers
-const makeRequest = async (endpoint: string, params?: Record<string, any>, provider: 'consumet' | 'jikan' | 'anilist' | 'animeapi' | 'animeapi-alt' | 'animeflix' | 'animeapi-new' | 'animeapi-extra' = 'consumet') => {
+const makeRequest = async (endpoint: string, params?: Record<string, any>, provider: 'consumet' | 'jikan' | 'anilist' | 'animeapi' | 'animeapi-alt' | 'animeflix' | 'animeapi-new' | 'animeapi-extra' | 'anbuanime' = 'consumet') => {
   // En Web, nunca llamamos proveedores externos
   if (!USE_EXTERNAL_PROVIDERS) {
     throw new Error('External providers disabled on web');
@@ -50,6 +51,9 @@ const makeRequest = async (endpoint: string, params?: Record<string, any>, provi
       break;
     case 'animeapi-extra':
       baseUrl = ANIME_API_EXTRA_URL;
+      break;
+    case 'anbuanime':
+      baseUrl = ANBUANIME_BASE_URL;
       break;
     default:
       baseUrl = CONSUMET_BASE_URL;
@@ -185,6 +189,57 @@ export const getAnimeStreamingInfo = async (animeId: string, animeTitle?: string
       };
     }
   console.log(`Anime not found in M3U: ${animeTitle}`);
+    if (USE_EXTERNAL_PROVIDERS) {
+      try {
+      console.log(`Searching Anbuanime for: ${animeTitle}`);
+        const searchData = await makeRequest('/search', { keyw: animeTitle }, 'anbuanime');
+        const results = Array.isArray(searchData) ? searchData : (searchData?.results || []);
+        if (!results || results.length === 0) {
+        console.log('No results from Anbuanime search');
+          return null;
+        }
+        const bestMatch = results.find((r: any) => (r.animeTitle || '').toLowerCase() === animeTitle.toLowerCase()) || results[0];
+        const extId = bestMatch.animeId || bestMatch.id || bestMatch.slug;
+        if (!extId) {
+        console.log('Missing animeId in Anbuanime result');
+          return null;
+        }
+        const detailsData = await makeRequest(`/anime-details/${encodeURIComponent(extId)}`, undefined, 'anbuanime');
+        if (!detailsData) {
+        console.log('No details from Anbuanime');
+          return null;
+        }
+        const episodesList = detailsData.episodesList || detailsData.episodes || [];
+        const episodes: AnimeEpisode[] = (episodesList || []).map((ep: any) => ({
+          id: ep.episodeId || ep.id,
+          number: parseInt(ep.episodeNum || ep.number || '0', 10),
+          title: `Episode ${ep.episodeNum || ep.number}`,
+          url: ep.episodeUrl || ep.url,
+          sources: []
+        })).filter((e: AnimeEpisode) => !!e.id);
+        const season: AnimeSeason = {
+          id: 'season-1',
+          title: 'Season 1',
+          season: 1,
+          episodes
+        };
+        const info: StreamingInfo = {
+          animeId: `anbuanime-${extId}`,
+          title: detailsData.animeTitle || animeTitle,
+          description: detailsData.synopsis || '',
+          image: detailsData.animeImg || '',
+          genres: detailsData.genres || [],
+          status: detailsData.status || 'UNKNOWN',
+          totalEpisodes: parseInt(detailsData.episodesAvaliable || episodes.length || '0', 10) || episodes.length,
+          seasons: [season]
+        };
+      console.log(`Found Anbuanime data: ${info.totalEpisodes} episodes`);
+        return info;
+      } catch (e) {
+      console.error('Error fetching Anbuanime data:', e);
+        return null;
+      }
+    }
     return null;
   } catch (error) {
   console.error('Error loading M3U data:', error);
@@ -194,23 +249,80 @@ export const getAnimeStreamingInfo = async (animeId: string, animeTitle?: string
 
 // Get episode sources (video URLs) - únicamente M3U, simplificado
 export const getEpisodeSources = async (episodeId: string, animeTitle?: string, season?: number, episodeNumber?: number): Promise<VideoSource[]> => {
-  if (!animeTitle || !season || !episodeNumber) {
-  console.log('Missing anime title, season, or episode number for M3U search');
-    return [];
-  }
-
   try {
-  console.log(`Searching M3U for episode: ${animeTitle} S${season}E${episodeNumber}`);
-    const m3uSources = await getEpisodeSourcesFromM3U(animeTitle, season, episodeNumber);
-    if (m3uSources?.length) {
-  console.log(`Found video URL: ${m3uSources[0].url}`);
-      // Devolver solo la primera fuente (la URL del video)
-      return [{ url: m3uSources[0].url }];
+    if (animeTitle && season && episodeNumber) {
+    console.log(`Searching M3U for episode: ${animeTitle} S${season}E${episodeNumber}`);
+      const m3uSources = await getEpisodeSourcesFromM3U(animeTitle, season, episodeNumber);
+      if (m3uSources?.length) {
+        console.log(`Found video URL: ${m3uSources[0].url}`);
+        const url = m3uSources[0].url;
+        const isMkv = /\.mkv(\?|$)/i.test(url);
+        if (isMkv) {
+          try {
+            const resp = await fetch(buildServerURL('/transcode/hls'), {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+              body: new URLSearchParams({ src: url }).toString(),
+            });
+            const data = await resp.json().catch(() => null);
+            const playlist = data?.playlist_url || '';
+            if (playlist) {
+              // Poll for playlist availability (up to ~10s)
+              const maxTries = 60;
+              for (let i = 0; i < maxTries; i++) {
+                try {
+                  const check = await fetch(playlist, { method: 'GET', cache: 'no-store' as any });
+                  if (check.ok) {
+                    console.log(`Using HLS playlist: ${playlist}`);
+                    return [{ url: playlist, isM3U8: true }];
+                  }
+                } catch {}
+                await new Promise(r => setTimeout(r, 500));
+              }
+            }
+          } catch (e) {
+            console.error('Error requesting HLS transcode:', e);
+          }
+          // If HLS not ready, try external providers before falling back
+          // On web, avoid returning MKV direct (not supported)
+          if (Platform.OS !== 'web') {
+            return [{ url }];
+          }
+          // Fall-through to try external providers below
+        } else {
+          // Non-MKV source from M3U is likely playable
+          return [{ url }];
+        }
+      }
+      console.log(`No sources found in M3U for: ${animeTitle} S${season}E${episodeNumber}`);
     }
-  console.log(`No sources found in M3U for: ${animeTitle} S${season}E${episodeNumber}`);
+
+    if (USE_EXTERNAL_PROVIDERS && episodeId) {
+      console.log(`Fetching sources from Anbuanime for episode: ${episodeId}`);
+      const endpoints = [`/vidcdn/watch/${encodeURIComponent(episodeId)}`, `/streamsb/watch/${encodeURIComponent(episodeId)}`];
+      for (const ep of endpoints) {
+        try {
+          const data = await makeRequest(ep, undefined, 'anbuanime');
+          const rawSources = data?.sources || data?.stream || data?.result || [];
+          const mapped: VideoSource[] = (rawSources || []).map((s: any) => ({
+            url: s.file || s.url || s.source || '',
+            quality: s.label || s.quality || 'unknown',
+            isM3U8: !!(s.type === 'hls' || (s.file || s.url || '').includes('.m3u8'))
+          })).filter((s: VideoSource) => !!s.url);
+          if (mapped.length) {
+            console.log(`Found ${mapped.length} sources from ${ep.includes('vidcdn') ? 'VIDCDN' : 'StreamSB'}`);
+            return mapped;
+          }
+        } catch (e) {
+          console.log(`Provider failed for ${ep}:`, (e as any)?.message || e);
+          continue;
+        }
+      }
+      console.log('No external sources found');
+    }
     return [];
   } catch (error) {
-  console.error('Error loading M3U episode sources:', error);
+  console.error('Error loading episode sources:', error);
     return [];
   }
 };

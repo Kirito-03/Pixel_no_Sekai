@@ -1,4 +1,8 @@
 import axios from 'axios';
+import { db, auth, storage } from './firebase';
+import { collection, addDoc, deleteDoc, doc, onSnapshot, query, orderBy, where, getDocs, serverTimestamp, setDoc, getDoc } from 'firebase/firestore';
+import { ref as storageRef, uploadBytes, uploadString, getDownloadURL } from 'firebase/storage';
+import * as FileSystemLegacy from 'expo-file-system/legacy';
 import { Platform } from 'react-native';
 import { loadNetworkConfig, saveNetworkConfig, clearNetworkConfig } from '../utils/networkStorage';
 import { getCandidateBaseURLs } from '../utils/networkUtils';
@@ -218,8 +222,13 @@ export const databaseService = {
    * Se usa después del login para saber si el usuario debe crear su primer perfil.
    */
   async getProfiles(userId: number) {
-    const { data } = await axiosInstance.get('/profiles', { params: { userId } });
-    return data;
+    const uid = auth.currentUser?.uid;
+    if (!uid) {
+      return [];
+    }
+    const ref = collection(db, `profiles/${uid}/profiles`);
+    const snap = await getDocs(ref);
+    return snap.docs.map(d => ({ id: Number(d.id), ...(d.data() as any) }));
   },
 
   /**
@@ -227,40 +236,36 @@ export const databaseService = {
    * Se llama desde la nueva pantalla "CreateProfileScreen".
    */
   async createProfile(payload: CreateProfilePayload) {
-    console.log('🔄 DatabaseService: Creando perfil...', {
-      baseURL: axiosInstance.defaults.baseURL || getCurrentBaseURL(),
-      endpoint: '/profiles',
-      payload,
-    });
-    try {
-      const { data } = await axiosInstance.post('/profiles', payload);
-      console.log('✅ DatabaseService: Perfil creado', data);
-      return data;
-    } catch (error: any) {
-      const status = error?.response?.status;
-      const errData = error?.response?.data;
-      console.error('❌ DatabaseService: Error al crear perfil', {
-        status,
-        error: errData || error.message,
-      });
-      throw error;
-    }
+    const uid = auth.currentUser?.uid;
+    if (!uid) throw new Error('No auth user');
+    const profileId = Date.now();
+    const ref = doc(db, `profiles/${uid}/profiles/${profileId}`);
+    const body = { name: payload.name, avatar_url: payload.avatar_url, created_at: serverTimestamp() };
+    await setDoc(ref, body);
+    return { id: profileId, ...body } as any;
   },
 
   /**
    * Actualiza un perfil específico.
    */
   async updateProfile(profileId: number, updates: { name?: string; avatar_url?: string }) {
-    const { data } = await axiosInstance.put(`/profiles/${profileId}`, updates);
-    return data;
+    const uid = auth.currentUser?.uid;
+    if (!uid) throw new Error('No auth user');
+    const ref = doc(db, `profiles/${uid}/profiles/${profileId}`);
+    await setDoc(ref, { ...updates, updated_at: serverTimestamp() }, { merge: true });
+    const snap = await getDoc(ref);
+    return { id: profileId, ...(snap.data() as any) };
   },
 
   /**
    * Elimina un perfil específico.
    */
   async deleteProfile(profileId: number) {
-    const { data } = await axiosInstance.delete(`/profiles/${profileId}`);
-    return data;
+    const uid = auth.currentUser?.uid;
+    if (!uid) throw new Error('No auth user');
+    const ref = doc(db, `profiles/${uid}/profiles/${profileId}`);
+    await deleteDoc(ref);
+    return { ok: true } as any;
   },
 
   // --- El resto de funciones para la lista del usuario ---
@@ -268,25 +273,19 @@ export const databaseService = {
   async getMyList(perfilId: number) {
     console.log(`🔄 DatabaseService: Getting MyList for profile: ${perfilId}`);
     try {
-      console.log(`📤 DatabaseService: GET /my-list/${perfilId}`);
-      
-      const { data } = await axiosInstance.get(`/my-list/${perfilId}`);
-      
+      const profileDocId = auth.currentUser?.uid || String(perfilId);
+      const ref = collection(db, `profiles/${profileDocId}/mylist`);
+      const q = query(ref, orderBy('added_at', 'desc'));
+      const snap = await getDocs(q);
+      const items = snap.docs.map(d => d.data() as { content_id: number; content_type: 'movie' | 'tv' | 'anime' });
       console.log(`✅ DatabaseService: MyList retrieved`, {
-        profileId: perfilId,
-        itemCount: data?.length || 0,
-        items: data?.map((item: any) => ({
-          id: item.content_id,
-          type: item.content_type
-        })) || []
+        profileId: profileDocId,
+        itemCount: items.length,
+        items: items.map((item: any) => ({ id: item.content_id, type: item.content_type }))
       });
-      
-      return data;
+      return items;
     } catch (error: any) {
-      console.error(`❌ DatabaseService: Error getting MyList`, {
-        perfilId,
-        error: error.response?.data || error.message
-      });
+      console.error(`❌ DatabaseService: Error getting MyList`, error);
       throw error;
     }
   },
@@ -294,20 +293,14 @@ export const databaseService = {
   async addToMyList(perfilId: number, contentId: number, type: 'movie' | 'tv' | 'anime') {
     console.log(`🔄 DatabaseService: Adding to MyList - Profile: ${perfilId}, Content: ${contentId}, Type: ${type}`);
     try {
-      const payload = { content_id: contentId, content_type: type };
-      console.log(`📤 DatabaseService: POST /my-list/${perfilId}/items`, payload);
-      
-      const { data } = await axiosInstance.post(`/my-list/${perfilId}/items`, payload);
-      
-      console.log(`✅ DatabaseService: Successfully added to MyList`, data);
-      return data;
+      const profileDocId = auth.currentUser?.uid || String(perfilId);
+      const ref = collection(db, `profiles/${profileDocId}/mylist`);
+      const payload = { content_id: contentId, content_type: type, added_at: serverTimestamp() };
+      const res = await addDoc(ref, payload);
+      console.log(`✅ DatabaseService: Successfully added to MyList`, { id: res.id, ...payload });
+      return { id: res.id, ...payload } as any;
     } catch (error: any) {
-      console.error(`❌ DatabaseService: Error adding to MyList`, {
-        perfilId,
-        contentId,
-        type,
-        error: error.response?.data || error.message
-      });
+      console.error(`❌ DatabaseService: Error adding to MyList`, error);
       throw error;
     }
   },
@@ -315,19 +308,16 @@ export const databaseService = {
   async removeFromMyList(perfilId: number, contentId: number, type: 'movie' | 'tv' | 'anime') {
     console.log(`🔄 DatabaseService: Removing from MyList - Profile: ${perfilId}, Content: ${contentId}, Type: ${type}`);
     try {
-      console.log(`📤 DatabaseService: DELETE /my-list/${perfilId}/items/${contentId}/${type}`);
-      
-      const { data } = await axiosInstance.delete(`/my-list/${perfilId}/items/${contentId}/${type}`);
-      
-      console.log(`✅ DatabaseService: Successfully removed from MyList`, data);
-      return data;
+      const profileDocId = auth.currentUser?.uid || String(perfilId);
+      const ref = collection(db, `profiles/${profileDocId}/mylist`);
+      const q = query(ref, where('content_id', '==', contentId), where('content_type', '==', type));
+      const snap = await getDocs(q);
+      const batchDeletes = snap.docs.map(d => deleteDoc(doc(db, `profiles/${profileDocId}/mylist/${d.id}`)));
+      await Promise.all(batchDeletes);
+      console.log(`✅ DatabaseService: Successfully removed from MyList`, { contentId, type, deleted: snap.size });
+      return { ok: true } as any;
     } catch (error: any) {
-      console.error(`❌ DatabaseService: Error removing from MyList`, {
-        perfilId,
-        contentId,
-        type,
-        error: error.response?.data || error.message
-      });
+      console.error(`❌ DatabaseService: Error removing from MyList`, error);
       throw error;
     }
   },
@@ -335,13 +325,17 @@ export const databaseService = {
   // --- Funciones para descargas ---
 
   async getDownloads(perfilId: number) {
-    console.log(`🔄 DatabaseService: Getting Downloads for profile: ${perfilId}`);
+    console.log(`🔄 DatabaseService: Getting Downloads (Firestore) for profile: ${perfilId}`);
     try {
-      const { data } = await axiosInstance.get(`/downloads/${perfilId}`);
-      console.log('✅ DatabaseService: Downloads retrieved', { count: data?.length || 0 });
-      return data;
+      const profileDocId = auth.currentUser?.uid || String(perfilId);
+      const ref = collection(db, `profiles/${profileDocId}/downloads`);
+      const q = query(ref, orderBy('created_at', 'desc'));
+      const snap = await getDocs(q);
+      const items = snap.docs.map(d => d.data() as { content_id: number; content_type: 'movie' | 'tv' | 'anime'; status?: 'PENDING' | 'DOWNLOADING' | 'COMPLETED' | 'FAILED'; progress?: number; file_path?: string | null });
+      console.log('✅ DatabaseService: Downloads retrieved', { count: items.length });
+      return items;
     } catch (error: any) {
-      console.error('❌ DatabaseService: Error getting Downloads', error.response?.data || error.message);
+      console.error('❌ DatabaseService: Error getting Downloads (Firestore)', error.message);
       throw error;
     }
   },
@@ -352,46 +346,23 @@ export const databaseService = {
     type: 'movie' | 'tv' | 'anime',
     options?: { status?: 'PENDING' | 'DOWNLOADING' | 'COMPLETED' | 'FAILED'; progress?: number; file_path?: string | null }
   ) {
-    console.log(`🔄 DatabaseService: Adding to Downloads - Profile: ${perfilId}, Content: ${contentId}, Type: ${type}`);
+    console.log(`🔄 DatabaseService: Adding to Downloads (Firestore) - Profile: ${perfilId}, Content: ${contentId}, Type: ${type}`);
     try {
+      const profileDocId = auth.currentUser?.uid || String(perfilId);
+      const ref = collection(db, `profiles/${profileDocId}/downloads`);
       const payload = {
         content_id: contentId,
         content_type: type,
         status: options?.status ?? 'PENDING',
         progress: options?.progress ?? 0,
         file_path: options?.file_path ?? null,
+        created_at: serverTimestamp(),
       };
-      const { data } = await axiosInstance.post(`/downloads/${perfilId}/items`, payload);
-      console.log('✅ DatabaseService: Added to Downloads');
-      return data;
+      const res = await addDoc(ref, payload);
+      console.log('✅ DatabaseService: Added to Downloads (Firestore)', { id: res.id });
+      return { id: res.id, ...payload } as any;
     } catch (error: any) {
-      const status = error?.response?.status;
-      const message: string = error?.response?.data?.message || error?.message || '';
-      console.error('❌ DatabaseService: Error adding to Downloads', error.response?.data || error.message);
-
-      // Fallback: si el backend devuelve 404 porque no existe el registro de descargas del perfil,
-      // intentamos auto-crear con GET /downloads/:perfilId y reintentamos el POST.
-      if (status === 404 && /Descargas no encontrada para el perfil|Perfil no encontrado/i.test(message)) {
-        try {
-          console.log('➡️ Intentando auto-crear registro de descargas con GET /downloads/:perfilId...');
-          await this.getDownloads(perfilId); // backend debe auto-crear si falta
-          console.log('↪️ Reintentando añadir a Descargas...');
-          const retryPayload = {
-            content_id: contentId,
-            content_type: type,
-            status: options?.status ?? 'PENDING',
-            progress: options?.progress ?? 0,
-            file_path: options?.file_path ?? null,
-          };
-          const { data: retryData } = await axiosInstance.post(`/downloads/${perfilId}/items`, retryPayload);
-          console.log('✅ DatabaseService: Added to Downloads tras auto-creación');
-          return retryData;
-        } catch (retryErr: any) {
-          console.error('❌ Retry addToDownloads failed:', retryErr?.response?.data || retryErr?.message);
-          throw retryErr;
-        }
-      }
-
+      console.error('❌ DatabaseService: Error adding to Downloads (Firestore)', error.message);
       throw error;
     }
   },
@@ -403,22 +374,31 @@ export const databaseService = {
     updates: { status?: 'PENDING' | 'DOWNLOADING' | 'COMPLETED' | 'FAILED'; progress?: number; file_path?: string | null }
   ) {
     try {
-      const { data } = await axiosInstance.put(`/downloads/${perfilId}/items/${contentId}/${type}`, updates);
-      return data;
+      const profileDocId = auth.currentUser?.uid || String(perfilId);
+      const ref = collection(db, `profiles/${profileDocId}/downloads`);
+      const q = query(ref, where('content_id', '==', contentId), where('content_type', '==', type));
+      const snap = await getDocs(q);
+      await Promise.all(snap.docs.map(d => setDoc(doc(db, `profiles/${profileDocId}/downloads/${d.id}`), { ...updates, updated_at: serverTimestamp() }, { merge: true })));
+      return { ok: true } as any;
     } catch (error: any) {
-      console.error('❌ DatabaseService: Error updating download item', error.response?.data || error.message);
+      console.error('❌ DatabaseService: Error updating download item (Firestore)', error.message);
       throw error;
     }
   },
 
   async removeFromDownloads(perfilId: number, contentId: number, type: 'movie' | 'tv' | 'anime') {
-    console.log(`🔄 DatabaseService: Removing from Downloads - Profile: ${perfilId}, Content: ${contentId}, Type: ${type}`);
+    console.log(`🔄 DatabaseService: Removing from Downloads (Firestore) - Profile: ${perfilId}, Content: ${contentId}, Type: ${type}`);
     try {
-      const { data } = await axiosInstance.delete(`/downloads/${perfilId}/items/${contentId}/${type}`);
-      console.log('✅ DatabaseService: Removed from Downloads');
-      return data;
+      const profileDocId = auth.currentUser?.uid || String(perfilId);
+      const ref = collection(db, `profiles/${profileDocId}/downloads`);
+      const q = query(ref, where('content_id', '==', contentId), where('content_type', '==', type));
+      const snap = await getDocs(q);
+      const batchDeletes = snap.docs.map(d => deleteDoc(doc(db, `profiles/${profileDocId}/downloads/${d.id}`)));
+      await Promise.all(batchDeletes);
+      console.log('✅ DatabaseService: Removed from Downloads (Firestore)', { deleted: snap.size });
+      return { ok: true } as any;
     } catch (error: any) {
-      console.error('❌ DatabaseService: Error removing from Downloads', error.response?.data || error.message);
+      console.error('❌ DatabaseService: Error removing from Downloads (Firestore)', error.message);
       throw error;
     }
   },
@@ -552,16 +532,19 @@ export const databaseService = {
    * Obtiene todo el contenido almacenado en la base de datos
    */
   async getAllContent() {
-    const { data } = await axiosInstance.get('/content');
-    return data;
+    const ref = collection(db, 'content');
+    const snap = await getDocs(ref);
+    return snap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
   },
 
   /**
    * Obtiene contenido por tipo (movie, tv, anime)
    */
   async getContentByType(type: 'movie' | 'tv' | 'anime') {
-    const { data } = await axiosInstance.get(`/content/${type}`);
-    return data;
+    const ref = collection(db, 'content');
+    const q = query(ref, where('type', '==', type));
+    const snap = await getDocs(q);
+    return snap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
   },
 
   /**
@@ -574,8 +557,10 @@ export const databaseService = {
     poster_url?: string;
     backdrop_url?: string;
   }) {
-    const { data } = await axiosInstance.post('/content', content);
-    return data;
+    const payload = { ...content, created_at: serverTimestamp() };
+    const ref = collection(db, 'content');
+    const res = await addDoc(ref, payload);
+    return { id: res.id, ...payload } as any;
   },
 
   // --- Funciones para manejo de imágenes ---
@@ -612,111 +597,69 @@ export const databaseService = {
    * Soporta tanto React Native (URI) como Web (File o data URL)
    */
   async uploadAvatar(imageSource: string | File): Promise<{ url: string; filename: string }> {
-    console.log('Iniciando subida de avatar');
-    console.log('URL del servidor:', BASE_URL);
-    console.log('Tipo de fuente:', typeof imageSource);
-    
-    const formData = new FormData();
-    
-    // Detectar si estamos en web (File object) o móvil (URI string)
-    if (typeof imageSource === 'string') {
-      // React Native: URI string
-      const filename = imageSource.split('/').pop() || 'avatar.jpg';
-      const match = /\.(\w+)$/.exec(filename);
-      const mimeType = match ? `image/${match[1]}` : 'image/jpeg';
-      
-      console.log('Detalles del archivo (móvil):', { filename, mimeType, uri: imageSource });
-      
-      // Crear el objeto de archivo para FormData en React Native
-      formData.append('avatar', {
-        uri: imageSource,
-        name: filename,
-        type: mimeType,
-      } as any);
-    } else {
-      // Web: File object
-      console.log('Detalles del archivo (web):', {
-        name: imageSource.name,
-        type: imageSource.type,
-        size: imageSource.size
-      });
-      
-      // En web, simplemente agregamos el File directamente
-      formData.append('avatar', imageSource);
-    }
-
+    const uid = auth.currentUser?.uid;
+    if (!uid) throw new Error('No auth user');
+    const filename = `avatar_${Date.now()}.jpg`;
+    const path = `avatars/${uid}/${filename}`;
+    const sref = storageRef(storage, path);
+    let dataUrlForFallback: string | null = null;
     try {
-      console.log('Enviando request a:', `${BASE_URL}/upload/avatar`);
-      console.log('BASE_URL actual:', BASE_URL);
-      
-      // Usar axiosFileUpload que no tiene Content-Type predefinido
-      // El navegador establecerá automáticamente el Content-Type correcto con boundary para FormData
-      // Enviar BASE_URL en un header personalizado para que el servidor construya la URL correcta
-      const { data } = await axiosFileUpload.post('/upload/avatar', formData, {
-        headers: {
-          // Usar minúsculas para asegurar coincidencia en Node/Express
-          'x-client-baseurl': BASE_URL, // Enviar BASE_URL al servidor para construir la URL correcta
-          // En RN, establecer explícitamente multipart/form-data suele evitar errores de red
-          'Content-Type': 'multipart/form-data',
-        },
-        maxContentLength: Infinity,
-        maxBodyLength: Infinity,
-      });
-      
-      // Si el servidor devolvió una URL relativa, construirla con nuestro BASE_URL
-      if (data.url && !data.url.startsWith('http')) {
-        data.url = `${BASE_URL}${data.url.startsWith('/') ? '' : '/'}${data.url}`;
-        console.log('URL reconstruida:', data.url);
-      }
-
-      console.log('Avatar subido exitosamente:', data);
-      return data;
-    } catch (error: any) {
-      console.error('Error al subir avatar:', error);
-      console.error('Detalles del error:', {
-        message: error.message,
-        code: error.code,
-        response: error.response?.data,
-        status: error.response?.status,
-        baseURL: BASE_URL,
-      });
-      
-      // Si es un error 400, mostrar el mensaje del servidor
-      if (error.response?.status === 400) {
-        const serverMessage = error.response?.data?.message || 'Error al procesar el archivo';
-        console.error('Mensaje del servidor:', serverMessage);
-        throw new Error(`Error al subir avatar: ${serverMessage}`);
-      }
-      
-      // Fallback: intentar subir usando fetch (suele ser más robusto en RN)
-      try {
-        console.log('Intentando fallback con fetch para subir avatar...');
-        const resp = await fetch(`${BASE_URL}/upload/avatar`, {
-          method: 'POST',
-          headers: {
-            'x-client-baseurl': BASE_URL,
-            // No establecer Content-Type aquí para que RN/Fetch cree el boundary correctamente
-          } as any,
-          body: formData as any,
-        });
-        if (!resp.ok) {
-          const txt = await resp.text().catch(() => '');
-          throw new Error(`Upload failed (fetch). Status: ${resp.status}. Body: ${txt}`);
+      if (typeof imageSource === 'string') {
+        if (imageSource.startsWith('data:')) {
+          const commaIndex = imageSource.indexOf(',');
+          const base64 = commaIndex >= 0 ? imageSource.slice(commaIndex + 1) : imageSource;
+          dataUrlForFallback = `data:image/jpeg;base64,${base64}`;
+          await uploadString(sref, dataUrlForFallback, 'data_url');
+        } else {
+          try {
+            const mod = require('expo-image-manipulator');
+            const SaveFormat = mod.SaveFormat || { JPEG: 'jpeg' };
+            const result = await mod.manipulateAsync(
+              imageSource,
+              [{ resize: { width: 256, height: 256 } }],
+              { compress: 0.8, format: SaveFormat.JPEG, base64: true }
+            );
+            if (result?.base64) {
+              dataUrlForFallback = `data:image/jpeg;base64,${result.base64}`;
+              await uploadString(sref, dataUrlForFallback, 'data_url');
+            } else {
+              const base64 = await FileSystemLegacy.readAsStringAsync(imageSource, { encoding: 'base64' as any });
+              dataUrlForFallback = `data:image/jpeg;base64,${base64}`;
+              await uploadString(sref, dataUrlForFallback, 'data_url');
+            }
+          } catch (_) {
+            const base64 = await FileSystemLegacy.readAsStringAsync(imageSource, { encoding: 'base64' as any });
+            dataUrlForFallback = `data:image/jpeg;base64,${base64}`;
+            await uploadString(sref, dataUrlForFallback, 'data_url');
+          }
         }
-        const data = await resp.json();
-
-        if (data.url && !data.url.startsWith('http')) {
-          data.url = `${BASE_URL}${data.url.startsWith('/') ? '' : '/'}${data.url}`;
-          console.log('URL reconstruida (fetch):', data.url);
+      } else {
+        try {
+          await uploadBytes(sref, imageSource as any);
+        } catch (_) {
+          const toDataUrl = (file: any) => new Promise<string>((resolve, reject) => {
+            try {
+              const reader = new (globalThis as any).FileReader();
+              reader.onload = () => resolve(reader.result as string);
+              reader.onerror = reject;
+              reader.readAsDataURL(file);
+            } catch (err) {
+              reject(err);
+            }
+          });
+          const dataUrl = await toDataUrl(imageSource as any);
+          dataUrlForFallback = dataUrl;
+          await uploadString(sref, dataUrl, 'data_url');
         }
-
-        console.log('Avatar subido exitosamente (fetch):', data);
-        return data;
-      } catch (fallbackErr: any) {
-        console.error('Fallback con fetch también falló:', fallbackErr);
-        // Propagar el error original si el fallback falla
-        throw error;
       }
+      const url = await getDownloadURL(sref);
+      return { url, filename };
+    } catch (e: any) {
+      const msg = String(e?.message || '');
+      if (dataUrlForFallback) {
+        return { url: dataUrlForFallback, filename };
+      }
+      throw e;
     }
   }
 };
