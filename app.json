@@ -5,11 +5,11 @@
     "slug": "Proyecto_Netflix",
     "version": "1.0.0",
     "orientation": "default",
-    "icon": "./assets/icon.png",
+    "icon": "./assets/icon-arle.png",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
     "splash": {
-      "image": "./assets/splash-icon.png",
+      "image": "./assets/icon-arle.png",
       "resizeMode": "contain",
       "backgroundColor": "#ffffff"
     },
@@ -18,7 +18,7 @@
     },
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "./assets/adaptive-icon.png",
+        "foregroundImage": "./assets/icon-arle.png",
         "backgroundColor": "#ffffff"
       },
       "edgeToEdgeEnabled": true,
@@ -26,7 +26,7 @@
       "package": "com.anonymous.Proyecto_Netflix"
     },
     "web": {
-      "favicon": "./assets/favicon.png"
+      "favicon": "./assets/icon-arle.png"
     },
     "plugins": [
       "expo-font"
