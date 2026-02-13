@@ -35,10 +35,10 @@ function HomeNavigator() {
 function MainTabs({ route }: { route: any }) {
   const { colors } = useTheme();
   const { selectedProfile, userId } = route.params || {};
-  
+
   // Importar useProfile hook
   const { setCurrentProfile, currentProfile } = require('../contexts/ProfileContext').useProfile();
-  
+
   // Establecer el perfil seleccionado cuando se monta el componente
   React.useEffect(() => {
     if (!selectedProfile) {
@@ -50,16 +50,16 @@ function MainTabs({ route }: { route: any }) {
 
     // Si no hay perfil en contexto aún, establecer el seleccionado
     if (!currentProfile) {
-      console.log('MainTabs: No currentProfile; setting from selectedProfile:', selectedProfile);
+      console.log('MainTabs: No currentProfile; setting from selectedProfile ID:', selectedProfile.id);
       setCurrentProfile(selectedProfile);
       return;
     }
 
     // Si el ID difiere, cambiar de perfil
     if (selectedProfile.id !== currentProfile.id) {
-      console.log('MainTabs: Different profile id; switching to selectedProfile:', {
-        from: currentProfile,
-        to: selectedProfile,
+      console.log('MainTabs: Different profile id; switching:', {
+        fromId: currentProfile.id,
+        toId: selectedProfile.id,
       });
       setCurrentProfile(selectedProfile);
       return;
@@ -67,10 +67,7 @@ function MainTabs({ route }: { route: any }) {
 
     // Mismo perfil: evitar sobreescribir datos más recientes del contexto (ej. avatar actualizado)
     if (selectedProfile.avatar_url !== currentProfile.avatar_url) {
-      console.log('MainTabs: Same profile id; ignoring stale selectedProfile avatar_url. Keeping currentProfile avatar.', {
-        selectedProfileAvatar: selectedProfile.avatar_url,
-        currentProfileAvatar: currentProfile.avatar_url,
-      });
+      console.log('MainTabs: Same profile id; keeping current avatar (ID:', currentProfile.id, ')');
       return;
     }
 
@@ -142,7 +139,7 @@ export default function AppNavigator() {
 
       // Si hay usuario, verificar si hay perfil guardado
       await loadCurrentProfile();
-      
+
       // Esperar un momento para que el estado se actualice
       setTimeout(() => {
         if (currentProfile) {
@@ -169,14 +166,14 @@ export default function AppNavigator() {
 
   return (
     <NavigationContainer>
-      <RootStack.Navigator 
+      <RootStack.Navigator
         screenOptions={{ headerShown: false }}
         initialRouteName={initialRoute}
       >
         <RootStack.Screen name="Login" component={LoginScreen} />
         <RootStack.Screen name="Register" component={RegisterScreen} />
-        <RootStack.Screen 
-          name="ProfileSelection" 
+        <RootStack.Screen
+          name="ProfileSelection"
           component={ProfileSelectionScreen as any}
         />
         <RootStack.Screen name="Main" component={MainTabs} />

@@ -31,7 +31,7 @@ export const ProfileProvider: React.FC<ProfileProviderProps> = ({ children }) =>
   const [adultContentEnabled, setAdultContentEnabledState] = useState<boolean>(false);
 
   const setCurrentProfile = async (profile: Profile | null) => {
-    console.log('ProfileContext: Setting current profile:', profile);
+    console.log('ProfileContext: Setting current profile:', profile?.id, profile?.name);
     setCurrentProfileState(profile);
     if (profile) {
       await AsyncStorage.setItem('currentProfile', JSON.stringify(profile));
@@ -60,10 +60,9 @@ export const ProfileProvider: React.FC<ProfileProviderProps> = ({ children }) =>
     try {
       console.log('ProfileContext: Loading current profile...');
       const profileData = await AsyncStorage.getItem('currentProfile');
-      console.log('ProfileContext: Profile data from storage:', profileData);
       if (profileData) {
         const profile = JSON.parse(profileData);
-        console.log('ProfileContext: Parsed profile:', profile);
+        console.log('ProfileContext: Parsed profile ID:', profile?.id, 'Name:', profile?.name);
         setCurrentProfileState(profile);
         // Cargar preferencia de +18 para el perfil
         try {
@@ -104,7 +103,7 @@ export const ProfileProvider: React.FC<ProfileProviderProps> = ({ children }) =>
     if (uid) {
       try {
         await setDoc(doc(db, 'profiles', uid), { adultContentEnabled: enabled, updatedAt: serverTimestamp() }, { merge: true });
-      } catch {}
+      } catch { }
     }
   };
 
@@ -122,7 +121,7 @@ export const ProfileProvider: React.FC<ProfileProviderProps> = ({ children }) =>
         if (remote && typeof remote.adultContentEnabled === 'boolean') {
           setAdultContentEnabledState(Boolean(remote.adultContentEnabled));
         }
-      } catch {}
+      } catch { }
     })();
   }, []);
 

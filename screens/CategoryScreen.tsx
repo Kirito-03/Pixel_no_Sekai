@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, SafeAreaView, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../theme';
@@ -116,7 +117,7 @@ export default function CategoryScreen({ navigation, route }: Props) {
             getTopRatedMovies(),
           ]);
           contentData.movies = moviesData;
-          contentData.topRated = topRatedData.filter((m: any) => 
+          contentData.topRated = topRatedData.filter((m: any) =>
             m.genre_ids?.includes(categoryConfig.movies)
           );
         }
@@ -130,7 +131,7 @@ export default function CategoryScreen({ navigation, route }: Props) {
             getTopRatedTVShows(),
           ]);
           contentData.tvShows = tvData;
-          contentData.topRatedTV = topRatedTVData.filter((s: any) => 
+          contentData.topRatedTV = topRatedTVData.filter((s: any) =>
             s.genre_ids?.includes(categoryConfig.tv)
           );
         }
@@ -179,7 +180,7 @@ export default function CategoryScreen({ navigation, route }: Props) {
         vote_average: item.vote_average,
         source: 'tmdb',
       };
-      
+
       setSelectedContent(contentItem);
       setModalVisible(true);
     } catch (error) {
@@ -205,15 +206,15 @@ export default function CategoryScreen({ navigation, route }: Props) {
       {/* Header */}
       <SafeAreaView style={styles.header}>
         <View style={styles.headerContent}>
-          <TouchableOpacity 
+          <TouchableOpacity
             style={styles.backButton}
             onPress={() => navigation.goBack()}
           >
             <Ionicons name="arrow-back" size={28} color={colors.text} />
           </TouchableOpacity>
-          
+
           <Text style={styles.headerTitle}>Categorías</Text>
-          
+
           <View style={styles.headerRight}>
             <TouchableOpacity style={styles.iconButton}>
               <Ionicons name="search" size={26} color={colors.text} />
@@ -226,8 +227,8 @@ export default function CategoryScreen({ navigation, route }: Props) {
           <TouchableOpacity style={styles.closeChip} onPress={() => navigation.goBack()}>
             <Ionicons name="close" size={18} color={colors.text} />
           </TouchableOpacity>
-          
-          <TouchableOpacity 
+
+          <TouchableOpacity
             style={styles.categoryChip}
             onPress={() => setShowCategoriesMenu(true)}
           >
@@ -238,7 +239,7 @@ export default function CategoryScreen({ navigation, route }: Props) {
       </SafeAreaView>
 
       {/* Contenido */}
-      <ScrollView 
+      <ScrollView
         style={styles.scrollView}
         showsVerticalScrollIndicator={false}
       >

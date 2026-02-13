@@ -46,7 +46,7 @@ const AVAILABLE_AVATARS = [
 const RegisterScreen: React.FC<RegisterScreenProps> = ({ navigation }) => {
   const { width } = useWindowDimensions();
   const isSmallScreen = width < 768;
-  
+
   const [currentStep, setCurrentStep] = useState<Step>('email');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -65,13 +65,13 @@ const RegisterScreen: React.FC<RegisterScreenProps> = ({ navigation }) => {
   const validateEmail = (): boolean => {
     const newErrors: { [key: string]: string } = {};
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    
+
     if (!email.trim()) {
       newErrors.email = 'El email es requerido';
     } else if (!emailRegex.test(email)) {
       newErrors.email = 'Ingresa un email válido';
     }
-    
+
     if (!password) {
       newErrors.password = 'La contraseña es requerida';
     } else if (password.length < 6) {
@@ -84,11 +84,11 @@ const RegisterScreen: React.FC<RegisterScreenProps> = ({ navigation }) => {
 
   const validateProfile = (): boolean => {
     const newErrors: { [key: string]: string } = {};
-    
+
     if (!profileName.trim()) {
       newErrors.profileName = 'El nombre del perfil es requerido';
     }
-    
+
     if (!selectedImageUri) {
       newErrors.avatar = 'Debes seleccionar una foto de perfil';
     }
@@ -107,7 +107,7 @@ const RegisterScreen: React.FC<RegisterScreenProps> = ({ navigation }) => {
 
     try {
       const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      
+
       if (status !== 'granted') {
         Alert.alert(
           'Permisos requeridos',
@@ -155,7 +155,7 @@ const RegisterScreen: React.FC<RegisterScreenProps> = ({ navigation }) => {
       setErrors(prev => ({ ...prev, avatar: '' }));
     };
     reader.readAsDataURL(file);
-    
+
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
@@ -181,22 +181,22 @@ const RegisterScreen: React.FC<RegisterScreenProps> = ({ navigation }) => {
     if (!validateProfile()) return;
 
     setLoading(true);
-    
+
     // Registro sin backend: usamos Firebase directamente
 
     try {
       // Registrar el usuario
       const cred = await registerEmail(email.trim().toLowerCase(), password);
-  console.log('Usuario registrado (Firebase):', cred.user?.uid);
-      
+      console.log('Usuario registrado (Firebase):', cred.user?.uid);
+
       // Subir la imagen del perfil primero
       setUploadingImage(true);
       let avatarUrl: string;
-      
+
       if (!selectedImageUri) {
         throw new Error('Debes seleccionar una foto de perfil');
       }
-      
+
       if (Platform.OS === 'web' && selectedImageUri.startsWith('data:')) {
         const uploadResult = await databaseService.uploadAvatar(selectedImageUri);
         avatarUrl = uploadResult.url;
@@ -207,21 +207,21 @@ const RegisterScreen: React.FC<RegisterScreenProps> = ({ navigation }) => {
       } else {
         throw new Error('Tipo de imagen no soportado');
       }
-      
+
       setUploadingImage(false);
-      
+
       // Crear un perfil automáticamente con el nombre y avatar proporcionado
       const profileResult = await databaseService.createProfile({
         usuario_id: 0,
         name: profileName.trim() || 'Mi Perfil',
         avatar_url: avatarUrl,
       });
-  console.log('Perfil creado:', profileResult);
-      
+      console.log('Perfil creado con ID:', profileResult?.id);
+
       // Obtener el perfil creado para pasarlo a la pantalla principal
       const profiles = await databaseService.getProfiles(0);
       const createdProfile = profiles.find((p: any) => p.id === profileResult.id);
-      
+
       if (createdProfile) {
         // Navegar directamente a la pantalla principal con el perfil seleccionado
         navigation.reset({
@@ -244,7 +244,7 @@ const RegisterScreen: React.FC<RegisterScreenProps> = ({ navigation }) => {
           ],
         });
       }
-      
+
     } catch (error: any) {
       console.error('Error en registro:', error);
       const status = error?.response?.status;
@@ -276,17 +276,17 @@ const RegisterScreen: React.FC<RegisterScreenProps> = ({ navigation }) => {
       setGoogleLoading(true);
       if (Platform.OS === 'web') {
         const cred = await loginGoogleProxy();
-        navigation.reset({ index: 0, routes: [ { name: 'Main' } ] });
+        navigation.reset({ index: 0, routes: [{ name: 'Main' }] });
         return;
       }
       const res = await googlePromptAsync();
       if (res?.type === 'success' && res?.params?.id_token) {
         const credential = GoogleAuthProvider.credential(res.params.id_token as string);
         const cred = await signInWithCredential(auth, credential);
-        navigation.reset({ index: 0, routes: [ { name: 'Main' } ] });
+        navigation.reset({ index: 0, routes: [{ name: 'Main' }] });
       } else {
         const cred = await loginGoogleProxy();
-        navigation.reset({ index: 0, routes: [ { name: 'Main' } ] });
+        navigation.reset({ index: 0, routes: [{ name: 'Main' }] });
       }
     } catch (e: any) {
       Alert.alert('Error', e?.message || 'No se pudo continuar con Google');
@@ -304,7 +304,7 @@ const RegisterScreen: React.FC<RegisterScreenProps> = ({ navigation }) => {
   const renderStepIndicator = () => {
     const steps = ['email', 'profile'];
     const currentIndex = steps.indexOf(currentStep);
-    
+
     return (
       <View style={styles.stepIndicator}>
         {steps.map((step, index) => (
@@ -449,8 +449,8 @@ const RegisterScreen: React.FC<RegisterScreenProps> = ({ navigation }) => {
           disabled={loading || uploadingImage}
         >
           {selectedImageUri ? (
-            <Image 
-              source={{ uri: selectedImageUri }} 
+            <Image
+              source={{ uri: selectedImageUri }}
               style={styles.previewImage}
             />
           ) : (
@@ -467,7 +467,7 @@ const RegisterScreen: React.FC<RegisterScreenProps> = ({ navigation }) => {
           )}
         </TouchableOpacity>
         {errors.avatar && <Text style={styles.errorText}>{errors.avatar}</Text>}
-        
+
         {/* Input file oculto para web */}
         {Platform.OS === 'web' && (
           <input
@@ -538,7 +538,7 @@ const RegisterScreen: React.FC<RegisterScreenProps> = ({ navigation }) => {
                 {renderCurrentStep()}
               </View>
 
-              
+
             </ScrollView>
           </KeyboardAvoidingView>
         </LinearGradient>

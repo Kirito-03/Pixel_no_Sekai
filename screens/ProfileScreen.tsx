@@ -1,19 +1,19 @@
 import React, { useState, useRef } from 'react';
-import { 
-  View, 
-  Text, 
-  StyleSheet, 
-  ScrollView, 
-  TouchableOpacity, 
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  TouchableOpacity,
   Image,
   Switch,
-  SafeAreaView,
   useWindowDimensions,
   Alert,
   ActivityIndicator,
   Platform,
   Modal,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { CommonActions } from '@react-navigation/native';
@@ -34,7 +34,7 @@ export default function ProfileScreen({ navigation }: any) {
   const { currentProfile, setCurrentProfile, clearCurrentProfile, adultContentEnabled, setAdultContentEnabled } = useProfile();
   const { logout, user } = useAuth();
   const fileInputRef = useRef<any>(null);
-  
+
   const { width } = useWindowDimensions();
   const isSmallScreen = width < 768;
   const [accountModalVisible, setAccountModalVisible] = useState(false);
@@ -59,7 +59,7 @@ export default function ProfileScreen({ navigation }: any) {
     if (!currentProfile?.avatar_url) {
       return appendCacheBust('https://upload.wikimedia.org/wikipedia/commons/0/0b/Netflix-avatar.png');
     }
-    
+
     if (currentProfile.avatar_url.startsWith('data:')) {
       return currentProfile.avatar_url;
     }
@@ -72,28 +72,28 @@ export default function ProfileScreen({ navigation }: any) {
   // Función para manejar la imagen seleccionada (común para web y móvil)
   const processSelectedImage = async (imageSource: string | File) => {
     if (!currentProfile) return;
-    
+
     setUpdatingAvatar(true);
     try {
       // Subir la imagen al servidor (acepta tanto URI string como File object)
       const uploadResult = await databaseService.uploadAvatar(imageSource);
-      
-  console.log('Imagen subida, URL:', uploadResult.url);
-      
+
+      console.log('Imagen subida, URL:', uploadResult.url);
+
       // Actualizar el perfil con la nueva URL del avatar
       await databaseService.updateProfile(currentProfile.id, {
         avatar_url: uploadResult.url,
       });
-      
+
       // Actualizar el perfil en el contexto con la nueva URL
       const updatedProfile = {
         ...currentProfile,
         avatar_url: uploadResult.url,
       };
-      
+
       console.log('Actualizando perfil en contexto:', updatedProfile);
       await setCurrentProfile(updatedProfile);
-      
+
       // Forzar actualización de la imagen incrementando la key
       setAvatarKey(prev => prev + 1);
       // Prefetch explícito para ayudar a RN/Android a refrescar la imagen
@@ -106,10 +106,10 @@ export default function ProfileScreen({ navigation }: any) {
         // Ignorar si prefetch no está disponible
       }
       setImageError(false); // Resetear el error para intentar cargar la nueva imagen
-      
+
       // Pequeño delay para asegurar que el estado se actualice
       await new Promise(resolve => setTimeout(resolve, 200));
-      
+
       Alert.alert('Éxito', 'Avatar actualizado correctamente');
     } catch (error) {
       console.error('Error al actualizar avatar:', error);
@@ -138,7 +138,7 @@ export default function ProfileScreen({ navigation }: any) {
 
     // En web, pasamos el File object directamente a processSelectedImage
     await processSelectedImage(file as any);
-    
+
     // Limpiar el input para que se pueda seleccionar el mismo archivo de nuevo
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
@@ -169,7 +169,7 @@ export default function ProfileScreen({ navigation }: any) {
 
   const handleChangeAvatar = async () => {
     if (!currentProfile) return;
-    
+
     // En web, usar input file nativo
     if (Platform.OS === 'web') {
       if (fileInputRef.current) {
@@ -182,7 +182,7 @@ export default function ProfileScreen({ navigation }: any) {
     try {
       // Pedir permisos para acceder a la galería
       const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      
+
       if (status !== 'granted') {
         Alert.alert(
           'Permisos requeridos',
@@ -427,8 +427,8 @@ export default function ProfileScreen({ navigation }: any) {
     <SafeAreaView style={styles.container}>
       {/* Círculo decorativo */}
       <View style={styles.decorativeCircle} />
-      
-      <ScrollView 
+
+      <ScrollView
         style={styles.scrollView}
         showsVerticalScrollIndicator={false}
       >
@@ -442,7 +442,7 @@ export default function ProfileScreen({ navigation }: any) {
         {/* Perfil de usuario */}
         <View style={styles.profileSection}>
           <View style={styles.avatarWrapper}>
-            <TouchableOpacity 
+            <TouchableOpacity
               style={styles.avatarContainer}
               onPress={handleChangeAvatar}
               activeOpacity={0.8}
@@ -457,7 +457,7 @@ export default function ProfileScreen({ navigation }: any) {
                   {!imageError ? (
                     <Image
                       key={`${currentProfile?.avatar_url || 'default-avatar'}-${avatarKey}`}
-                      source={{ 
+                      source={{
                         uri: getAvatarUrl()
                       }}
                       style={styles.avatar}
@@ -473,7 +473,7 @@ export default function ProfileScreen({ navigation }: any) {
                         setImageError(true);
                       }}
                       onLoad={() => {
-  console.log('Avatar cargado exitosamente:', getAvatarUrl());
+                        console.log('Avatar cargado exitosamente:', getAvatarUrl());
                         setImageError(false); // Resetear error si carga correctamente
                       }}
                       onLoadStart={() => {
@@ -509,7 +509,7 @@ export default function ProfileScreen({ navigation }: any) {
         {/* Sección CUENTA */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>CUENTA</Text>
-          
+
           <TouchableOpacity style={styles.menuItem} onPress={() => setAccountModalVisible(true)}>
             <View style={styles.menuContent}>
               <Text style={styles.menuTitle}>Información de la cuenta</Text>
@@ -534,21 +534,21 @@ export default function ProfileScreen({ navigation }: any) {
             />
           </View>
 
-          <TouchableOpacity 
+          <TouchableOpacity
             style={styles.menuItem}
             onPress={async () => {
               try {
                 // Limpiar el perfil actual
                 await clearCurrentProfile();
                 console.log('📱 Limpiando perfil y navegando a ProfileSelection...');
-                
+
                 // Intentar múltiples métodos de navegación
                 const parent = navigation.getParent();
                 const grandParent = parent?.getParent();
-                
+
                 console.log('📱 Parent existe:', !!parent);
                 console.log('📱 GrandParent existe:', !!grandParent);
-                
+
                 // Intentar con el grandParent primero (RootStack)
                 if (grandParent) {
                   console.log('📱 Usando grandParent para navegar...');
@@ -559,7 +559,7 @@ export default function ProfileScreen({ navigation }: any) {
                         {
                           name: 'ProfileSelection',
                           // Usar el id del usuario (o fallback al usuario_id del perfil actual)
-                          params: { },
+                          params: {},
                         },
                       ],
                     })
@@ -572,7 +572,7 @@ export default function ProfileScreen({ navigation }: any) {
                       routes: [
                         {
                           name: 'ProfileSelection',
-                          params: { },
+                          params: {},
                         },
                       ],
                     })
@@ -590,16 +590,16 @@ export default function ProfileScreen({ navigation }: any) {
                       routes: [
                         {
                           name: 'ProfileSelection',
-                          params: { },
+                          params: {},
                         },
                       ],
                     })
                   );
                 }
-                
-  console.log('Navegación completada');
+
+                console.log('Navegación completada');
               } catch (error) {
-  console.error('Error al navegar:', error);
+                console.error('Error al navegar:', error);
                 Alert.alert('Error', 'No se pudo cambiar de perfil. Intenta de nuevo.');
               }
             }}
@@ -615,7 +615,7 @@ export default function ProfileScreen({ navigation }: any) {
         {/* Sección CONFIGURACIÓN */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>CONFIGURACION</Text>
-          
+
           <View style={styles.menuItem}>
             <View style={styles.menuContent}>
               <Text style={styles.menuTitle}>Notificaciones</Text>
@@ -649,8 +649,8 @@ export default function ProfileScreen({ navigation }: any) {
 
         {/* Sección CERRAR SESIÓN */}
         <View style={styles.section}>
-          <TouchableOpacity 
-            style={[styles.menuItem, styles.logoutButton]} 
+          <TouchableOpacity
+            style={[styles.menuItem, styles.logoutButton]}
             onPress={() => setLogoutVisible(true)}
           >
             <View style={styles.menuContent}>
@@ -673,7 +673,7 @@ export default function ProfileScreen({ navigation }: any) {
                 <Text style={styles.infoLabel}>Email</Text>
                 <Text style={styles.infoValue}>{user?.email || '—'}</Text>
               </View>
-              
+
               <View style={styles.infoRow}>
                 <Text style={styles.infoLabel}>Proveedor</Text>
                 <Text style={styles.infoValue}>{(() => {

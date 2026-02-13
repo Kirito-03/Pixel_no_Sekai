@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { View, Image, Text, TouchableOpacity, StyleSheet, SafeAreaView, Animated, useWindowDimensions, Platform } from 'react-native';
+import { View, Image, Text, TouchableOpacity, StyleSheet, Animated, useWindowDimensions, Platform } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../theme';
 import CategoriesMenu from './CategoriesMenu';
@@ -19,7 +20,7 @@ export default function Header({ black = false, onProfilePress, onSearchPress, o
   const isWeb = Platform.OS === 'web';
   const [selectedFilter, setSelectedFilter] = useState<'series' | 'movies' | 'anime' | 'all' | null>('anime');
   const [showCategoriesMenu, setShowCategoriesMenu] = useState(false);
-  
+
   const backgroundOpacity = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
@@ -109,7 +110,7 @@ export default function Header({ black = false, onProfilePress, onSearchPress, o
           {/* Contenedor derecho: Búsqueda + Notificaciones */}
           <View style={dynamicStyles.rightContainer}>
             {/* Botón de búsqueda */}
-            <TouchableOpacity 
+            <TouchableOpacity
               style={dynamicStyles.notificationButton}
               onPress={onSearchPress}
             >
@@ -125,7 +126,7 @@ export default function Header({ black = false, onProfilePress, onSearchPress, o
 
         {/* Filtros: Anime y Categorías */}
         <View style={[styles.filtersContainer, isWeb ? { marginTop: -22, paddingBottom: 14 } : null]}>
-          <TouchableOpacity 
+          <TouchableOpacity
             style={[styles.filterButton, selectedFilter === 'anime' && styles.filterButtonActive]}
             onPress={() => handleFilterPress('anime')}
           >
@@ -134,17 +135,17 @@ export default function Header({ black = false, onProfilePress, onSearchPress, o
             </Text>
           </TouchableOpacity>
 
-          <TouchableOpacity 
+          <TouchableOpacity
             style={styles.filterButton}
             onPress={handleCategoriesPress}
           >
             <Text style={styles.filterText}>
               Categorías
             </Text>
-            <Ionicons 
-              name="chevron-down" 
-              size={14} 
-              color={colors.textGray} 
+            <Ionicons
+              name="chevron-down"
+              size={14}
+              color={colors.textGray}
               style={{ marginLeft: 4 }}
             />
           </TouchableOpacity>

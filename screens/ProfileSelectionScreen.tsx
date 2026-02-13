@@ -106,10 +106,10 @@ const ProfileSelectionScreen: React.FC<ProfileSelectionScreenProps> = ({ navigat
           .filter((u): u is string => Boolean(u));
         urls.forEach((u) => {
           // @ts-ignore RN Image tiene prefetch
-          Image.prefetch(u).catch(() => {});
+          Image.prefetch(u).catch(() => { });
         });
-        console.log('ProfileSelection: Prefetch de avatares', urls);
-      } catch {}
+        console.log('ProfileSelection: Prefetch de avatares, cantidad:', urls.length);
+      } catch { }
     } catch (error) {
       console.error('Error al cargar perfiles:', error);
       Alert.alert('Error', 'No se pudieron cargar los perfiles');
@@ -129,7 +129,7 @@ const ProfileSelectionScreen: React.FC<ProfileSelectionScreenProps> = ({ navigat
     // Para móviles, usar expo-image-picker
     try {
       const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      
+
       if (status !== 'granted') {
         Alert.alert(
           'Permisos requeridos',
@@ -177,7 +177,7 @@ const ProfileSelectionScreen: React.FC<ProfileSelectionScreenProps> = ({ navigat
       setSelectedImageUri(e.target?.result as string);
     };
     reader.readAsDataURL(file);
-    
+
     // Guardar el archivo para subirlo después
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
@@ -218,7 +218,7 @@ const ProfileSelectionScreen: React.FC<ProfileSelectionScreenProps> = ({ navigat
       }
 
       setUploadingImage(false);
-      
+
       // Crear el perfil con la URL del avatar subido
       await databaseService.createProfile({
         usuario_id: 0,
@@ -231,11 +231,11 @@ const ProfileSelectionScreen: React.FC<ProfileSelectionScreenProps> = ({ navigat
       // No hay estado de perfil para niños
       setShowCreateModal(false);
       await loadProfiles();
-      
+
       // Obtener el perfil recién creado
       const updatedProfiles = await databaseService.getProfiles(0);
       const createdProfile = updatedProfiles.find((p: any) => p.avatar_url === avatarUrl);
-      
+
       if (createdProfile) {
         // Navegar a Main con el perfil creado
         const mappedProfile = {
@@ -290,7 +290,7 @@ const ProfileSelectionScreen: React.FC<ProfileSelectionScreenProps> = ({ navigat
   // Función para corregir URLs de avatar que contengan localhost y añadir cache-busting
   const getCorrectedAvatarUrl = (avatarUrl: string | undefined): string | null => {
     if (!avatarUrl) return null;
-    
+
     if (avatarUrl.startsWith('data:')) return avatarUrl;
     if (avatarUrl.startsWith('http')) return appendCacheBust(avatarUrl);
     return avatarUrl;
@@ -528,10 +528,10 @@ const ProfileSelectionScreen: React.FC<ProfileSelectionScreenProps> = ({ navigat
                 try {
                   const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
                   if (status !== 'granted') return;
-                  const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'] as any, allowsEditing: true, aspect: [1,1], quality: 0.8 });
+                  const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'] as any, allowsEditing: true, aspect: [1, 1], quality: 0.8 });
                   if (result.canceled || !result.assets || result.assets.length === 0) return;
                   setEditImageUri(result.assets[0].uri);
-                } catch {}
+                } catch { }
               }}
               disabled={editing}
             >
@@ -636,8 +636,8 @@ const ProfileSelectionScreen: React.FC<ProfileSelectionScreenProps> = ({ navigat
               disabled={uploadingImage}
             >
               {selectedImageUri ? (
-                <Image 
-                  source={{ uri: selectedImageUri }} 
+                <Image
+                  source={{ uri: selectedImageUri }}
                   style={styles.previewImage}
                 />
               ) : (
@@ -653,7 +653,7 @@ const ProfileSelectionScreen: React.FC<ProfileSelectionScreenProps> = ({ navigat
                 </View>
               )}
             </TouchableOpacity>
-            
+
             {/* Input file oculto para web */}
             {Platform.OS === 'web' && (
               <input

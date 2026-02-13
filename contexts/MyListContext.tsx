@@ -25,15 +25,24 @@ export const MyListProvider: React.FC<MyListProviderProps> = ({ children }) => {
   const { currentProfile } = useProfile();
   const [myListItems, setMyListItems] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(false);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
 
-  // Cargar la lista cuando cambie el perfil
+  // Escuchar cambios en el estado de autenticación
   useEffect(() => {
-    if (currentProfile) {
+    const unsubscribe = auth.onAuthStateChanged((user: any) => {
+      setIsAuthenticated(!!user);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // Cargar la lista cuando cambie el perfil O cuando se complete la autenticación
+  useEffect(() => {
+    if (currentProfile && isAuthenticated) {
       refreshMyList();
-    } else {
+    } else if (!currentProfile) {
       setMyListItems(new Set());
     }
-  }, [currentProfile]);
+  }, [currentProfile, isAuthenticated]);
 
   useEffect(() => {
     if (!currentProfile) return;
@@ -57,6 +66,12 @@ export const MyListProvider: React.FC<MyListProviderProps> = ({ children }) => {
 
   const refreshMyList = async () => {
     if (!currentProfile) return;
+
+    // Esperar a que el usuario esté autenticado antes de cargar
+    if (!auth.currentUser) {
+      console.log('⏳ refreshMyList: Esperando autenticación...');
+      return;
+    }
 
     setLoading(true);
     try {
