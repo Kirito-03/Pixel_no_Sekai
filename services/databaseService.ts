@@ -91,27 +91,27 @@ axiosInstance.interceptors.response.use(
         lastErrorTime = now;
         errorCount++;
       }
-      
+
       // Intentar con diferentes URLs base (incluyendo la del emulador Android)
       const candidateBaseURLs = getCandidateBaseURLs();
       const currentBaseURL = axiosInstance.defaults.baseURL || BASE_URL;
-      
+
       let workingBaseURL: string | null = null;
-      
+
       // Si ya estamos usando una de las URLs candidatas, no buscar otras salvo por si acaso
       if (currentBaseURL && candidateBaseURLs.includes(currentBaseURL)) {
         console.log(`   Ya estamos usando ${currentBaseURL}, probando otras URLs por si acaso...`);
       }
-      
+
       // Probar todas las URLs candidatas
       for (const candidate of candidateBaseURLs) {
         // Si ya es la URL actual, saltarla
         if (candidate === currentBaseURL) continue;
-        
+
         try {
           const testUrl = `${candidate}/health`;
           console.log(`   Probando ${candidate}...`);
-          
+
           const testResponse = await axios.get(testUrl, { timeout: 5000 });
           if (testResponse.status === 200) {
             console.log(`   ${candidate} funciona! Actualizando baseURL...`);
@@ -119,12 +119,12 @@ axiosInstance.interceptors.response.use(
             axiosInstance.defaults.baseURL = candidate;
             axiosFileUpload.defaults.baseURL = candidate;
             axios.defaults.baseURL = candidate; // Actualizar para otros módulos
-            
+
             // Guardar la IP que funciona para futuras sesiones
             saveNetworkConfig(candidate).catch(err => {
               console.warn('No se pudo guardar la configuración:', err);
             });
-            
+
             console.log(`   Nuevo baseURL: ${BASE_URL}`);
             workingBaseURL = candidate;
             break;
@@ -133,7 +133,7 @@ axiosInstance.interceptors.response.use(
           console.log(`   ${candidate} falló`);
         }
       }
-      
+
       // Si encontramos una IP que funciona, reintentar la solicitud original
       if (workingBaseURL && error.config) {
         console.log('Reintentando solicitud con nueva IP...');
@@ -142,7 +142,7 @@ axiosInstance.interceptors.response.use(
         return axiosInstance.request(error.config);
       }
     }
-    
+
     return Promise.reject(error);
   }
 );
@@ -273,13 +273,15 @@ export const databaseService = {
   async getMyList(perfilId: number) {
     console.log(`🔄 DatabaseService: Getting MyList for profile: ${perfilId}`);
     try {
-      const profileDocId = auth.currentUser?.uid || String(perfilId);
-      const ref = collection(db, `profiles/${profileDocId}/mylist`);
+      const uid = auth.currentUser?.uid;
+      if (!uid) throw new Error('No authenticated user');
+      const ref = collection(db, `profiles/${uid}/profiles/${perfilId}/mylist`);
       const q = query(ref, orderBy('added_at', 'desc'));
       const snap = await getDocs(q);
       const items = snap.docs.map(d => d.data() as { content_id: number; content_type: 'movie' | 'tv' | 'anime' });
       console.log(`✅ DatabaseService: MyList retrieved`, {
-        profileId: profileDocId,
+        uid,
+        profileId: perfilId,
         itemCount: items.length,
         items: items.map((item: any) => ({ id: item.content_id, type: item.content_type }))
       });
@@ -293,8 +295,9 @@ export const databaseService = {
   async addToMyList(perfilId: number, contentId: number, type: 'movie' | 'tv' | 'anime') {
     console.log(`🔄 DatabaseService: Adding to MyList - Profile: ${perfilId}, Content: ${contentId}, Type: ${type}`);
     try {
-      const profileDocId = auth.currentUser?.uid || String(perfilId);
-      const ref = collection(db, `profiles/${profileDocId}/mylist`);
+      const uid = auth.currentUser?.uid;
+      if (!uid) throw new Error('No authenticated user');
+      const ref = collection(db, `profiles/${uid}/profiles/${perfilId}/mylist`);
       const payload = { content_id: contentId, content_type: type, added_at: serverTimestamp() };
       const res = await addDoc(ref, payload);
       console.log(`✅ DatabaseService: Successfully added to MyList`, { id: res.id, ...payload });
@@ -308,11 +311,12 @@ export const databaseService = {
   async removeFromMyList(perfilId: number, contentId: number, type: 'movie' | 'tv' | 'anime') {
     console.log(`🔄 DatabaseService: Removing from MyList - Profile: ${perfilId}, Content: ${contentId}, Type: ${type}`);
     try {
-      const profileDocId = auth.currentUser?.uid || String(perfilId);
-      const ref = collection(db, `profiles/${profileDocId}/mylist`);
+      const uid = auth.currentUser?.uid;
+      if (!uid) throw new Error('No authenticated user');
+      const ref = collection(db, `profiles/${uid}/profiles/${perfilId}/mylist`);
       const q = query(ref, where('content_id', '==', contentId), where('content_type', '==', type));
       const snap = await getDocs(q);
-      const batchDeletes = snap.docs.map(d => deleteDoc(doc(db, `profiles/${profileDocId}/mylist/${d.id}`)));
+      const batchDeletes = snap.docs.map(d => deleteDoc(doc(db, `profiles/${uid}/profiles/${perfilId}/mylist/${d.id}`)));
       await Promise.all(batchDeletes);
       console.log(`✅ DatabaseService: Successfully removed from MyList`, { contentId, type, deleted: snap.size });
       return { ok: true } as any;
@@ -327,8 +331,9 @@ export const databaseService = {
   async getDownloads(perfilId: number) {
     console.log(`🔄 DatabaseService: Getting Downloads (Firestore) for profile: ${perfilId}`);
     try {
-      const profileDocId = auth.currentUser?.uid || String(perfilId);
-      const ref = collection(db, `profiles/${profileDocId}/downloads`);
+      const uid = auth.currentUser?.uid;
+      if (!uid) throw new Error('No authenticated user');
+      const ref = collection(db, `profiles/${uid}/profiles/${perfilId}/downloads`);
       const q = query(ref, orderBy('created_at', 'desc'));
       const snap = await getDocs(q);
       const items = snap.docs.map(d => d.data() as { content_id: number; content_type: 'movie' | 'tv' | 'anime'; status?: 'PENDING' | 'DOWNLOADING' | 'COMPLETED' | 'FAILED'; progress?: number; file_path?: string | null });
@@ -348,8 +353,9 @@ export const databaseService = {
   ) {
     console.log(`🔄 DatabaseService: Adding to Downloads (Firestore) - Profile: ${perfilId}, Content: ${contentId}, Type: ${type}`);
     try {
-      const profileDocId = auth.currentUser?.uid || String(perfilId);
-      const ref = collection(db, `profiles/${profileDocId}/downloads`);
+      const uid = auth.currentUser?.uid;
+      if (!uid) throw new Error('No authenticated user');
+      const ref = collection(db, `profiles/${uid}/profiles/${perfilId}/downloads`);
       const payload = {
         content_id: contentId,
         content_type: type,
@@ -374,11 +380,12 @@ export const databaseService = {
     updates: { status?: 'PENDING' | 'DOWNLOADING' | 'COMPLETED' | 'FAILED'; progress?: number; file_path?: string | null }
   ) {
     try {
-      const profileDocId = auth.currentUser?.uid || String(perfilId);
-      const ref = collection(db, `profiles/${profileDocId}/downloads`);
+      const uid = auth.currentUser?.uid;
+      if (!uid) throw new Error('No authenticated user');
+      const ref = collection(db, `profiles/${uid}/profiles/${perfilId}/downloads`);
       const q = query(ref, where('content_id', '==', contentId), where('content_type', '==', type));
       const snap = await getDocs(q);
-      await Promise.all(snap.docs.map(d => setDoc(doc(db, `profiles/${profileDocId}/downloads/${d.id}`), { ...updates, updated_at: serverTimestamp() }, { merge: true })));
+      await Promise.all(snap.docs.map(d => setDoc(doc(db, `profiles/${uid}/profiles/${perfilId}/downloads/${d.id}`), { ...updates, updated_at: serverTimestamp() }, { merge: true })));
       return { ok: true } as any;
     } catch (error: any) {
       console.error('❌ DatabaseService: Error updating download item (Firestore)', error.message);
@@ -389,11 +396,12 @@ export const databaseService = {
   async removeFromDownloads(perfilId: number, contentId: number, type: 'movie' | 'tv' | 'anime') {
     console.log(`🔄 DatabaseService: Removing from Downloads (Firestore) - Profile: ${perfilId}, Content: ${contentId}, Type: ${type}`);
     try {
-      const profileDocId = auth.currentUser?.uid || String(perfilId);
-      const ref = collection(db, `profiles/${profileDocId}/downloads`);
+      const uid = auth.currentUser?.uid;
+      if (!uid) throw new Error('No authenticated user');
+      const ref = collection(db, `profiles/${uid}/profiles/${perfilId}/downloads`);
       const q = query(ref, where('content_id', '==', contentId), where('content_type', '==', type));
       const snap = await getDocs(q);
-      const batchDeletes = snap.docs.map(d => deleteDoc(doc(db, `profiles/${profileDocId}/downloads/${d.id}`)));
+      const batchDeletes = snap.docs.map(d => deleteDoc(doc(db, `profiles/${uid}/profiles/${perfilId}/downloads/${d.id}`)));
       await Promise.all(batchDeletes);
       console.log('✅ DatabaseService: Removed from Downloads (Firestore)', { deleted: snap.size });
       return { ok: true } as any;
@@ -409,8 +417,8 @@ export const databaseService = {
   async isInDownloads(perfilId: number, contentId: number, type: 'movie' | 'tv' | 'anime'): Promise<boolean> {
     try {
       const downloads = await this.getDownloads(perfilId) as Array<{ content_id: number; content_type: 'movie' | 'tv' | 'anime' }>;
-      return downloads.some((item) => 
-        item.content_id === contentId && 
+      return downloads.some((item) =>
+        item.content_id === contentId &&
         item.content_type === type
       );
     } catch (error: any) {
@@ -423,8 +431,8 @@ export const databaseService = {
    * Agrega anime completo (todas las temporadas y episodios)
    */
   async addAnimeToDownloads(
-    perfilId: number, 
-    contentId: number, 
+    perfilId: number,
+    contentId: number,
     seasons: Array<{ season_number: number; episodes: Array<{ episode_number: number; name: string }> }>
   ): Promise<void> {
     try {
@@ -432,7 +440,7 @@ export const databaseService = {
       await this.addToDownloads(perfilId, contentId, 'anime', {
         status: 'PENDING',
         progress: 0,
-        file_path: JSON.stringify({ 
+        file_path: JSON.stringify({
           type: 'full_anime',
           total_seasons: seasons.length,
           total_episodes: seasons.reduce((acc, season) => acc + season.episodes.length, 0)
@@ -464,8 +472,8 @@ export const databaseService = {
    * Agrega temporada específica de anime
    */
   async addAnimeSeasonToDownloads(
-    perfilId: number, 
-    contentId: number, 
+    perfilId: number,
+    contentId: number,
     seasonNumber: number,
     episodes: Array<{ episode_number: number; name: string }>
   ): Promise<void> {

@@ -38,8 +38,8 @@ export const MyListProvider: React.FC<MyListProviderProps> = ({ children }) => {
   useEffect(() => {
     if (!currentProfile) return;
     if (!auth.currentUser) return;
-    const profileDocId = auth.currentUser.uid;
-    const ref = collection(db, `profiles/${profileDocId}/mylist`);
+    const uid = auth.currentUser.uid;
+    const ref = collection(db, `profiles/${uid}/profiles/${currentProfile.id}/mylist`);
     const q = query(ref, orderBy('added_at', 'desc'));
     const unsub = onSnapshot(q, (snap) => {
       const keyed = new Set<string>(
@@ -57,13 +57,13 @@ export const MyListProvider: React.FC<MyListProviderProps> = ({ children }) => {
 
   const refreshMyList = async () => {
     if (!currentProfile) return;
-    
+
     setLoading(true);
     try {
       console.log('🔄 refreshMyList: Cargando Mi Lista para perfil:', currentProfile.id);
       const items = await databaseService.getMyList(currentProfile.id);
       console.log('🔄 refreshMyList: Items recibidos del backend:', items);
-      
+
       // Crear claves únicas por tipo para evitar colisiones (ej: 'anime:12345')
       // Normalizamos el tipo por si el backend envía variantes de casing
       const keyed = new Set<string>(
@@ -112,22 +112,22 @@ export const MyListProvider: React.FC<MyListProviderProps> = ({ children }) => {
 
   const addToMyList = async (contentId: number, contentType: 'movie' | 'tv' | 'anime' = 'movie') => {
     console.log('➕ addToMyList: Starting', { contentId, contentType, profileId: currentProfile?.id });
-    
+
     if (!currentProfile) {
       console.log('❌ addToMyList: No current profile');
       throw new Error('No hay perfil seleccionado');
     }
 
     try {
-      console.log('➕ addToMyList: Calling databaseService.addToMyList', { 
-        profileId: currentProfile.id, 
-        contentId, 
-        contentType 
+      console.log('➕ addToMyList: Calling databaseService.addToMyList', {
+        profileId: currentProfile.id,
+        contentId,
+        contentType
       });
-      
+
       const result = await databaseService.addToMyList(currentProfile.id, contentId, contentType);
       console.log('✅ addToMyList: Database call successful, result:', result);
-      
+
       const key = `${contentType}:${contentId}`;
       setMyListItems(prev => {
         const newSet = new Set<string>([...prev, key]);
@@ -147,22 +147,22 @@ export const MyListProvider: React.FC<MyListProviderProps> = ({ children }) => {
 
   const removeFromMyList = async (contentId: number, contentType: 'movie' | 'tv' | 'anime' = 'movie') => {
     console.log('➖ removeFromMyList: Starting', { contentId, contentType, profileId: currentProfile?.id });
-    
+
     if (!currentProfile) {
       console.log('❌ removeFromMyList: No current profile');
       throw new Error('No hay perfil seleccionado');
     }
 
     try {
-      console.log('➖ removeFromMyList: Calling databaseService.removeFromMyList', { 
-        profileId: currentProfile.id, 
-        contentId, 
-        contentType 
+      console.log('➖ removeFromMyList: Calling databaseService.removeFromMyList', {
+        profileId: currentProfile.id,
+        contentId,
+        contentType
       });
-      
+
       const result = await databaseService.removeFromMyList(currentProfile.id, contentId, contentType);
       console.log('✅ removeFromMyList: Database call successful, result:', result);
-      
+
       setMyListItems(prev => {
         const newSet = new Set(prev);
         const key = `${contentType}:${contentId}`;
@@ -183,7 +183,7 @@ export const MyListProvider: React.FC<MyListProviderProps> = ({ children }) => {
 
   const toggleMyList = async (contentId: number, contentType: 'movie' | 'tv' | 'anime' = 'movie') => {
     console.log('🔄 toggleMyList: Starting', { contentId, contentType, profileId: currentProfile?.id });
-    
+
     if (!currentProfile) {
       console.log('❌ toggleMyList: No current profile');
       return;
@@ -191,8 +191,8 @@ export const MyListProvider: React.FC<MyListProviderProps> = ({ children }) => {
 
     const isCurrentlyInList = isInMyList(contentId, contentType);
     const key = `${contentType}:${contentId}`;
-    console.log('🔄 toggleMyList: Current status', { 
-      isCurrentlyInList, 
+    console.log('🔄 toggleMyList: Current status', {
+      isCurrentlyInList,
       key,
       allKeys: Array.from(myListItems)
     });
@@ -205,7 +205,7 @@ export const MyListProvider: React.FC<MyListProviderProps> = ({ children }) => {
         console.log('➕ toggleMyList: Adding to list');
         await addToMyList(contentId, contentType);
       }
-      
+
       console.log('🔄 toggleMyList: Refreshing list');
       await refreshMyList();
       console.log('✅ toggleMyList: Success');
