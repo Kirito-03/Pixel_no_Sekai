@@ -26,7 +26,7 @@ const makeRequest = async (endpoint: string, params?: Record<string, any>, provi
   }
 
   let baseUrl: string;
-  
+
   switch (provider) {
     case 'consumet':
       baseUrl = CONSUMET_BASE_URL;
@@ -58,9 +58,9 @@ const makeRequest = async (endpoint: string, params?: Record<string, any>, provi
     default:
       baseUrl = CONSUMET_BASE_URL;
   }
-  
+
   const url = new URL(`${baseUrl}${endpoint}`);
-  
+
   if (params) {
     Object.keys(params).forEach(key => {
       if (params[key] !== undefined && params[key] !== null) {
@@ -69,7 +69,12 @@ const makeRequest = async (endpoint: string, params?: Record<string, any>, provi
     });
   }
 
-  const response = await fetch(url.toString(), {
+  // En web, usar proxy CORS del backend
+  const finalUrl = Platform.OS === 'web'
+    ? buildServerURL(`/api/cors-proxy?url=${encodeURIComponent(url.toString())}`)
+    : url.toString();
+
+  const response = await fetch(finalUrl, {
     method: 'GET',
     headers: { 'Content-Type': 'application/json' },
   });
@@ -105,7 +110,7 @@ export const searchAnimeForStreaming = async (query: string): Promise<any[]> => 
         genres: anime.genres?.map((g: any) => g.name) || []
       }));
     }
-  } catch (error) {}
+  } catch (error) { }
 
   try {
     const anilistQuery = `
@@ -146,7 +151,7 @@ export const searchAnimeForStreaming = async (query: string): Promise<any[]> => 
         genres: anime.genres || []
       }));
     }
-  } catch (error) {}
+  } catch (error) { }
 
   // Consumet providers (solo si habilitado)
   const providers = [
@@ -158,7 +163,7 @@ export const searchAnimeForStreaming = async (query: string): Promise<any[]> => 
       const data = await makeRequest(p.endpoint, p.params, 'consumet');
       const results = data.results || data || [];
       if (results.length > 0) return results;
-    } catch (e) {}
+    } catch (e) { }
   }
 
   return [];
@@ -168,15 +173,15 @@ export const searchAnimeForStreaming = async (query: string): Promise<any[]> => 
 export const getAnimeStreamingInfo = async (animeId: string, animeTitle?: string): Promise<StreamingInfo | null> => {
   // Usar únicamente M3U - si no hay título del anime, no podemos buscar
   if (!animeTitle) {
-  console.log('No anime title provided, cannot search M3U');
+    console.log('No anime title provided, cannot search M3U');
     return null;
   }
 
   try {
-  console.log(`Searching M3U for anime: ${animeTitle}`);
+    console.log(`Searching M3U for anime: ${animeTitle}`);
     const m3uData = await getStreamingInfoFromM3U(animeTitle);
     if (m3uData && m3uData.seasons?.length) {
-  console.log(`Found anime in M3U: ${animeTitle} with ${m3uData.totalEpisodes} episodes`);
+      console.log(`Found anime in M3U: ${animeTitle} with ${m3uData.totalEpisodes} episodes`);
       return {
         animeId: `m3u-${animeTitle}`,
         title: animeTitle,
@@ -188,25 +193,25 @@ export const getAnimeStreamingInfo = async (animeId: string, animeTitle?: string
         seasons: m3uData.seasons
       };
     }
-  console.log(`Anime not found in M3U: ${animeTitle}`);
+    console.log(`Anime not found in M3U: ${animeTitle}`);
     if (USE_EXTERNAL_PROVIDERS) {
       try {
-      console.log(`Searching Anbuanime for: ${animeTitle}`);
+        console.log(`Searching Anbuanime for: ${animeTitle}`);
         const searchData = await makeRequest('/search', { keyw: animeTitle }, 'anbuanime');
         const results = Array.isArray(searchData) ? searchData : (searchData?.results || []);
         if (!results || results.length === 0) {
-        console.log('No results from Anbuanime search');
+          console.log('No results from Anbuanime search');
           return null;
         }
         const bestMatch = results.find((r: any) => (r.animeTitle || '').toLowerCase() === animeTitle.toLowerCase()) || results[0];
         const extId = bestMatch.animeId || bestMatch.id || bestMatch.slug;
         if (!extId) {
-        console.log('Missing animeId in Anbuanime result');
+          console.log('Missing animeId in Anbuanime result');
           return null;
         }
         const detailsData = await makeRequest(`/anime-details/${encodeURIComponent(extId)}`, undefined, 'anbuanime');
         if (!detailsData) {
-        console.log('No details from Anbuanime');
+          console.log('No details from Anbuanime');
           return null;
         }
         const episodesList = detailsData.episodesList || detailsData.episodes || [];
@@ -233,16 +238,16 @@ export const getAnimeStreamingInfo = async (animeId: string, animeTitle?: string
           totalEpisodes: parseInt(detailsData.episodesAvaliable || episodes.length || '0', 10) || episodes.length,
           seasons: [season]
         };
-      console.log(`Found Anbuanime data: ${info.totalEpisodes} episodes`);
+        console.log(`Found Anbuanime data: ${info.totalEpisodes} episodes`);
         return info;
       } catch (e) {
-      console.error('Error fetching Anbuanime data:', e);
+        console.error('Error fetching Anbuanime data:', e);
         return null;
       }
     }
     return null;
   } catch (error) {
-  console.error('Error loading M3U data:', error);
+    console.error('Error loading M3U data:', error);
     return null;
   }
 };
@@ -251,7 +256,7 @@ export const getAnimeStreamingInfo = async (animeId: string, animeTitle?: string
 export const getEpisodeSources = async (episodeId: string, animeTitle?: string, season?: number, episodeNumber?: number): Promise<VideoSource[]> => {
   try {
     if (animeTitle && season && episodeNumber) {
-    console.log(`Searching M3U for episode: ${animeTitle} S${season}E${episodeNumber}`);
+      console.log(`Searching M3U for episode: ${animeTitle} S${season}E${episodeNumber}`);
       const m3uSources = await getEpisodeSourcesFromM3U(animeTitle, season, episodeNumber);
       if (m3uSources?.length) {
         console.log(`Found video URL: ${m3uSources[0].url}`);
@@ -276,7 +281,7 @@ export const getEpisodeSources = async (episodeId: string, animeTitle?: string, 
                     console.log(`Using HLS playlist: ${playlist}`);
                     return [{ url: playlist, isM3U8: true }];
                   }
-                } catch {}
+                } catch { }
                 await new Promise(r => setTimeout(r, 500));
               }
             }
@@ -322,7 +327,7 @@ export const getEpisodeSources = async (episodeId: string, animeTitle?: string, 
     }
     return [];
   } catch (error) {
-  console.error('Error loading episode sources:', error);
+    console.error('Error loading episode sources:', error);
     return [];
   }
 };
@@ -350,7 +355,7 @@ export const getM3UAnimes = async (): Promise<any[]> => {
   try {
     console.log('Getting animes from M3U file...');
     const animes = await getAvailableAnimes();
-  console.log(`Found ${animes.length} animes in M3U`);
+    console.log(`Found ${animes.length} animes in M3U`);
     return animes.map(anime => ({
       id: `m3u-${anime.title}`,
       title: anime.title,
@@ -359,7 +364,7 @@ export const getM3UAnimes = async (): Promise<any[]> => {
       type: 'anime'
     }));
   } catch (error) {
-  console.error('Error getting M3U animes:', error);
+    console.error('Error getting M3U animes:', error);
     return [];
   }
 };
@@ -397,7 +402,7 @@ export const getBestQualitySource = (sources: VideoSource[]): VideoSource | null
 
   // Sort by quality preference (1080p > 720p > 480p > 360p)
   const qualityOrder = ['1080p', '720p', '480p', '360p', 'unknown'];
-  
+
   return sources.sort((a, b) => {
     const aQuality = a.quality || 'unknown';
     const bQuality = b.quality || 'unknown';
@@ -420,10 +425,10 @@ export const getDirectVideoSource = (sources: VideoSource[]): VideoSource | null
 // Fallback function to create mock streaming data for testing
 export const createMockStreamingInfo = (animeTitle: string, realEpisodeCount?: number): StreamingInfo => {
   console.log('Creating mock streaming info for:', animeTitle);
-  
+
   // Usar el conteo real de episodios si está disponible, sino crear un número razonable
   const episodeCount = realEpisodeCount || Math.floor(Math.random() * 12) + 12; // Entre 12 y 24 episodios
-  
+
   const mockEpisodes: AnimeEpisode[] = Array.from({ length: episodeCount }, (_, i) => ({
     id: `mock-ep-${i + 1}`,
     number: i + 1,
@@ -461,7 +466,7 @@ export const searchAnimeForStreamingWithFallback = async (query: string): Promis
     if (consumetResults.length > 0) {
       return consumetResults;
     }
-    
+
     // Try alternative APIs
     const alternativeAPIs = [
       { name: 'AnimeFlix', endpoint: '/search', params: { q: query }, provider: 'animeflix' },
@@ -476,7 +481,7 @@ export const searchAnimeForStreamingWithFallback = async (query: string): Promis
         console.log(`Trying ${api.name}...`);
         const data = await makeRequest(api.endpoint, api.params, api.provider as any);
         const results = data.results || data.data || data || [];
-        
+
         if (results.length > 0) {
           console.log(`Found ${results.length} results with ${api.name}`);
           return results;
@@ -486,7 +491,7 @@ export const searchAnimeForStreamingWithFallback = async (query: string): Promis
         continue;
       }
     }
-    
+
     // If no results, create a mock result for testing
     console.log('No results found, creating mock result for testing');
     return [{

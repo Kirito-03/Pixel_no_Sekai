@@ -1,0 +1,204 @@
+import axios, { AxiosInstance, AxiosRequestConfig } from 'axios';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Platform } from 'react-native';
+
+// Base URL del backend
+const API_BASE_URL = Platform.select({
+    android: 'http://10.0.2.2:3001', // Android emulator
+    ios: 'http://localhost:3001',
+    default: 'http://localhost:3001'
+});
+
+interface AnimeData {
+    tmdb_id?: number;
+    title: string;
+    title_english?: string;
+    title_japanese?: string;
+    description?: string;
+    poster_url?: string;
+    banner_url?: string;
+    genres?: string[];
+    status?: string;
+    total_episodes?: number;
+    rating?: number;
+    release_date?: string;
+}
+
+interface EpisodeData {
+    anime_id: number;
+    season?: number;
+    episode_number: number;
+    title?: string;
+    video_url: string;
+    storage_type?: 'gdrive' | 'local';
+    duration?: number;
+    thumbnail_url?: string;
+    file_size?: number;
+    quality?: string;
+}
+
+interface DashboardStats {
+    totalAnime: number;
+    totalEpisodes: number;
+    storageStats: Array<{
+        storage_type: string;
+        count: number;
+    }>;
+    recentAnime: any[];
+}
+
+class AdminApiService {
+    private axiosInstance: AxiosInstance;
+
+    constructor() {
+        this.axiosInstance = axios.create({
+            baseURL: API_BASE_URL,
+            timeout: 30000,
+        });
+
+        // Add request interceptor to include auth token
+        this.axiosInstance.interceptors.request.use(
+            async (config) => {
+                const token = await AsyncStorage.getItem('admin_token');
+                if (token) {
+                    config.headers.Authorization = `Bearer ${token}`;
+                }
+                return config;
+            },
+            (error) => Promise.reject(error)
+        );
+
+        // Add response interceptor for error handling
+        this.axiosInstance.interceptors.response.use(
+            (response) => response,
+            async (error) => {
+                if (error.response?.status === 401) {
+                    // Token expired or invalid
+                    await AsyncStorage.removeItem('admin_token');
+                }
+                return Promise.reject(error);
+            }
+        );
+    }
+
+    // ========================================
+    // Anime Management
+    // ========================================
+
+    /**
+     * Get list of anime with pagination and filters
+     */
+    async getAnimeList(params?: {
+        page?: number;
+        limit?: number;
+        search?: string;
+        status?: string;
+    }) {
+        const response = await this.axiosInstance.get('/api/admin/anime', { params });
+        return response.data;
+    }
+
+    /**
+     * Get anime by ID
+     */
+    async getAnimeById(id: number) {
+        const response = await this.axiosInstance.get(`/api/admin/anime/${id}`);
+        return response.data;
+    }
+
+    /**
+     * Create new anime
+     */
+    async createAnime(data: AnimeData) {
+        const response = await this.axiosInstance.post('/api/admin/anime', data);
+        return response.data;
+    }
+
+    /**
+     * Update anime
+     */
+    async updateAnime(id: number, data: Partial<AnimeData>) {
+        const response = await this.axiosInstance.put(`/api/admin/anime/${id}`, data);
+        return response.data;
+    }
+
+    /**
+     * Delete anime (soft delete)
+     */
+    async deleteAnime(id: number) {
+        const response = await this.axiosInstance.delete(`/api/admin/anime/${id}`);
+        return response.data;
+    }
+
+    // ========================================
+    // Episode Management
+    // ========================================
+
+    /**
+     * Get episodes for an anime
+     */
+    async getEpisodes(animeId: number) {
+        const response = await this.axiosInstance.get(`/api/admin/episodes/${animeId}`);
+        return response.data;
+    }
+
+    /**
+     * Create new episode
+     */
+    async createEpisode(data: EpisodeData) {
+        const response = await this.axiosInstance.post('/api/admin/episodes', data);
+        return response.data;
+    }
+
+    /**
+     * Update episode
+     */
+    async updateEpisode(id: number, data: Partial<EpisodeData>) {
+        const response = await this.axiosInstance.put(`/api/admin/episodes/${id}`, data);
+        return response.data;
+    }
+
+    /**
+     * Delete episode (soft delete)
+     */
+    async deleteEpisode(id: number) {
+        const response = await this.axiosInstance.delete(`/api/admin/episodes/${id}`);
+        return response.data;
+    }
+
+    // ========================================
+    // TMDB Integration
+    // ========================================
+
+    /**
+     * Search TMDB for anime/TV shows
+     */
+    async searchTMDB(query: string) {
+        const response = await this.axiosInstance.get('/api/admin/tmdb/search', {
+            params: { q: query }
+        });
+        return response.data;
+    }
+
+    /**
+     * Get TMDB details by ID
+     */
+    async getTMDBDetails(tmdbId: number) {
+        const response = await this.axiosInstance.get(`/api/admin/tmdb/details/${tmdbId}`);
+        return response.data;
+    }
+
+    // ========================================
+    // Dashboard & Stats
+    // ========================================
+
+    /**
+     * Get dashboard statistics
+     */
+    async getDashboardStats(): Promise<DashboardStats> {
+        const response = await this.axiosInstance.get('/api/admin/stats');
+        return response.data;
+    }
+}
+
+export const adminApiService = new AdminApiService();

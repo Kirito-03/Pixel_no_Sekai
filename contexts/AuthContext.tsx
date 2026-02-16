@@ -60,11 +60,13 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     console.log('AuthContext: Logging out user');
     try {
       await firebaseLogout();
-    } catch (e) {}
+    } catch (e) { }
     setUser(null);
     await AsyncStorage.removeItem('userSession');
     // También limpiar el perfil actual
+    // También limpiar el perfil actual y token de admin
     await AsyncStorage.removeItem('currentProfile');
+    await AsyncStorage.removeItem('admin_token');
     console.log('AuthContext: Session removed from AsyncStorage');
   };
 

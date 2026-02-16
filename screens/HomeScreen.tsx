@@ -19,14 +19,14 @@ import { useProfile } from '../contexts/ProfileContext';
 import databaseService from '../services/databaseService';
 import { useMyList } from '../contexts/MyListContext';
 
-type Props = NativeStackScreenProps<HomeStackParamList, 'HomeScreen'>;
+type Props = NativeStackScreenProps<HomeStackParamList, 'Inicio'>;
 
 export default function HomeScreen({ navigation }: Props) {
     const { currentProfile, adultContentEnabled } = useProfile();
     const { addToMyList: addToMyListContext } = useMyList();
 
     // Estado unificado para contenido (TMDB + AniList)
-    const [contentSections, setContentSections] = useState<{[key: string]: ContentItem[]}>({});
+    const [contentSections, setContentSections] = useState<{ [key: string]: ContentItem[] }>({});
 
     // Estados de la UI
     const [featuredMovies, setFeaturedMovies] = useState<(MovieDetail | AnimeDetail)[]>([]);
@@ -35,7 +35,7 @@ export default function HomeScreen({ navigation }: Props) {
     const [loading, setLoading] = useState(true);
     const [blackHeader, setBlackHeader] = useState(false);
     const [contentFilter, setContentFilter] = useState<'all' | 'movies' | 'series' | 'anime'>('anime');
-    
+
     // NOTA: 'selectedCategory' parecía no usarse correctamente.
     // La lógica actual se basa en el filtro principal (todo, películas, series).
     // Si la idea era filtrar por género (ej. solo 'Acción'), se necesitaría un cambio mayor.
@@ -100,7 +100,7 @@ export default function HomeScreen({ navigation }: Props) {
             });
 
             const categoryResults = await Promise.allSettled(categoryPromises);
-            const newContentSections: {[key: string]: ContentItem[]} = {};
+            const newContentSections: { [key: string]: ContentItem[] } = {};
 
             categoryResults.forEach((result) => {
                 if (result.status === 'fulfilled') {
@@ -177,9 +177,9 @@ export default function HomeScreen({ navigation }: Props) {
         setModalVisible(true);
     };
 
-    const handleProfilePress = () => navigation.getParent()?.navigate('Profile' as never);
-    const handleSearchPress = () => navigation.getParent()?.navigate('Search' as never);
-    
+    const handleProfilePress = () => navigation.getParent()?.navigate('Perfil' as never);
+    const handleSearchPress = () => navigation.getParent()?.navigate('Buscar' as never);
+
     const handleFilterChange = (filter: 'series' | 'movies' | 'all' | 'anime') => {
         setContentFilter(filter);
         setSelectedCategory(null); // Resetear categoría al cambiar el filtro principal
@@ -266,13 +266,13 @@ export default function HomeScreen({ navigation }: Props) {
     };
 
     const handleCategorySelect = (categoryId: string, categoryName: string) => {
-        navigation.navigate('Category', { categoryId, categoryName });
+        navigation.navigate('Categoria', { categoryId, categoryName });
     };
 
     // Lógica de renderizado actualizada para incluir anime
     const shouldShowCategory = (categoryId: string) => {
         if (contentFilter === 'all') return true;
-        
+
         // Filtros específicos por tipo de contenido
         if (contentFilter === 'movies') {
             return categoryId.includes('movie') || categoryId === 'popular_all' || categoryId === 'top_rated_all' || categoryId === 'current_all';
@@ -283,7 +283,7 @@ export default function HomeScreen({ navigation }: Props) {
         if (contentFilter === 'anime') {
             return categoryId.includes('anime') || categoryId === 'popular_all' || categoryId === 'top_rated_all' || categoryId === 'current_all';
         }
-        
+
         return false;
     };
 
@@ -312,7 +312,7 @@ export default function HomeScreen({ navigation }: Props) {
             </View>
         );
     }
-    
+
     // Función simplificada para manejar la selección de contenido
     const handleContentSelection = (contentItem: ContentItem) => {
         handleContentPress(contentItem);
@@ -366,24 +366,24 @@ export default function HomeScreen({ navigation }: Props) {
 
                 {ENHANCED_CATEGORIES.map((category) => {
                     if (!shouldShowCategory(category.id)) return null;
-                    
+
                     const categoryContent = contentSections[category.id];
                     if (!categoryContent || categoryContent.length === 0) return null;
-                    
+
                     const filteredContent = filterContent(categoryContent);
                     if (filteredContent.length === 0) return null;
-                    
+
                     return (
-                        <MovieRow 
+                        <MovieRow
                             key={category.id}
-                            title={category.name} 
-                            movies={filteredContent} 
+                            title={category.name}
+                            movies={filteredContent}
                             onMoviePress={(id) => {
                                 const contentItem = filteredContent.find(item => item.id === id);
                                 if (contentItem) {
                                     handleContentNavigation(contentItem);
                                 }
-                            }} 
+                            }}
                         />
                     );
                 })}

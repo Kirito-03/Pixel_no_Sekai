@@ -1,12 +1,16 @@
 {
-  "name": "proyecto-netflix",
+  "name": "pixel-no-sekai",
   "version": "1.0.0",
   "main": "index.ts",
   "scripts": {
     "start": "expo start",
     "android": "expo run:android",
     "ios": "expo run:ios",
-    "web": "expo start --web"
+    "web": "expo start --web",
+    "docker:up": "docker-compose up -d",
+    "docker:down": "docker-compose down",
+    "docker:logs": "docker-compose logs -f backend",
+    "docker:rebuild": "docker-compose build --no-cache backend && docker-compose up -d backend"
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.3",

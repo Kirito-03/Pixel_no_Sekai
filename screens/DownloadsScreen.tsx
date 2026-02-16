@@ -12,7 +12,7 @@ import { Ionicons } from '@expo/vector-icons';
 import databaseService from '../services/databaseService';
 import { getContentDetails } from '../services/api';
 
-type Props = NativeStackScreenProps<RootStackParamList, 'Downloads'>;
+type Props = NativeStackScreenProps<RootStackParamList, 'Descargas'>;
 
 type DownloadApiItem = {
   content_id: number;
@@ -35,7 +35,7 @@ type DisplayEntry = {
   meta: AggregatedMeta;
 };
 
-export default function DownloadsScreen({}: Props) {
+export default function DownloadsScreen({ }: Props) {
   const { currentProfile, adultContentEnabled } = useProfile();
   const navigation = useNavigation();
   const [items, setItems] = useState<DisplayEntry[]>([]);
@@ -81,7 +81,7 @@ export default function DownloadsScreen({}: Props) {
           try {
             parsed = JSON.parse(item.file_path);
             metaType = parsed?.type;
-          } catch {}
+          } catch { }
         }
 
         if (item.content_type === 'anime') {
@@ -129,7 +129,7 @@ export default function DownloadsScreen({}: Props) {
           if (!content) continue;
           if (!adultContentEnabled && content.type === 'anime' && content.isAdult) continue;
           entries.push({ content, meta });
-        } catch {}
+        } catch { }
       }
       setItems(entries);
     } catch (e) {
@@ -202,7 +202,7 @@ export default function DownloadsScreen({}: Props) {
                 return;
               }
               // Si venimos directo a Downloads (sin historial), navega al tab 'Profile' dentro de 'Main'.
-              (navigation as any).navigate('Main', { screen: 'Profile' });
+              (navigation as any).navigate('Principal', { screen: 'Perfil' });
             }}
             accessibilityLabel="Cerrar descargas"
           >

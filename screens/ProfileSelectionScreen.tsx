@@ -248,7 +248,7 @@ const ProfileSelectionScreen: React.FC<ProfileSelectionScreenProps> = ({ navigat
           index: 0,
           routes: [
             {
-              name: 'Main',
+              name: 'Principal',
               params: {
                 selectedProfile: mappedProfile,
               },
@@ -302,7 +302,7 @@ const ProfileSelectionScreen: React.FC<ProfileSelectionScreenProps> = ({ navigat
       index: 0,
       routes: [
         {
-          name: 'Main',
+          name: 'Principal',
           params: {
             selectedProfile: profile,
           },
@@ -405,7 +405,7 @@ const ProfileSelectionScreen: React.FC<ProfileSelectionScreenProps> = ({ navigat
           style={styles.logoutButton}
           onPress={async () => {
             await logout();
-            navigation.replace('Login');
+            navigation.replace('Ingreso');
           }}
         >
           <Text style={styles.logoutText}>Cerrar sesión</Text>

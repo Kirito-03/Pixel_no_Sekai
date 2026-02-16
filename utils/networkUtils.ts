@@ -32,16 +32,16 @@ const deriveLanURLFromExpo = (): string => {
 };
 
 const BASE_CANDIDATES: string[] = [
+  // IP de la laptop en la red local (PRIMERO para dispositivos físicos)
+  'http://192.168.1.224:3001',
+  // Intento de LAN usando datos de Expo (útil para dispositivo físico en la misma red)
+  deriveLanURLFromExpo(),
   // Local en web/iOS simulador
   'http://localhost:3001',
   // Loopback explícito
   'http://127.0.0.1:3001',
   // Emulador Android accede al host con 10.0.2.2
   Platform.OS === 'android' ? 'http://10.0.2.2:3001' : '',
-  // Intento de LAN usando datos de Expo (útil para dispositivo físico en la misma red)
-  deriveLanURLFromExpo(),
-  // VirtualBox/host-only redes (
-  'http://192.168.56.1:3001',
 ].filter(Boolean);
 
 /**

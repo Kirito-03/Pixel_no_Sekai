@@ -169,23 +169,23 @@ export interface ContentItem {
 
 // Navegación
 export type RootStackParamList = {
-  Login: undefined;
-  Main: undefined;
-  MyList: undefined;
-  Downloads: undefined;
+  Ingreso: undefined;
+  Principal: undefined;
+  MiLista: undefined;
+  Descargas: undefined;
 };
 
 export type TabParamList = {
-  Home: undefined;
-  Search: undefined;
-  Profile: undefined;
-  MyList: undefined;
+  Inicio: undefined;
+  Buscar: undefined;
+  Perfil: undefined;
+  MiLista: undefined;
 };
 
 export type HomeStackParamList = {
-  HomeScreen: undefined;
-  MovieDetail: { movieId: number; type?: 'movie' | 'tv' | 'anime'; source?: 'tmdb' | 'anilist' };
-  Category: { categoryId: string; categoryName: string; source?: 'tmdb' | 'anilist' };
-  MyList: undefined;
+  Inicio: undefined;
+  DetallePelicula: { movieId: number; type?: 'movie' | 'tv' | 'anime'; source?: 'tmdb' | 'anilist' };
+  Categoria: { categoryId: string; categoryName: string; source?: 'tmdb' | 'anilist' };
+  MiLista: undefined;
 };
 

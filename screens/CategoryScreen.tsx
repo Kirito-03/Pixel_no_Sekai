@@ -26,10 +26,10 @@ import * as AniListService from '../services/anilistService';
 import { animeToContentItem } from '../services/api';
 
 type RootStackParamList = {
-  Category: { categoryId: string; categoryName: string };
+  Categoria: { categoryId: string; categoryName: string };
 };
 
-type Props = NativeStackScreenProps<RootStackParamList, 'Category'>;
+type Props = NativeStackScreenProps<RootStackParamList, 'Categoria'>;
 
 // Mapeo de categorías a géneros de TMDB
 const categoryToGenreMap: { [key: string]: any } = {
@@ -190,7 +190,7 @@ export default function CategoryScreen({ navigation, route }: Props) {
 
   const handleCategorySelect = (newCategoryId: string, newCategoryName: string) => {
     // Navegar a la nueva categoría reemplazando la pantalla actual
-    navigation.replace('Category', { categoryId: newCategoryId, categoryName: newCategoryName });
+    navigation.replace('Categoria', { categoryId: newCategoryId, categoryName: newCategoryName });
   };
 
   if (loading) {

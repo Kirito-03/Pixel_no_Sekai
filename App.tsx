@@ -6,6 +6,7 @@ import { ProfileProvider } from './contexts/ProfileContext';
 import { MyListProvider } from './contexts/MyListContext';
 import { AuthProvider } from './contexts/AuthContext';
 import { ThemeProvider, useTheme } from './contexts/ThemeContext';
+import { AdminProvider } from './contexts/AdminContext';
 
 function ThemedStatusBar() {
   const { theme } = useTheme();
@@ -17,12 +18,14 @@ export default function App() {
     <SafeAreaProvider>
       <ThemeProvider>
         <AuthProvider>
-          <ProfileProvider>
-            <MyListProvider>
-              <AppNavigator />
-              <ThemedStatusBar />
-            </MyListProvider>
-          </ProfileProvider>
+          <AdminProvider>
+            <ProfileProvider>
+              <MyListProvider>
+                <AppNavigator />
+                <ThemedStatusBar />
+              </MyListProvider>
+            </ProfileProvider>
+          </AdminProvider>
         </AuthProvider>
       </ThemeProvider>
     </SafeAreaProvider>

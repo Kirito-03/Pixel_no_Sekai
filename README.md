@@ -30,7 +30,101 @@ Una aplicación móvil y web que replica la funcionalidad de Netflix, desarrolla
 ### APIs externas
 - **TMDB (The Movie Database)** para catálogo de películas
 
-## Instalación y configuración
+## 🐳 Quick Start con Docker (Recomendado)
+
+La forma más rápida de ejecutar la aplicación es usando Docker. Todo el backend y la base de datos se configuran automáticamente.
+
+### Prerrequisitos
+- **Docker Desktop** instalado ([Descargar aquí](https://www.docker.com/products/docker-desktop))
+- Node.js (versión 16 o superior) para el frontend
+- Expo CLI (`npm install -g @expo/cli`)
+
+### Pasos rápidos
+
+**1. Clonar y configurar:**
+```bash
+git clone <url-del-repositorio>
+cd netflix_app
+npm install
+```
+
+**2. Iniciar servicios Docker:**
+```bash
+docker-compose --env-file .env.docker up -d
+```
+
+**3. Verificar servicios:**
+```bash
+# Ver estado de containers
+docker-compose ps
+
+# Ver logs del backend
+docker-compose logs -f backend
+```
+
+**4. Iniciar el frontend:**
+```bash
+npm start
+# Presiona 'w' para web, 'a' para Android, 'i' para iOS
+```
+
+### URLs de servicios
+
+- **Backend API**: `http://localhost:3001`
+- **Adminer** (gestión de BD): `http://localhost:8080`
+  - Server: `mysql`
+  - Username: `root`
+  - Password: `netflix_dev_pass`
+- **MySQL**: `localhost:3306`
+
+### Comandos útiles
+
+```bash
+# Detener servicios
+docker-compose down
+
+# Detener y eliminar volúmenes (resetea la BD)
+docker-compose down -v
+
+# Ver logs en tiempo real
+docker-compose logs -f
+
+# Reconstruir containers después de cambios
+docker-compose up -d --build
+
+# Acceder al container del backend
+docker-compose exec backend sh
+
+# Acceder a MySQL CLI
+docker-compose exec mysql mysql -uroot -pnetflix_dev_pass bd_netflix
+```
+
+### Troubleshooting Docker
+
+**Error: "Port already in use"**
+```bash
+# Ver qué proceso usa el puerto
+netstat -ano | findstr :3001
+
+# Detener otros servicios o cambiar puerto en docker-compose.yml
+```
+
+**Backend no conecta a MySQL**
+```bash
+# Verificar que MySQL esté healthy
+docker-compose ps
+
+# Reiniciar servicios
+docker-compose restart
+```
+
+**Datos no persisten**
+- Los datos se guardan en volúmenes Docker
+- Para reset completo: `docker-compose down -v`
+
+---
+
+## Instalación y configuración (Manual)
 
 ### Prerrequisitos
 - Node.js (versión 16 o superior)

@@ -5,7 +5,7 @@
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const NETWORK_CONFIG_KEY = '@netflix_network_config';
+const NETWORK_CONFIG_KEY = '@pixelnosekai_network_config';
 
 export interface NetworkConfig {
   baseURL: string;
@@ -22,9 +22,9 @@ export const saveNetworkConfig = async (baseURL: string): Promise<void> => {
       lastUpdated: Date.now(),
     };
     await AsyncStorage.setItem(NETWORK_CONFIG_KEY, JSON.stringify(config));
-  console.log('Configuración de red guardada:', baseURL);
+    console.log('Configuración de red guardada:', baseURL);
   } catch (error) {
-  console.error('Error al guardar configuración de red:', error);
+    console.error('Error al guardar configuración de red:', error);
   }
 };
 
@@ -42,13 +42,13 @@ export const loadNetworkConfig = async (): Promise<string | null> => {
         console.log('Configuración de red cargada:', config.baseURL);
         return config.baseURL;
       } else {
-  console.log('Configuración de red muy antigua, ignorando');
+        console.log('Configuración de red muy antigua, ignorando');
         await AsyncStorage.removeItem(NETWORK_CONFIG_KEY);
       }
     }
     return null;
   } catch (error) {
-  console.error('Error al cargar configuración de red:', error);
+    console.error('Error al cargar configuración de red:', error);
     return null;
   }
 };
@@ -59,9 +59,9 @@ export const loadNetworkConfig = async (): Promise<string | null> => {
 export const clearNetworkConfig = async (): Promise<void> => {
   try {
     await AsyncStorage.removeItem(NETWORK_CONFIG_KEY);
-  console.log('Configuración de red eliminada');
+    console.log('Configuración de red eliminada');
   } catch (error) {
-  console.error('Error al eliminar configuración de red:', error);
+    console.error('Error al eliminar configuración de red:', error);
   }
 };
 

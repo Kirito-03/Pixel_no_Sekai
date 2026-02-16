@@ -228,7 +228,7 @@ const RegisterScreen: React.FC<RegisterScreenProps> = ({ navigation }) => {
           index: 0,
           routes: [
             {
-              name: 'Main',
+              name: 'Principal',
               params: {
                 selectedProfile: createdProfile,
               },
@@ -240,7 +240,7 @@ const RegisterScreen: React.FC<RegisterScreenProps> = ({ navigation }) => {
         navigation.reset({
           index: 0,
           routes: [
-            { name: 'ProfileSelection' },
+            { name: 'SeleccionPerfil' },
           ],
         });
       }
@@ -276,17 +276,17 @@ const RegisterScreen: React.FC<RegisterScreenProps> = ({ navigation }) => {
       setGoogleLoading(true);
       if (Platform.OS === 'web') {
         const cred = await loginGoogleProxy();
-        navigation.reset({ index: 0, routes: [{ name: 'Main' }] });
+        navigation.reset({ index: 0, routes: [{ name: 'Principal' }] });
         return;
       }
       const res = await googlePromptAsync();
       if (res?.type === 'success' && res?.params?.id_token) {
         const credential = GoogleAuthProvider.credential(res.params.id_token as string);
         const cred = await signInWithCredential(auth, credential);
-        navigation.reset({ index: 0, routes: [{ name: 'Main' }] });
+        navigation.reset({ index: 0, routes: [{ name: 'Principal' }] });
       } else {
         const cred = await loginGoogleProxy();
-        navigation.reset({ index: 0, routes: [{ name: 'Main' }] });
+        navigation.reset({ index: 0, routes: [{ name: 'Principal' }] });
       }
     } catch (e: any) {
       Alert.alert('Error', e?.message || 'No se pudo continuar con Google');
@@ -406,8 +406,7 @@ const RegisterScreen: React.FC<RegisterScreenProps> = ({ navigation }) => {
         )}
       </TouchableOpacity>
       <TouchableOpacity
-        style={styles.loginLink}
-        onPress={() => navigation.navigate('Login')}
+        onPress={() => navigation.navigate('Ingreso')}
       >
         <Text style={styles.loginLinkText}>¿Ya tienes cuenta? Inicia sesión</Text>
       </TouchableOpacity>

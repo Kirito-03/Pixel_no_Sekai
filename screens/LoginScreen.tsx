@@ -67,7 +67,7 @@ export default function LoginScreen({ navigation }: any) {
     try {
       const cred = await loginEmail(email.trim().toLowerCase(), password);
       await login({ uid: cred.user.uid, email: cred.user.email || email.trim().toLowerCase() });
-      navigation.replace('ProfileSelection');
+      navigation.replace('SeleccionPerfil');
       return;
     } catch (error: any) {
       const code = error?.code || '';
@@ -97,7 +97,7 @@ export default function LoginScreen({ navigation }: any) {
       if (Platform.OS === 'web') {
         const cred = await loginGoogleProxy();
         await login({ uid: cred.user.uid, email: cred.user.email || '' });
-        navigation.replace('ProfileSelection');
+        navigation.replace('SeleccionPerfil');
         return;
       }
       const res = await googlePromptAsync();
@@ -105,11 +105,11 @@ export default function LoginScreen({ navigation }: any) {
         const credential = GoogleAuthProvider.credential(res.params.id_token as string);
         const cred = await signInWithCredential(auth, credential);
         await login({ uid: cred.user.uid, email: cred.user.email || '' });
-        navigation.replace('ProfileSelection');
+        navigation.replace('SeleccionPerfil');
       } else {
         const cred = await loginGoogleProxy();
         await login({ uid: cred.user.uid, email: cred.user.email || '' });
-        navigation.replace('ProfileSelection');
+        navigation.replace('SeleccionPerfil');
       }
     } catch (error: any) {
       const msg = error?.message || 'No se pudo iniciar sesión con Google';
@@ -280,7 +280,7 @@ export default function LoginScreen({ navigation }: any) {
 
                 <View style={styles.signupContainer}>
                   <Text style={styles.signupText}>¿Primera vez en Pixel No Sekai?</Text>
-                  <TouchableOpacity onPress={() => navigation.navigate('Register')}>
+                  <TouchableOpacity onPress={() => navigation.navigate('Registro')}>
                     <Text style={styles.signupLink}>Regístrate aquí.</Text>
                   </TouchableOpacity>
                 </View>
@@ -368,7 +368,7 @@ export default function LoginScreen({ navigation }: any) {
             </View>
           </Modal>
 
-          
+
         </LinearGradient>
       </ImageBackground>
     </View>

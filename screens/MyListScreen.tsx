@@ -24,7 +24,7 @@ import { Ionicons } from '@expo/vector-icons';
 
 // Dejamos de usar la interfaz local Movie, trabajamos directamente con ContentItem
 
-type Props = NativeStackScreenProps<RootStackParamList, 'MyList'>;
+type Props = NativeStackScreenProps<RootStackParamList, 'MiLista'>;
 
 export default function MyListScreen({ navigation }: Props) {
   const { currentProfile, adultContentEnabled } = useProfile();
@@ -47,19 +47,19 @@ export default function MyListScreen({ navigation }: Props) {
 
   const loadMyList = async () => {
     if (!currentProfile) return;
-    
+
     console.log('📋 MyListScreen: Starting loadMyList for profile:', currentProfile.id);
     setLoading(true);
     try {
       // Refrescar la lista global
       console.log('📋 MyListScreen: Refreshing global list');
       await refreshMyList();
-      
+
       // Obtener los elementos de Mi Lista desde la base de datos
       console.log('📋 MyListScreen: Fetching items from database');
       const myListItems = await databaseService.getMyList(currentProfile.id);
       console.log('📋 MyListScreen: Items received from database:', myListItems);
-      
+
       if (myListItems.length === 0) {
         console.log('📋 MyListScreen: No items found, setting empty list');
         setItems([]);
@@ -80,16 +80,16 @@ export default function MyListScreen({ navigation }: Props) {
             console.warn(`⚠️ MyListScreen: content_type inválido ('${typeRaw}') para ID ${item.content_id}. Usando fallback 'movie'.`);
           }
           const source = type === 'anime' ? 'anilist' : 'tmdb';
-          
+
           console.log(`📋 MyListScreen: Processing item ${index + 1}/${myListItems.length}:`, {
             contentId: item.content_id,
             originalType: item.content_type,
             normalizedType: type,
             source
           });
-          
+
           const content = await getContentDetails(Number(item.content_id), type, source);
-          
+
           if (content) {
             console.log(`✅ MyListScreen: Item ${index + 1} loaded successfully:`, {
               id: content.id,
@@ -100,7 +100,7 @@ export default function MyListScreen({ navigation }: Props) {
           } else {
             console.log(`❌ MyListScreen: Item ${index + 1} failed to load (null response)`);
           }
-          
+
           return content; // ContentItem o null
         } catch (error) {
           console.error(`❌ MyListScreen: Error loading item ${index + 1} (${item.content_id}/${item.content_type}):`, error);
@@ -116,7 +116,7 @@ export default function MyListScreen({ navigation }: Props) {
           } else {
             const item = myListItems[index];
             console.error(`❌ MyListScreen: Failed to load item ${item.content_id}/${item.content_type}:`, result.reason);
-            
+
             // Si es un error 404 de TMDB, loggear para posible auto-eliminación
             if (result.reason?.message?.includes('TMDB_404')) {
               console.warn(`🗑️ MyListScreen: TMDB 404 detected for item ${item.content_id}, item may need removal`);
@@ -125,7 +125,7 @@ export default function MyListScreen({ navigation }: Props) {
             if (result.reason?.message?.includes('ANILIST_404')) {
               console.warn(`🗑️ MyListScreen: AniList 404 detected for anime ${item.content_id}, item may need removal`);
             }
-            
+
             return null;
           }
         })
@@ -135,7 +135,7 @@ export default function MyListScreen({ navigation }: Props) {
       if (!adultContentEnabled) {
         validItems = validItems.filter(item => !(item.type === 'anime' && item.isAdult));
       }
-      
+
       // Auto-eliminar opcional de items inválidos (404)
       const removalCandidates = details
         .map((result, index) => ({ result, item: myListItems[index] }))
@@ -171,7 +171,7 @@ export default function MyListScreen({ navigation }: Props) {
         validItems: validItems.length,
         failedItems: myListItems.length - validItems.length
       });
-      
+
       setItems(validItems);
     } catch (error) {
       console.error('❌ MyListScreen: Error loading my list:', error);
@@ -223,7 +223,7 @@ export default function MyListScreen({ navigation }: Props) {
     <View style={styles.movieContainer}>
       <MovieCard movie={item} onPress={() => handleContentPress(item)} />
       <TouchableOpacity
-        style={[styles.removeButton, removingKey === `${item.type}:${item.id}` && { opacity: 0.6 } ]}
+        style={[styles.removeButton, removingKey === `${item.type}:${item.id}` && { opacity: 0.6 }]}
         onPress={() => handleRemoveFromList(item)}
         disabled={removingKey === `${item.type}:${item.id}`}
       >
@@ -244,7 +244,7 @@ export default function MyListScreen({ navigation }: Props) {
       </Text>
       <TouchableOpacity
         style={styles.browseButton}
-        onPress={() => navigation.navigate('Main')}
+        onPress={() => navigation.navigate('Principal')}
       >
         <Text style={styles.browseButtonText}>Explorar contenido</Text>
       </TouchableOpacity>
