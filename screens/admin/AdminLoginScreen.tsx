@@ -14,93 +14,87 @@ import { useAdmin } from '../../contexts/AdminContext';
 import { useNavigation } from '@react-navigation/native';
 
 export default function AdminLoginScreen() {
-    const [isLoading, setIsLoading] = useState(false);
-    const { loginAsAdmin, isAdmin } = useAdmin();
+    const [isLoading, setIsLoading] = useState(true); // Start loading immediately
+    const { isAdmin, checkAdminStatus } = useAdmin();
     const navigation = useNavigation();
 
-    // Redirigir automáticamente si ya es admin
+    // Intentar login automático al montar
     React.useEffect(() => {
-        if (isAdmin) {
-            navigation.reset({
-                index: 0,
-                routes: [{
-                    name: 'Admin',
-                    params: { screen: 'AdminDashboard' }
-                } as any]
-            });
-        }
+        const tryAutoLogin = async () => {
+            if (isAdmin) {
+                navigation.reset({
+                    index: 0,
+                    routes: [{ name: 'Admin', params: { screen: 'AdminDashboard' } } as any]
+                });
+                return;
+            }
+
+            // Forzar chequeo (que ahora incluye el sync con firebase)
+            const success = await checkAdminStatus();
+            if (success) {
+                navigation.reset({
+                    index: 0,
+                    routes: [{ name: 'Admin', params: { screen: 'AdminDashboard' } } as any]
+                });
+            } else {
+                setIsLoading(false); // Solo mostrar UI si falló el auto-login
+            }
+        };
+
+        tryAutoLogin();
     }, [isAdmin]);
 
-    const handleGoogleLogin = async () => {
-        try {
-            setIsLoading(true);
-            await loginAsAdmin();
-
-            // Navigate to admin dashboard on success
-            // Navigate to admin dashboard on success (via MainTabs)
-            // Navigate to admin dashboard on success (via MainTabs)
-            navigation.reset({
-                index: 0,
-                routes: [{
-                    name: 'Admin',
-                    params: { screen: 'AdminDashboard' }
-                } as any]
-            });
-        } catch (error: any) {
+    const handleRetry = async () => {
+        setIsLoading(true);
+        const success = await checkAdminStatus();
+        if (!success) {
             setIsLoading(false);
-            Alert.alert(
-                'Error de Autenticación',
-                error.message || 'No se pudo iniciar sesión. Por favor, intenta de nuevo.',
-                [{ text: 'OK' }]
-            );
+            Alert.alert('Acceso Denegado', 'No tienes permisos de administrador.');
         }
     };
+
+    if (isLoading) {
+        return (
+            <SafeAreaView style={styles.container}>
+                <View style={styles.content}>
+                    <ActivityIndicator size="large" color="#0A2342" />
+                    <Text style={{ textAlign: 'center', marginTop: 20, color: '#666' }}>
+                        Verificando credenciales...
+                    </Text>
+                </View>
+            </SafeAreaView>
+        );
+    }
 
     return (
         <SafeAreaView style={styles.container}>
             <View style={styles.content}>
-                {/* Logo/Header */}
                 <View style={styles.header}>
                     <View style={styles.iconContainer}>
-                        <Ionicons name="shield-checkmark" size={64} color="#0A2342" />
+                        <Ionicons name="lock-closed" size={64} color="#e50914" />
                     </View>
-                    <Text style={styles.title}>Admin Panel</Text>
-                    <Text style={styles.subtitle}>Pixel No Sekai</Text>
+                    <Text style={styles.title}>Acceso Restringido</Text>
+                    <Text style={styles.subtitle}>Solo personal autorizado</Text>
                 </View>
 
-                {/* Login Section */}
                 <View style={styles.loginSection}>
-                    <Text style={styles.loginTitle}>Iniciar Sesión</Text>
-                    <Text style={styles.loginSubtitle}>
-                        Acceso exclusivo para administradores
+                    <Text style={styles.infoText}>
+                        No pudimos verificar tus permisos de administrador automáticamente.
                     </Text>
-
-                    {/* Google Login Button */}
+                    
                     <TouchableOpacity
                         style={styles.googleButton}
-                        onPress={handleGoogleLogin}
-                        disabled={isLoading}
+                        onPress={handleRetry}
                     >
-                        {isLoading ? (
-                            <ActivityIndicator color="#0A2342" />
-                        ) : (
-                            <>
-                                <Image
-                                    source={{ uri: 'https://www.google.com/favicon.ico' }}
-                                    style={styles.googleIcon}
-                                />
-                                <Text style={styles.googleButtonText}>Continuar con Google</Text>
-                            </>
-                        )}
+                        <Text style={styles.googleButtonText}>Reintentar Verificación</Text>
                     </TouchableOpacity>
 
-                    {/* Info Box */}
-                    <View style={styles.infoBox}>
-                        <Ionicons name="information-circle" size={20} color="#0A2342" />
-                        <Text style={styles.infoText}>
-                            Solo los administradores autorizados pueden acceder a este panel.
-                        </Text>
-                    </View>
+                    <TouchableOpacity
+                        style={[styles.googleButton, { backgroundColor: '#666', marginTop: 10 }]}
+                        onPress={() => navigation.goBack()}
+                    >
+                        <Text style={styles.googleButtonText}>Volver</Text>
+                    </TouchableOpacity>
                 </View>
             </View>
         </SafeAreaView>

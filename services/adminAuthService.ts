@@ -25,6 +25,28 @@ interface AuthResult {
 
 class AdminAuthService {
     /**
+     * Authenticate using Firebase ID Token (Single Login)
+     */
+    async loginWithFirebaseToken(idToken: string): Promise<AuthResult> {
+        try {
+            const baseUrl = getCurrentBaseURL();
+            const response = await axios.post(`${baseUrl}/auth/admin/firebase-login`, {
+                idToken
+            });
+
+            const { token, user } = response.data;
+            if (token && user) {
+                return { success: true, token, user };
+            }
+            return { success: false, error: 'Respuesta inválida del servidor' };
+        } catch (error: any) {
+            console.error('Firebase Admin Login Error:', error);
+            const msg = error.response?.data?.message || error.message || 'Error de autenticación';
+            return { success: false, error: msg };
+        }
+    }
+
+    /**
      * Authenticate with Google OAuth using WebBrowser
      * This will redirect to backend OAuth endpoint
      */

@@ -59,21 +59,30 @@ export const AdminProvider: React.FC<AdminProviderProps> = ({ children }) => {
         try {
             setIsLoading(true);
 
-            // 1. Check if we have a firebase user
+            // 1. Check if we have a firebase user and sync with backend
             const currentUser = require('../services/firebase').auth.currentUser;
-            if (currentUser && currentUser.email && ADMIN_EMAILS.includes(currentUser.email)) {
-                console.log('AdminContext: Auto-detected admin from Firebase user:', currentUser.email);
-                setIsAdmin(true);
-                setAdminUser({
-                    id: 0, // Mock ID or fetch from backend if needed
-                    email: currentUser.email,
-                    name: currentUser.displayName || 'Admin',
-                    picture: currentUser.photoURL || undefined
-                });
-                return true;
+            if (currentUser) {
+                // Verificar preliminarmente si el email está permitido (opcional, pero ahorra requests)
+                // Usamos la API del backend para saber si está permitido o si tenemos el array local
+                // Pero lo importante es obtener el token del backend.
+                
+                // Obtener ID Token de Firebase
+                const idToken = await currentUser.getIdToken(true); // force refresh
+                
+                // Intentar login silencioso con backend
+                const result = await adminAuthService.loginWithFirebaseToken(idToken);
+                
+                if (result.success && result.token && result.user) {
+                    await AsyncStorage.setItem('admin_token', result.token);
+                    setIsAdmin(true);
+                    setIsAdminAllowed(true);
+                    setAdminUser(result.user);
+                    return true;
+                }
             }
 
-            // 2. Fallback to stored token (if implementing separate auth later)
+            // 2. Fallback to stored token (if user not logged in via firebase but has token?)
+            // Esto es raro si queremos single login, pero mantenemos por si acaso.
             const token = await AsyncStorage.getItem('admin_token');
             if (!token) {
                 setIsAdmin(false);

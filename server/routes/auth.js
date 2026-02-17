@@ -136,6 +136,90 @@ router.get('/google/callback',
     }
 );
 
+import axios from 'axios';
+
+/**
+ * POST /auth/admin/firebase-login
+ * Inicia sesión admin usando un token de Firebase (Client SDK)
+ */
+router.post('/admin/firebase-login', async (req, res) => {
+    try {
+        const { idToken } = req.body;
+        if (!idToken) {
+            return res.status(400).json({ message: 'Token requerido' });
+        }
+
+        // Validar token contra Google
+        // Esto verifica firma y expiración sin necesitar service-account (para simplicidad)
+        const verifyUrl = `https://oauth2.googleapis.com/tokeninfo?id_token=${idToken}`;
+        const response = await axios.get(verifyUrl);
+        const payload = response.data;
+
+        // Verificar email en whitelist
+        const allowedEmails = (process.env.ADMIN_EMAILS || '').split(',').map(e => e.trim());
+        const email = payload.email;
+
+        if (!allowedEmails.includes(email)) {
+            return res.status(403).json({ message: 'Email no autorizado' });
+        }
+
+        // Guardar/Actualizar en BD
+        const pool = new (require('pg').Pool)({
+            host: process.env.DB_HOST || 'localhost',
+            port: Number(process.env.DB_PORT || 5432),
+            user: process.env.DB_USER || 'root',
+            password: process.env.DB_PASSWORD || '',
+            database: process.env.DB_NAME || 'bd_netflix',
+        });
+
+        // Usamos el 'sub' de firebase como google_id o similar
+        const googleId = payload.sub;
+        const name = payload.name || email.split('@')[0];
+        const picture = payload.picture || '';
+
+        const result = await pool.query(
+            `INSERT INTO admin_users (google_id, email, name, picture, last_login)
+             VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
+             ON CONFLICT (google_id) 
+             DO UPDATE SET 
+               name = EXCLUDED.name,
+               picture = EXCLUDED.picture,
+               last_login = CURRENT_TIMESTAMP
+             RETURNING id, email, name, picture`,
+            [googleId, email, name, picture]
+        );
+        await pool.end();
+
+        const user = result.rows[0];
+
+        // Generar JWT de Admin (el que usa el backend)
+        const token = jwt.sign(
+            {
+                id: user.id,
+                email: user.email,
+                name: user.name,
+                picture: user.picture
+            },
+            process.env.JWT_SECRET,
+            { expiresIn: '24h' }
+        );
+
+        // Si es web, establecer cookie también para consistencia
+        res.cookie('admin_token', token, {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === 'production',
+            maxAge: 24 * 60 * 60 * 1000,
+            sameSite: process.env.NODE_ENV === 'production' ? 'lax' : 'none'
+        });
+
+        return res.json({ token, user });
+
+    } catch (error) {
+        console.error('Firebase Admin Login Error:', error.response?.data || error.message);
+        return res.status(401).json({ message: 'Token inválido o expirado' });
+    }
+});
+
 /**
  * GET /auth/admin/me
  * Obtiene información del administrador autenticado

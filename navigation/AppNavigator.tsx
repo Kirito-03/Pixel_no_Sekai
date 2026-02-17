@@ -246,8 +246,9 @@ export default function AppNavigator() {
             <RootStack.Screen name="Principal" component={MainTabs} />
             <RootStack.Screen name="Apariencia" component={require('../screens/AppearanceScreen').default} />
             <RootStack.Screen name="Descargas" component={DownloadsScreen as any} />
-            <RootStack.Screen name="AdminPortal" component={AdminLoginScreen} />
-            <RootStack.Screen name="Admin" component={AdminNavigator} />
+            {/* AdminPortal y Admin ocultos/deshabilitados por ahora */}
+            {/* <RootStack.Screen name="AdminPortal" component={AdminLoginScreen} /> */}
+            {/* <RootStack.Screen name="Admin" component={AdminNavigator} /> */}
           </>
         )}
       </RootStack.Navigator>

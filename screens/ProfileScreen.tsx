@@ -24,7 +24,7 @@ import { useAuth } from '../contexts/AuthContext';
 import databaseService from '../services/databaseService';
 import { requestPasswordReset, requestEmailVerification } from '../services/auth';
 import { auth } from '../services/firebase';
-import { useAdmin } from '../contexts/AdminContext';
+// import { useAdmin } from '../contexts/AdminContext';
 
 export default function ProfileScreen({ navigation }: any) {
   const { colors, theme } = useTheme();
@@ -34,7 +34,7 @@ export default function ProfileScreen({ navigation }: any) {
   const [imageError, setImageError] = useState(false); // Para manejar errores de carga
   const { currentProfile, setCurrentProfile, clearCurrentProfile, adultContentEnabled, setAdultContentEnabled } = useProfile();
   const { logout, user } = useAuth();
-  const { isAdmin } = useAdmin();
+  // const { isAdmin, isAdminAllowed } = useAdmin();
   const fileInputRef = useRef<any>(null);
 
   const { width } = useWindowDimensions();
@@ -647,21 +647,6 @@ export default function ProfileScreen({ navigation }: any) {
             </View>
             <Ionicons name="chevron-forward" size={24} color={colors.textGray} />
           </TouchableOpacity>
-
-          {isAdmin && (
-            <TouchableOpacity
-              style={styles.menuItem}
-              onPress={() => {
-                navigation.navigate('Admin');
-              }}
-            >
-              <View style={styles.menuContent}>
-                <Text style={styles.menuTitle}>Panel de Administrador</Text>
-                <Text style={styles.menuSubtitle}>Acceso restringido</Text>
-              </View>
-              <Ionicons name="shield-checkmark-outline" size={24} color={colors.textGray} />
-            </TouchableOpacity>
-          )}
         </View>
 
         {/* Sección CERRAR SESIÓN */}

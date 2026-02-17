@@ -76,11 +76,7 @@ const ProfileSelectionScreen: React.FC<ProfileSelectionScreenProps> = ({ navigat
   const [deleteTargetId, setDeleteTargetId] = useState<number | null>(null);
   const [deleting, setDeleting] = useState(false);
 
-  useEffect(() => {
-    loadProfiles();
-  }, []);
-
-  // Volver a cargar los perfiles cada vez que la pantalla vuelve a estar en foco
+  // Cargar los perfiles cada vez que la pantalla está en foco (incluye montaje inicial)
   useFocusEffect(
     React.useCallback(() => {
       loadProfiles();

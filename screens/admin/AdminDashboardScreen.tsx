@@ -58,8 +58,13 @@ export default function AdminDashboardScreen() {
     };
 
     const handleLogout = async () => {
-        await logoutAdmin();
-        navigation.navigate('AdminLogin' as never);
+        // En lugar de cerrar sesión, volvemos al perfil
+        // Si se quiere "cerrar" el panel, basta con salir de la navegación admin
+        navigation.getParent()?.goBack();
+    };
+
+    const handleGoBack = () => {
+        navigation.getParent()?.goBack();
     };
 
     const gdriveCount = stats?.storageStats?.find(s => s.storage_type === 'gdrive')?.count || 0;
@@ -69,13 +74,17 @@ export default function AdminDashboardScreen() {
         <SafeAreaView style={styles.container} edges={['top']}>
             {/* Header */}
             <View style={styles.header}>
-                <View>
+                <TouchableOpacity onPress={handleGoBack} style={styles.backButton}>
+                    <Ionicons name="arrow-back" size={24} color="#FFFFFF" />
+                </TouchableOpacity>
+                <View style={{ flex: 1, marginLeft: 10 }}>
                     <Text style={styles.headerTitle}>Dashboard</Text>
                     <Text style={styles.headerSubtitle}>Panel de Administración</Text>
                 </View>
-                <TouchableOpacity onPress={handleLogout} style={styles.logoutButton}>
+                {/* Opcional: Mantener logout si el usuario quiere "salir" explícitamente */}
+                {/* <TouchableOpacity onPress={handleLogout} style={styles.logoutButton}>
                     <Ionicons name="log-out-outline" size={24} color="#ef4444" />
-                </TouchableOpacity>
+                </TouchableOpacity> */}
             </View>
 
             <ScrollView
@@ -208,15 +217,17 @@ const styles = StyleSheet.create({
     },
     header: {
         flexDirection: 'row',
-        justifyContent: 'space-between',
         alignItems: 'center',
         padding: 20,
         backgroundColor: '#000000', // Black header
         borderBottomWidth: 1,
         borderBottomColor: '#333333',
     },
+    backButton: {
+        padding: 8,
+    },
     headerTitle: {
-        fontSize: 28,
+        fontSize: 24,
         fontWeight: '700',
         color: '#E50914', // Red accent
     },
