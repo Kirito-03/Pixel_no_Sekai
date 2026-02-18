@@ -1,9 +1,10 @@
 import React, { useRef, useState, useEffect } from 'react';
-import { View, TextInput, FlatList, StyleSheet, Text, TouchableOpacity } from 'react-native';
+import { View, TextInput, FlatList, StyleSheet, Text, TouchableOpacity, Animated, ActivityIndicator } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { searchAllContent, getMovieDetails } from '../services/api';
 import MovieCard from '../components/MovieCard';
 import MovieModal from '../components/MovieModal';
-import { colors, spacing } from '../theme';
+import { colors, spacing, shadows, borderRadius } from '../theme';
 import { MovieDetail, ContentItem } from '../types';
 import { useProfile } from '../contexts/ProfileContext';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -17,8 +18,14 @@ export default function SearchScreen() {
   const [modalVisible, setModalVisible] = useState(false);
   const [loading, setLoading] = useState(false);
   const [recentQueries, setRecentQueries] = useState<string[]>([]);
+  const [isFocused, setIsFocused] = useState(false);
   const typingTimer = useRef<any>(null);
   const latestQueryRef = useRef<string>('');
+
+  // Animated values
+  const focusAnim = useRef(new Animated.Value(0)).current;
+  const suggestionsAnim = useRef(new Animated.Value(0)).current;
+  const loadingRotate = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     // Cargar últimas búsquedas por perfil
@@ -155,42 +162,132 @@ export default function SearchScreen() {
     }
   };
 
+  // Animación de focus
+  const handleFocus = () => {
+    setIsFocused(true);
+    Animated.spring(focusAnim, {
+      toValue: 1,
+      useNativeDriver: false,
+      friction: 5,
+    }).start();
+  };
+
+  const handleBlur = () => {
+    setIsFocused(false);
+    Animated.spring(focusAnim, {
+      toValue: 0,
+      useNativeDriver: false,
+      friction: 5,
+    }).start();
+  };
+
+  // Animación de sugerencias
+  useEffect(() => {
+    Animated.timing(suggestionsAnim, {
+      toValue: suggestions.length > 0 ? 1 : 0,
+      duration: 200,
+      useNativeDriver: true,
+    }).start();
+  }, [suggestions]);
+
+  // Animación de loading
+  useEffect(() => {
+    if (loading) {
+      Animated.loop(
+        Animated.timing(loadingRotate, {
+          toValue: 1,
+          duration: 1000,
+          useNativeDriver: true,
+        })
+      ).start();
+    } else {
+      loadingRotate.setValue(0);
+    }
+  }, [loading]);
+
+  const borderColor = focusAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [colors.card, colors.primary],
+  });
+
+  const rotate = loadingRotate.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['0deg', '360deg'],
+  });
+
   return (
     <View style={styles.container}>
-      <View style={styles.inputWrapper}>
+      <Animated.View style={[styles.inputWrapper, { borderColor, borderWidth: 2 }]}>
+        <Ionicons
+          name="search"
+          size={20}
+          color={isFocused ? colors.primary : colors.textGray}
+          style={styles.searchIcon}
+        />
         <TextInput
           style={styles.input}
-        placeholder="Buscar anime..."
+          placeholder="Buscar anime..."
           placeholderTextColor={colors.textGray}
           value={query}
           onChangeText={handleSearch}
           onSubmitEditing={({ nativeEvent }) => recordRecentSearch(nativeEvent.text)}
+          onFocus={handleFocus}
+          onBlur={handleBlur}
         />
-        {query.length > 0 && (
+        {loading && (
+          <Animated.View style={[styles.loadingIndicator, { transform: [{ rotate }] }]}>
+            <ActivityIndicator size="small" color={colors.primary} />
+          </Animated.View>
+        )}
+        {query.length > 0 && !loading && (
           <TouchableOpacity
             accessibilityLabel="Limpiar búsqueda"
             style={styles.clearButton}
             onPress={clearSearch}
           >
-            <Text style={styles.clearText}>×</Text>
+            <Ionicons name="close-circle" size={20} color={colors.textGray} />
           </TouchableOpacity>
         )}
-      </View>
+      </Animated.View>
 
-      {/* Sugerencias bajo el campo de búsqueda */}
+      {/* Sugerencias bajo el campo de búsqueda con animación */}
       {suggestions.length > 0 && (
-        <View style={styles.suggestionsContainer}>
+        <Animated.View
+          style={[
+            styles.suggestionsContainer,
+            {
+              opacity: suggestionsAnim,
+              transform: [
+                {
+                  translateY: suggestionsAnim.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [-10, 0],
+                  }),
+                },
+              ],
+            },
+          ]}
+        >
           <FlatList
             data={suggestions}
             keyExtractor={(item) => `${item.source}-${item.type}-${item.id}`}
             renderItem={({ item }) => (
-              <TouchableOpacity style={styles.suggestionRow} onPress={() => handleSuggestionPress(item)}>
-                <Text style={styles.suggestionText}>{item.title}</Text>
-                <Text style={styles.suggestionType}>{item.type.toUpperCase()}</Text>
+              <TouchableOpacity
+                style={styles.suggestionRow}
+                onPress={() => handleSuggestionPress(item)}
+                activeOpacity={0.7}
+              >
+                <View style={styles.suggestionContent}>
+                  <Ionicons name="search" size={16} color={colors.textGray} style={styles.suggestionIcon} />
+                  <Text style={styles.suggestionText}>{item.title}</Text>
+                </View>
+                <View style={styles.suggestionBadge}>
+                  <Text style={styles.suggestionType}>{item.type.toUpperCase()}</Text>
+                </View>
               </TouchableOpacity>
             )}
           />
-        </View>
+        </Animated.View>
       )}
 
       {/* Últimas búsquedas */}
@@ -228,7 +325,7 @@ export default function SearchScreen() {
           </Text>
         }
       />
-      
+
       <MovieModal
         content={selectedContent}
         visible={modalVisible}
@@ -244,47 +341,46 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
   },
   inputWrapper: {
+    flexDirection: 'row',
+    alignItems: 'center',
     position: 'relative',
     margin: spacing.md,
+    backgroundColor: colors.card,
+    borderRadius: borderRadius.md,
+    paddingHorizontal: spacing.sm,
+  },
+  searchIcon: {
+    marginRight: spacing.sm,
   },
   input: {
-    backgroundColor: colors.card,
+    flex: 1,
     color: colors.text,
     padding: spacing.md,
-    borderRadius: 8,
     fontSize: 16,
+  },
+  loadingIndicator: {
+    marginRight: spacing.sm,
   },
   clearButton: {
-    position: 'absolute',
-    right: spacing.md,
-    top: '50%',
-    transform: [{ translateY: -12 }],
-    height: 24,
-    width: 24,
-    alignItems: 'center',
+    padding: spacing.xs,
     justifyContent: 'center',
-    backgroundColor: '#3a3a3a',
-    borderRadius: 12,
-  },
-  clearText: {
-    color: colors.text,
-    fontSize: 16,
-    lineHeight: 16,
-    textAlign: 'center',
+    alignItems: 'center',
   },
   suggestionsContainer: {
     marginHorizontal: spacing.md,
     marginBottom: spacing.sm,
     backgroundColor: colors.card,
-    borderRadius: 8,
+    borderRadius: borderRadius.md,
     overflow: 'hidden',
+    ...shadows.md,
   },
   recentContainer: {
     marginHorizontal: spacing.md,
     marginBottom: spacing.md,
     backgroundColor: colors.card,
-    borderRadius: 8,
+    borderRadius: borderRadius.md,
     paddingVertical: spacing.sm,
+    ...shadows.sm,
   },
   recentTitle: {
     color: colors.textGray,
@@ -294,12 +390,20 @@ const styles = StyleSheet.create({
   },
   suggestionRow: {
     paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
+    paddingVertical: spacing.md,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: '#333',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+  },
+  suggestionContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  suggestionIcon: {
+    marginRight: spacing.sm,
   },
   recentRow: {
     paddingHorizontal: spacing.md,
@@ -310,10 +414,18 @@ const styles = StyleSheet.create({
   suggestionText: {
     color: colors.text,
     fontSize: 14,
+    flex: 1,
+  },
+  suggestionBadge: {
+    backgroundColor: colors.primary,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 2,
+    borderRadius: borderRadius.sm,
   },
   suggestionType: {
-    color: colors.textGray,
-    fontSize: 12,
+    color: colors.text,
+    fontSize: 10,
+    fontWeight: '600',
   },
   recentText: {
     color: colors.text,

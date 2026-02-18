@@ -1,9 +1,11 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { View, Image, Text, TouchableOpacity, StyleSheet, Animated, useWindowDimensions, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+// import { BlurView } from 'expo-blur'; // Fallback: Dependency not installed
 import { Ionicons } from '@expo/vector-icons';
-import { colors } from '../theme';
+import { colors, shadows } from '../theme';
 import CategoriesMenu from './CategoriesMenu';
+import PressableScale from './PressableScale';
 
 interface HeaderProps {
   black?: boolean;
@@ -22,6 +24,9 @@ export default function Header({ black = false, onProfilePress, onSearchPress, o
   const [showCategoriesMenu, setShowCategoriesMenu] = useState(false);
 
   const backgroundOpacity = useRef(new Animated.Value(0)).current;
+  const logoScale = useRef(new Animated.Value(1)).current;
+  const searchIconScale = useRef(new Animated.Value(1)).current;
+  const notifIconScale = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
     Animated.timing(backgroundOpacity, {
@@ -98,29 +103,77 @@ export default function Header({ black = false, onProfilePress, onSearchPress, o
     },
   };
 
+  const animateIcon = (iconAnim: Animated.Value) => {
+    Animated.sequence([
+      Animated.spring(iconAnim, {
+        toValue: 1.15,
+        useNativeDriver: true,
+        friction: 3,
+      }),
+      Animated.spring(iconAnim, {
+        toValue: 1,
+        useNativeDriver: true,
+        friction: 3,
+      }),
+    ]).start();
+  };
+
   return (
     <Animated.View style={[dynamicStyles.container, { backgroundColor }]}>
+      {/* Fallback for missing BlurView */}
+      {black && Platform.OS !== 'web' && (
+        <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(20, 20, 20, 0.95)' }]} />
+        // <BlurView intensity={20} tint="dark" style={StyleSheet.absoluteFill} />
+      )}
       <SafeAreaView>
         <View style={dynamicStyles.header}>
-          {/* Logo: Pixel No Sekai */}
-          <TouchableOpacity style={dynamicStyles.logoContainer}>
-            <Text style={dynamicStyles.logo}>Pixel No Sekai</Text>
-          </TouchableOpacity>
+          {/* Logo: Pixel No Sekai con animación */}
+          <Animated.View style={{ transform: [{ scale: logoScale }] }}>
+            <TouchableOpacity
+              style={dynamicStyles.logoContainer}
+              onPressIn={() => {
+                Animated.spring(logoScale, {
+                  toValue: 0.95,
+                  useNativeDriver: true,
+                  friction: 3,
+                }).start();
+              }}
+              onPressOut={() => {
+                Animated.spring(logoScale, {
+                  toValue: 1,
+                  useNativeDriver: true,
+                  friction: 3,
+                }).start();
+              }}
+            >
+              <Text style={dynamicStyles.logo}>Pixel No Sekai</Text>
+            </TouchableOpacity>
+          </Animated.View>
 
           {/* Contenedor derecho: Búsqueda + Notificaciones */}
           <View style={dynamicStyles.rightContainer}>
-            {/* Botón de búsqueda */}
-            <TouchableOpacity
-              style={dynamicStyles.notificationButton}
-              onPress={onSearchPress}
-            >
-              <Ionicons name="search" size={isSmallScreen ? 24 : 26} color={colors.text} />
-            </TouchableOpacity>
+            {/* Botón de búsqueda con animación */}
+            <Animated.View style={{ transform: [{ scale: searchIconScale }] }}>
+              <TouchableOpacity
+                style={[dynamicStyles.notificationButton, shadows.sm]}
+                onPress={() => {
+                  animateIcon(searchIconScale);
+                  onSearchPress?.();
+                }}
+              >
+                <Ionicons name="search" size={isSmallScreen ? 24 : 26} color={colors.text} />
+              </TouchableOpacity>
+            </Animated.View>
 
-            {/* Botón de notificaciones */}
-            <TouchableOpacity style={dynamicStyles.notificationButton}>
-              <Ionicons name="notifications-outline" size={isSmallScreen ? 24 : 26} color={colors.text} />
-            </TouchableOpacity>
+            {/* Botón de notificaciones con animación */}
+            <Animated.View style={{ transform: [{ scale: notifIconScale }] }}>
+              <TouchableOpacity
+                style={[dynamicStyles.notificationButton, shadows.sm]}
+                onPress={() => animateIcon(notifIconScale)}
+              >
+                <Ionicons name="notifications-outline" size={isSmallScreen ? 24 : 26} color={colors.text} />
+              </TouchableOpacity>
+            </Animated.View>
           </View>
         </View>
 

@@ -81,10 +81,10 @@ export default function AdminDashboardScreen() {
                     <Text style={styles.headerTitle}>Dashboard</Text>
                     <Text style={styles.headerSubtitle}>Panel de Administración</Text>
                 </View>
-                {/* Opcional: Mantener logout si el usuario quiere "salir" explícitamente */}
-                {/* <TouchableOpacity onPress={handleLogout} style={styles.logoutButton}>
-                    <Ionicons name="log-out-outline" size={24} color="#ef4444" />
-                </TouchableOpacity> */}
+                {/* Botón para salir del modo administrador */}
+                <TouchableOpacity onPress={handleGoBack} style={styles.logoutButton}>
+                    <Ionicons name="exit-outline" size={24} color="#ef4444" />
+                </TouchableOpacity>
             </View>
 
             <ScrollView

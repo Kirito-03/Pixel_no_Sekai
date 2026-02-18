@@ -21,10 +21,10 @@ import { spacing } from '../theme';
 import { useTheme } from '../contexts/ThemeContext';
 import { useProfile } from '../contexts/ProfileContext';
 import { useAuth } from '../contexts/AuthContext';
+import { useAdmin, ADMIN_EMAILS } from '../contexts/AdminContext';
 import databaseService from '../services/databaseService';
 import { requestPasswordReset, requestEmailVerification } from '../services/auth';
 import { auth } from '../services/firebase';
-// import { useAdmin } from '../contexts/AdminContext';
 
 export default function ProfileScreen({ navigation }: any) {
   const { colors, theme } = useTheme();
@@ -34,7 +34,7 @@ export default function ProfileScreen({ navigation }: any) {
   const [imageError, setImageError] = useState(false); // Para manejar errores de carga
   const { currentProfile, setCurrentProfile, clearCurrentProfile, adultContentEnabled, setAdultContentEnabled } = useProfile();
   const { logout, user } = useAuth();
-  // const { isAdmin, isAdminAllowed } = useAdmin();
+  const { checkAdminStatus } = useAdmin();
   const fileInputRef = useRef<any>(null);
 
   const { width } = useWindowDimensions();
@@ -647,6 +647,33 @@ export default function ProfileScreen({ navigation }: any) {
             </View>
             <Ionicons name="chevron-forward" size={24} color={colors.textGray} />
           </TouchableOpacity>
+
+          {/* Botón para acceder al modo administrador - solo visible para admins */}
+          {user?.email && ADMIN_EMAILS.includes(user.email) && (
+            <TouchableOpacity
+              style={styles.menuItem}
+              onPress={async () => {
+                try {
+                  Alert.alert('Accediendo...', 'Verificando credenciales de administrador');
+                  const isAdmin = await checkAdminStatus();
+                  if (isAdmin) {
+                    navigation.navigate('Admin' as never);
+                  } else {
+                    Alert.alert('Error', 'No tienes permisos de administrador');
+                  }
+                } catch (error) {
+                  console.error('Error al acceder al modo admin:', error);
+                  Alert.alert('Error', 'No se pudo acceder al modo administrador');
+                }
+              }}
+            >
+              <View style={styles.menuContent}>
+                <Text style={styles.menuTitle}>Acceder a administrador</Text>
+                <Text style={styles.menuSubtitle}>Panel de gestión de contenido</Text>
+              </View>
+              <Ionicons name="shield-checkmark" size={24} color={colors.textGray} />
+            </TouchableOpacity>
+          )}
         </View>
 
         {/* Sección CERRAR SESIÓN */}

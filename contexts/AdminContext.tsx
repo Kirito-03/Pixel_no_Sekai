@@ -65,17 +65,16 @@ export const AdminProvider: React.FC<AdminProviderProps> = ({ children }) => {
                 // Verificar preliminarmente si el email está permitido (opcional, pero ahorra requests)
                 // Usamos la API del backend para saber si está permitido o si tenemos el array local
                 // Pero lo importante es obtener el token del backend.
-                
+
                 // Obtener ID Token de Firebase
                 const idToken = await currentUser.getIdToken(true); // force refresh
-                
+
                 // Intentar login silencioso con backend
                 const result = await adminAuthService.loginWithFirebaseToken(idToken);
-                
+
                 if (result.success && result.token && result.user) {
                     await AsyncStorage.setItem('admin_token', result.token);
                     setIsAdmin(true);
-                    setIsAdminAllowed(true);
                     setAdminUser(result.user);
                     return true;
                 }

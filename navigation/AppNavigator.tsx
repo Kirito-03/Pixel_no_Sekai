@@ -248,7 +248,7 @@ export default function AppNavigator() {
             <RootStack.Screen name="Descargas" component={DownloadsScreen as any} />
             {/* AdminPortal y Admin ocultos/deshabilitados por ahora */}
             {/* <RootStack.Screen name="AdminPortal" component={AdminLoginScreen} /> */}
-            {/* <RootStack.Screen name="Admin" component={AdminNavigator} /> */}
+            <RootStack.Screen name="Admin" component={AdminNavigator} />
           </>
         )}
       </RootStack.Navigator>

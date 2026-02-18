@@ -1,9 +1,9 @@
 import React, { useRef } from 'react';
-import { 
-  TouchableOpacity, 
-  Image, 
-  StyleSheet, 
-  useWindowDimensions, 
+import {
+  TouchableOpacity,
+  Image,
+  StyleSheet,
+  useWindowDimensions,
   Animated,
   View,
 } from 'react-native';
@@ -11,6 +11,7 @@ import { Movie, TVShow, ContentItem } from '../types';
 import { getImageUrl } from '../services/api';
 import { Ionicons } from '@expo/vector-icons';
 import { useMyList } from '../contexts/MyListContext';
+import { shadows, colors } from '../theme';
 
 interface Props {
   movie: Movie | TVShow | ContentItem;
@@ -24,7 +25,7 @@ export default function MovieCard({ movie, onPress }: Props) {
   const CARD_WIDTH = isSmallScreen ? width * 0.32 : 130;
   const CARD_HEIGHT = CARD_WIDTH * 1.5; // Relación de aspecto 2:3 para posters
   const { isInMyList } = useMyList();
-  
+
   // Función para obtener la URL de la imagen según la fuente
   const getImageSource = () => {
     // Si es ContentItem (unificado)
@@ -59,22 +60,47 @@ export default function MovieCard({ movie, onPress }: Props) {
   const inMyList = id != null ? isInMyList(Number(id), type) : false;
 
   const scaleAnim = useRef(new Animated.Value(1)).current;
+  const shadowAnim = useRef(new Animated.Value(0)).current;
 
   const handlePressIn = () => {
-    Animated.spring(scaleAnim, {
-      toValue: 1.05,
-      useNativeDriver: true,
-      friction: 3,
-    }).start();
+    Animated.parallel([
+      Animated.spring(scaleAnim, {
+        toValue: 1.05,
+        useNativeDriver: true,
+        friction: 3,
+      }),
+      Animated.spring(shadowAnim, {
+        toValue: 1,
+        useNativeDriver: false,
+        friction: 3,
+      }),
+    ]).start();
   };
 
   const handlePressOut = () => {
-    Animated.spring(scaleAnim, {
-      toValue: 1,
-      useNativeDriver: true,
-      friction: 3,
-    }).start();
+    Animated.parallel([
+      Animated.spring(scaleAnim, {
+        toValue: 1,
+        useNativeDriver: true,
+        friction: 3,
+      }),
+      Animated.spring(shadowAnim, {
+        toValue: 0,
+        useNativeDriver: false,
+        friction: 3,
+      }),
+    ]).start();
   };
+
+  const animatedShadowRadius = shadowAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [4, 16],
+  });
+
+  const animatedShadowOpacity = shadowAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0.1, 0.4],
+  });
 
   const dynamicStyles = {
     card: {
@@ -102,11 +128,19 @@ export default function MovieCard({ movie, onPress }: Props) {
         dynamicStyles.card,
         {
           transform: [{ scale: scaleAnim }],
+          shadowColor: colors.primary,
+          shadowRadius: animatedShadowRadius,
+          shadowOpacity: animatedShadowOpacity,
+          shadowOffset: { width: 0, height: 4 },
+          elevation: shadowAnim.interpolate({
+            inputRange: [0, 1],
+            outputRange: [2, 8],
+          }),
         },
       ]}
     >
-      <TouchableOpacity 
-        style={dynamicStyles.imageContainer} 
+      <TouchableOpacity
+        style={dynamicStyles.imageContainer}
         onPress={onPress}
         onPressIn={handlePressIn}
         onPressOut={handlePressOut}

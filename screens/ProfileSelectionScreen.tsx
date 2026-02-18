@@ -79,12 +79,16 @@ const ProfileSelectionScreen: React.FC<ProfileSelectionScreenProps> = ({ navigat
   // Cargar los perfiles cada vez que la pantalla está en foco (incluye montaje inicial)
   useFocusEffect(
     React.useCallback(() => {
+      console.log('🔵 ProfileSelection: useFocusEffect EJECUTADO');
       loadProfiles();
-      return undefined;
+      return () => {
+        console.log('🔴 ProfileSelection: useFocusEffect CLEANUP');
+      };
     }, [])
   );
 
   const loadProfiles = async () => {
+    console.log('📥 ProfileSelection: loadProfiles INICIADO');
     try {
       const rows = await databaseService.getProfiles(0);
       const mapped: Profile[] = rows.map((p: any) => ({
@@ -93,6 +97,7 @@ const ProfileSelectionScreen: React.FC<ProfileSelectionScreenProps> = ({ navigat
         avatar_url: p.avatar_url,
       }));
       setProfiles(mapped);
+      console.log('✅ ProfileSelection: Perfiles cargados, cantidad:', mapped.length);
       // Aumentar la versión para invalidar caché de imágenes
       setProfilesVersion((v) => v + 1);
       // Prefetch de avatares corregidos para ayudar a Android a refrescar caché
@@ -107,10 +112,11 @@ const ProfileSelectionScreen: React.FC<ProfileSelectionScreenProps> = ({ navigat
         console.log('ProfileSelection: Prefetch de avatares, cantidad:', urls.length);
       } catch { }
     } catch (error) {
-      console.error('Error al cargar perfiles:', error);
+      console.error('❌ ProfileSelection: Error al cargar perfiles:', error);
       Alert.alert('Error', 'No se pudieron cargar los perfiles');
     } finally {
       setLoading(false);
+      console.log('🏁 ProfileSelection: loadProfiles COMPLETADO');
     }
   };
 
