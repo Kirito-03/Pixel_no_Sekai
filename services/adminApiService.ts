@@ -33,7 +33,7 @@ interface EpisodeData {
     title?: string;
     video_url?: string | null;
     status?: 'missing' | 'queued' | 'processing' | 'ready' | 'error';
-    storage_type?: 'gdrive' | 'local';
+    storage_type?: 'gdrive' | 'local' | 'r2' | 'external';
     duration?: number;
     thumbnail_url?: string;
     file_size?: number;
