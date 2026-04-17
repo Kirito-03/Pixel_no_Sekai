@@ -7,6 +7,7 @@ interface AdminUser {
     email: string;
     name: string;
     picture?: string;
+    role?: string;
 }
 
 interface AdminContextType {
@@ -26,8 +27,27 @@ interface AdminProviderProps {
 
 export const ADMIN_EMAILS = [
     'leojuniorss.8lj@gmail.com',
-    'pixel@dragonfluxstudios.com'
+    'pixel@dragonfluxstudios.com',
 ];
+
+const normalizeEmail = (email: string) => email.trim().toLowerCase();
+
+const parseEmailList = (raw?: string) =>
+    (raw || '')
+        .split(',')
+        .map((e) => normalizeEmail(e))
+        .filter(Boolean);
+
+export const ADMIN_EMAILS_NORMALIZED = (() => {
+    const fromEnv = parseEmailList(process.env.EXPO_PUBLIC_ADMIN_EMAILS);
+    if (fromEnv.length) return fromEnv;
+    return ADMIN_EMAILS.map(normalizeEmail);
+})();
+
+const isAllowedAdminEmail = (email?: string) => {
+    if (!email) return false;
+    return ADMIN_EMAILS_NORMALIZED.includes(normalizeEmail(email));
+};
 
 export const AdminProvider: React.FC<AdminProviderProps> = ({ children }) => {
     const [isAdmin, setIsAdmin] = useState(false);
@@ -62,9 +82,12 @@ export const AdminProvider: React.FC<AdminProviderProps> = ({ children }) => {
             // 1. Check if we have a firebase user and sync with backend
             const currentUser = require('../services/firebase').auth.currentUser;
             if (currentUser) {
-                // Verificar preliminarmente si el email está permitido (opcional, pero ahorra requests)
-                // Usamos la API del backend para saber si está permitido o si tenemos el array local
-                // Pero lo importante es obtener el token del backend.
+                const currentEmail = currentUser.email as string | undefined;
+                if (!isAllowedAdminEmail(currentEmail)) {
+                    setIsAdmin(false);
+                    setAdminUser(null);
+                    return false;
+                }
 
                 // Obtener ID Token de Firebase
                 const idToken = await currentUser.getIdToken(true); // force refresh
@@ -73,6 +96,12 @@ export const AdminProvider: React.FC<AdminProviderProps> = ({ children }) => {
                 const result = await adminAuthService.loginWithFirebaseToken(idToken);
 
                 if (result.success && result.token && result.user) {
+                    if (!isAllowedAdminEmail(result.user.email) && result.user.role !== 'admin') {
+                        await AsyncStorage.removeItem('admin_token');
+                        setIsAdmin(false);
+                        setAdminUser(null);
+                        return false;
+                    }
                     await AsyncStorage.setItem('admin_token', result.token);
                     setIsAdmin(true);
                     setAdminUser(result.user);
@@ -92,7 +121,7 @@ export const AdminProvider: React.FC<AdminProviderProps> = ({ children }) => {
             // Verify token with backend
             const user = await adminAuthService.verifyToken(token);
 
-            if (user && ADMIN_EMAILS.includes(user.email)) {
+            if (user && isAllowedAdminEmail(user.email)) {
                 setIsAdmin(true);
                 setAdminUser(user);
                 return true;
@@ -119,7 +148,7 @@ export const AdminProvider: React.FC<AdminProviderProps> = ({ children }) => {
 
             if (result.success && result.user && result.token) {
                 // Verify email is authorized
-                if (!ADMIN_EMAILS.includes(result.user.email)) {
+                if (!isAllowedAdminEmail(result.user.email)) {
                     throw new Error('Email no autorizado para acceso de administrador');
                 }
 

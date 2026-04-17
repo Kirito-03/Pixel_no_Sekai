@@ -77,3 +77,17 @@ export const requestEmailVerification = async () => {
   await sendEmailVerification(auth.currentUser)
   return { ok: true }
 }
+
+export const getUserDetails = async () => {
+  if (!auth.currentUser) throw new Error('No user logged in');
+  const token = await auth.currentUser.getIdToken();
+  const response = await fetch('/api/user/details', {
+    headers: {
+      'Authorization': `Bearer ${token}`,
+    },
+  });
+  if (!response.ok) {
+    throw new Error('Failed to fetch user details');
+  }
+  return response.json();
+};

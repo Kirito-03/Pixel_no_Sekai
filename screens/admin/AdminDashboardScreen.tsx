@@ -5,8 +5,10 @@ import {
     StyleSheet,
     ScrollView,
     TouchableOpacity,
+    Pressable,
     ActivityIndicator,
     RefreshControl,
+    useWindowDimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -15,6 +17,7 @@ import { adminApiService } from '../../services/adminApiService';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { AdminStackParamList } from '../../types/navigation';
+import { AdminShell } from '../../components/admin/AdminShell';
 
 interface DashboardStats {
     totalAnime: number;
@@ -31,9 +34,11 @@ type NavigationProp = NativeStackNavigationProp<AdminStackParamList>;
 export default function AdminDashboardScreen() {
     const { adminUser, logoutAdmin } = useAdmin();
     const navigation = useNavigation<NavigationProp>();
+    const { width } = useWindowDimensions();
     const [stats, setStats] = useState<DashboardStats | null>(null);
     const [isLoading, setIsLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
+    const [lastUpdatedAt, setLastUpdatedAt] = useState<number | null>(null);
 
     useEffect(() => {
         loadStats();
@@ -44,6 +49,7 @@ export default function AdminDashboardScreen() {
             setIsLoading(true);
             const data = await adminApiService.getDashboardStats();
             setStats(data);
+            setLastUpdatedAt(Date.now());
         } catch (error) {
             console.error('Error loading stats:', error);
         } finally {
@@ -67,24 +73,58 @@ export default function AdminDashboardScreen() {
         navigation.getParent()?.goBack();
     };
 
-    const gdriveCount = stats?.storageStats?.find(s => s.storage_type === 'gdrive')?.count || 0;
-    const localCount = stats?.storageStats?.find(s => s.storage_type === 'local')?.count || 0;
+    const storageTotal =
+        stats?.storageStats?.reduce((acc, s) => acc + (Number(s.count) || 0), 0) || 0;
+    const displayName = adminUser?.name || adminUser?.email?.split('@')[0] || 'Admin';
+    const avatarInitial = displayName.charAt(0).toUpperCase() || 'A';
+    const lastUpdatedText = lastUpdatedAt ? new Date(lastUpdatedAt).toLocaleString() : '—';
+    const isWide = width >= 980;
+    const isXWide = width >= 1280;
+
+    const formatAgo = (value?: string | number | Date) => {
+        if (!value) return '';
+        const ts = new Date(value).getTime();
+        if (!Number.isFinite(ts)) return '';
+        const diff = Date.now() - ts;
+        const m = Math.floor(diff / 60000);
+        if (m < 1) return 'Ahora';
+        if (m < 60) return `Hace ${m} min`;
+        const h = Math.floor(m / 60);
+        if (h < 24) return `Hace ${h} h`;
+        const d = Math.floor(h / 24);
+        return `Hace ${d} d`;
+    };
+
+    const activityItems = (stats?.recentAnime || [])
+        .slice(0, 10)
+        .map((a: any) => ({
+            id: a.id,
+            title: a.title,
+            meta: `${(a.total_episodes || 0)} episodios`,
+            time: formatAgo(a.created_at),
+        }));
+
+    const statItemStyle = isXWide ? styles.statCardQuarter : styles.statCardHalf;
 
     return (
+        <AdminShell activeKey="dashboard">
         <SafeAreaView style={styles.container} edges={['top']}>
-            {/* Header */}
             <View style={styles.header}>
                 <TouchableOpacity onPress={handleGoBack} style={styles.backButton}>
                     <Ionicons name="arrow-back" size={24} color="#FFFFFF" />
                 </TouchableOpacity>
-                <View style={{ flex: 1, marginLeft: 10 }}>
-                    <Text style={styles.headerTitle}>Dashboard</Text>
-                    <Text style={styles.headerSubtitle}>Panel de Administración</Text>
+                <View style={styles.headerTitleWrap}>
+                    <Text style={styles.headerTitle}>Administrador</Text>
+                    <Text style={styles.headerMeta}>Actualizado: {lastUpdatedText}</Text>
                 </View>
-                {/* Botón para salir del modo administrador */}
-                <TouchableOpacity onPress={handleGoBack} style={styles.logoutButton}>
-                    <Ionicons name="exit-outline" size={24} color="#ef4444" />
-                </TouchableOpacity>
+                <View style={styles.headerActions}>
+                    <TouchableOpacity onPress={loadStats} style={styles.iconButton} disabled={isLoading || refreshing}>
+                        <Ionicons name="refresh" size={20} color="#FFFFFF" />
+                    </TouchableOpacity>
+                    <TouchableOpacity onPress={handleGoBack} style={styles.iconButton}>
+                        <Ionicons name="exit-outline" size={20} color="#ef4444" />
+                    </TouchableOpacity>
+                </View>
             </View>
 
             <ScrollView
@@ -93,266 +133,513 @@ export default function AdminDashboardScreen() {
                     <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />
                 }
             >
-                {/* User Info */}
                 {adminUser && (
-                    <View style={styles.userCard}>
-                        <View style={styles.userInfo}>
+                    <View style={styles.topCard}>
+                        <View style={styles.userRow}>
                             <View style={styles.avatar}>
-                                <Text style={styles.avatarText}>
-                                    {adminUser.name.charAt(0).toUpperCase()}
-                                </Text>
+                                <Text style={styles.avatarText}>{avatarInitial}</Text>
                             </View>
-                            <View>
-                                <Text style={styles.userName}>{adminUser.name}</Text>
-                                <Text style={styles.userEmail}>{adminUser.email}</Text>
+                            <View style={styles.userText}>
+                                <Text style={styles.userName} numberOfLines={1}>{displayName}</Text>
+                                <Text style={styles.userEmail} numberOfLines={1}>{adminUser.email}</Text>
+                            </View>
+                            <View style={styles.badge}>
+                                <Text style={styles.badgeText}>ADMIN</Text>
                             </View>
                         </View>
                     </View>
                 )}
 
-                {/* Stats Grid */}
                 {isLoading ? (
                     <View style={styles.loadingContainer}>
-                        <ActivityIndicator size="large" color="#0A2342" />
+                        <ActivityIndicator size="large" color="#E50914" />
                     </View>
                 ) : (
                     <>
-                        <View style={styles.statsGrid}>
-                            <StatCard
-                                title="Total de Anime"
-                                value={stats?.totalAnime || 0}
-                                icon="film"
-                                color="#0A2342"
-                            />
-                            <StatCard
-                                title="Total de Episodios"
-                                value={stats?.totalEpisodes || 0}
-                                icon="play-circle"
-                                color="#10b981"
-                            />
-                            <StatCard
-                                title="Google Drive"
-                                value={gdriveCount}
-                                icon="cloud"
-                                color="#4285F4"
-                            />
-                            <StatCard
-                                title="Almacenamiento Local"
-                                value={localCount}
-                                icon="server"
-                                color="#f59e0b"
-                            />
-                        </View>
+                        <View style={[styles.mainGrid, isWide && styles.mainGridWide]}>
+                            <View style={styles.leftCol}>
+                                <View style={styles.sectionTight}>
+                                    <Text style={styles.sectionTitle}>Métricas</Text>
+                                    <View style={styles.statsGrid}>
+                                        <StatCard style={statItemStyle} title="Anime" value={stats?.totalAnime || 0} icon="film-outline" />
+                                        <StatCard style={statItemStyle} title="Episodios" value={stats?.totalEpisodes || 0} icon="play-circle-outline" />
+                                        <StatCard style={statItemStyle} title="Storage (R2)" value={storageTotal} icon="cloud-outline" />
+                                        <StatCard style={statItemStyle} title="Transcode" value={0} icon="pulse-outline" />
+                                    </View>
+                                </View>
 
-                        {/* Quick Actions */}
-                        <View style={styles.section}>
-                            <Text style={styles.sectionTitle}>Acciones Rápidas</Text>
-                            <View style={styles.actionsGrid}>
-                                <ActionButton
-                                    title="Gestionar Anime"
-                                    icon="list"
-                                    onPress={() => navigation.navigate('AnimeList' as never)}
-                                />
-                                <ActionButton
-                                    title="Agregar Anime"
-                                    icon="add-circle"
-                                    onPress={() => navigation.navigate('AnimeForm', { mode: 'create' })}
-                                />
+                                <View style={styles.section}>
+                                    <Text style={styles.sectionTitle}>Acciones</Text>
+                                    <View style={styles.actionsGrid}>
+                                        <QuickAction
+                                            title="Gestionar anime"
+                                            subtitle="Lista, edición y episodios"
+                                            icon="list"
+                                            onPress={() => navigation.navigate('AnimeList' as never)}
+                                        />
+                                        <QuickAction
+                                            title="Nuevo anime"
+                                            subtitle="Crear ficha y metadata"
+                                            icon="add-circle"
+                                            onPress={() => navigation.navigate('AnimeForm', { mode: 'create' })}
+                                            primary
+                                        />
+                                    </View>
+                                </View>
                             </View>
-                        </View>
 
-                        {/* Recent Anime */}
-                        {stats?.recentAnime && stats.recentAnime.length > 0 && (
-                            <View style={styles.section}>
-                                <Text style={styles.sectionTitle}>Anime Recientes</Text>
-                                {stats.recentAnime.map((anime) => (
-                                    <TouchableOpacity
-                                        key={anime.id}
-                                        style={styles.animeItem}
-                                        onPress={() => navigation.navigate('EpisodeManager', { animeId: anime.id })}
-                                    >
-                                        <View style={styles.animeInfo}>
-                                            <Text style={styles.animeTitle}>{anime.title}</Text>
-                                            <Text style={styles.animeSubtitle}>
-                                                {anime.total_episodes || 0} episodios
-                                            </Text>
+                            <View style={styles.rightCol}>
+                                <View style={styles.sectionTight}>
+                                    <Text style={styles.sectionTitle}>Actividad reciente</Text>
+                                    <View style={styles.panelCard}>
+                                        <View style={styles.panelHeader}>
+                                            <Text style={styles.panelTitle}>Eventos</Text>
+                                            <TouchableOpacity onPress={() => navigation.navigate('AnimeList' as never)}>
+                                                <Text style={styles.panelLink}>Ver catálogo</Text>
+                                            </TouchableOpacity>
                                         </View>
-                                        <Ionicons name="chevron-forward" size={20} color="#666666" />
-                                    </TouchableOpacity>
-                                ))}
+                                        {activityItems.length ? (
+                                            activityItems.map((item) => (
+                                                <Pressable
+                                                    key={item.id}
+                                                    onPress={() => navigation.navigate('EpisodeManager', { animeId: item.id })}
+                                                    style={(state: any) => [
+                                                        styles.activityRow,
+                                                        state.hovered && styles.hovered,
+                                                        state.pressed && styles.pressed,
+                                                    ]}
+                                                >
+                                                    <View style={styles.activityIcon}>
+                                                        <Ionicons name="sparkles-outline" size={18} color="#E50914" />
+                                                    </View>
+                                                    <View style={styles.rowMain}>
+                                                        <Text style={styles.rowTitle} numberOfLines={1}>{item.title}</Text>
+                                                        <Text style={styles.rowSub} numberOfLines={1}>{item.meta}</Text>
+                                                    </View>
+                                                    <View style={styles.activityMeta}>
+                                                        <Text style={styles.activityTime}>{item.time}</Text>
+                                                        <Ionicons name="chevron-forward" size={16} color="#6b7280" />
+                                                    </View>
+                                                </Pressable>
+                                            ))
+                                        ) : (
+                                            <Text style={styles.emptyText}>Sin actividad reciente</Text>
+                                        )}
+                                    </View>
+                                </View>
+
+                                <View style={styles.section}>
+                                    <Text style={styles.sectionTitle}>Resumen</Text>
+                                    <View style={styles.panelCard}>
+                                        <View style={styles.summaryRow}>
+                                            <Text style={styles.summaryLabel}>Total anime</Text>
+                                            <Text style={styles.summaryValue}>{stats?.totalAnime || 0}</Text>
+                                        </View>
+                                        <View style={styles.summaryRow}>
+                                            <Text style={styles.summaryLabel}>Total episodios</Text>
+                                            <Text style={styles.summaryValue}>{stats?.totalEpisodes || 0}</Text>
+                                        </View>
+                                        <View style={styles.divider} />
+                                        <View style={styles.summaryRow}>
+                                            <Text style={styles.summaryLabel}>Storage (R2)</Text>
+                                            <Text style={styles.summaryValue}>{storageTotal}</Text>
+                                        </View>
+                                        <View style={styles.summaryRow}>
+                                            <Text style={styles.summaryLabel}>Transcode</Text>
+                                            <Text style={styles.summaryValue}>{0}</Text>
+                                        </View>
+                                    </View>
+                                </View>
                             </View>
-                        )}
+                        </View>
                     </>
                 )}
             </ScrollView>
         </SafeAreaView>
+        </AdminShell>
     );
 }
 
-// Stat Card Component
-function StatCard({ title, value, icon, color }: any) {
+function StatCard({ title, value, icon, style }: any) {
     return (
-        <View style={styles.statCard}>
-            <Ionicons name={icon} size={32} color={color} />
-            <Text style={styles.statValue}>{value}</Text>
-            <Text style={styles.statTitle}>{title}</Text>
+        <View style={[styles.statCard, style]}>
+            <View style={styles.statCardTop}>
+                <Text style={styles.statBig}>{value}</Text>
+                <View style={styles.statChip}>
+                    <Ionicons name={icon} size={14} color="#E50914" />
+                </View>
+            </View>
+            <Text style={styles.statLabel} numberOfLines={1}>{title}</Text>
+            <View style={styles.statBar} />
         </View>
     );
 }
 
-// Action Button Component
-function ActionButton({ title, icon, onPress }: any) {
+function QuickAction({ title, subtitle, icon, onPress, primary }: any) {
     return (
-        <TouchableOpacity style={styles.actionButton} onPress={onPress}>
-            <Ionicons name={icon} size={28} color="#E50914" />
-            <Text style={styles.actionButtonText}>{title}</Text>
-        </TouchableOpacity>
+        <Pressable
+            onPress={onPress}
+            style={(state: any) => [
+                styles.actionCard,
+                primary && styles.actionCardPrimary,
+                state.hovered && styles.hovered,
+                state.pressed && styles.pressed,
+            ]}
+        >
+            <View style={[styles.actionIconWrap, primary && styles.actionIconWrapPrimary]}>
+                <Ionicons name={icon} size={22} color={primary ? '#000000' : '#E50914'} />
+            </View>
+            <View style={styles.actionText}>
+                <Text style={[styles.actionTitle, primary && styles.actionTitlePrimary]} numberOfLines={1}>{title}</Text>
+                <Text style={[styles.actionSubtitle, primary && styles.actionSubtitlePrimary]} numberOfLines={1}>{subtitle}</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={primary ? '#000000' : '#6b7280'} />
+        </Pressable>
     );
 }
 
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        backgroundColor: '#000000', // Black background
+        backgroundColor: '#000000',
     },
     header: {
         flexDirection: 'row',
         alignItems: 'center',
-        padding: 20,
-        backgroundColor: '#000000', // Black header
+        paddingHorizontal: 16,
+        paddingVertical: 12,
+        backgroundColor: '#000000',
         borderBottomWidth: 1,
         borderBottomColor: '#333333',
     },
     backButton: {
-        padding: 8,
+        padding: 6,
+    },
+    headerTitleWrap: {
+        flex: 1,
+        marginLeft: 10,
     },
     headerTitle: {
-        fontSize: 24,
+        fontSize: 18,
         fontWeight: '700',
-        color: '#E50914', // Red accent
+        color: '#FFFFFF',
     },
-    headerSubtitle: {
-        fontSize: 14,
-        color: '#CCCCCC',
-        marginTop: 4,
+    headerMeta: {
+        fontSize: 12,
+        color: '#9ca3af',
+        marginTop: 2,
     },
-    logoutButton: {
-        padding: 8,
+    headerActions: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+    },
+    iconButton: {
+        width: 36,
+        height: 36,
+        borderRadius: 10,
+        backgroundColor: '#111111',
+        borderWidth: 1,
+        borderColor: '#222222',
+        justifyContent: 'center',
+        alignItems: 'center',
     },
     content: {
         flex: 1,
     },
-    userCard: {
-        backgroundColor: '#1A1A1A', // Dark grey card
-        margin: 16,
-        padding: 16,
-        borderRadius: 12,
+    topCard: {
+        marginHorizontal: 16,
+        marginTop: 14,
+        marginBottom: 10,
+        padding: 12,
+        borderRadius: 14,
+        backgroundColor: '#0b0b0b',
+        borderWidth: 1,
+        borderColor: '#1f1f1f',
     },
-    userInfo: {
+    userRow: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 12,
+        gap: 10,
     },
     avatar: {
-        width: 48,
-        height: 48,
-        borderRadius: 24,
-        backgroundColor: '#E50914', // Red avatar
+        width: 36,
+        height: 36,
+        borderRadius: 12,
+        backgroundColor: '#E50914',
         justifyContent: 'center',
         alignItems: 'center',
     },
     avatarText: {
-        fontSize: 20,
+        fontSize: 16,
         fontWeight: '600',
         color: '#FFFFFF',
     },
+    userText: {
+        flex: 1,
+        minWidth: 0,
+    },
     userName: {
-        fontSize: 16,
+        fontSize: 14,
         fontWeight: '600',
         color: '#FFFFFF',
     },
     userEmail: {
-        fontSize: 13,
-        color: '#999999',
-        marginTop: 2,
+        fontSize: 12,
+        color: '#9ca3af',
+        marginTop: 1,
+    },
+    badge: {
+        height: 24,
+        paddingHorizontal: 10,
+        borderRadius: 999,
+        backgroundColor: '#111111',
+        borderWidth: 1,
+        borderColor: '#27272a',
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    badgeText: {
+        color: '#E50914',
+        fontSize: 11,
+        fontWeight: '800',
+        letterSpacing: 1,
     },
     loadingContainer: {
-        padding: 40,
+        padding: 32,
         alignItems: 'center',
+    },
+    sectionTight: {
+        paddingHorizontal: 16,
+        marginTop: 2,
+    },
+    mainGrid: {
+        paddingBottom: 8,
+    },
+    mainGridWide: {
+        flexDirection: 'row',
+        gap: 10,
+    },
+    leftCol: {
+        flex: 1,
+        minWidth: 0,
+    },
+    rightCol: {
+        flex: 1,
+        minWidth: 0,
     },
     statsGrid: {
         flexDirection: 'row',
         flexWrap: 'wrap',
-        padding: 16,
-        gap: 12,
+        gap: 10,
     },
     statCard: {
-        flex: 1,
-        minWidth: '45%',
-        backgroundColor: '#1A1A1A', // Dark grey card
-        padding: 20,
-        borderRadius: 12,
+        padding: 14,
+        borderRadius: 14,
+        backgroundColor: '#0b0b0b',
+        borderWidth: 1,
+        borderColor: '#1f1f1f',
+        minWidth: '47%',
+    },
+    statCardHalf: {
+        flexBasis: '47%',
+        flexGrow: 1,
+    },
+    statCardQuarter: {
+        flexBasis: '23%',
+        flexGrow: 1,
+    },
+    statCardTop: {
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        justifyContent: 'space-between',
+        gap: 10,
+    },
+    statBig: {
+        fontSize: 28,
+        fontWeight: '900',
+        color: '#FFFFFF',
+        letterSpacing: 0.2,
+    },
+    statLabel: {
+        marginTop: 6,
+        fontSize: 12,
+        fontWeight: '700',
+        color: '#9ca3af',
+    },
+    statChip: {
+        width: 28,
+        height: 28,
+        borderRadius: 10,
+        backgroundColor: '#111111',
+        borderWidth: 1,
+        borderColor: '#222222',
+        justifyContent: 'center',
         alignItems: 'center',
     },
-    statValue: {
-        fontSize: 32,
-        fontWeight: '700',
-        color: '#E50914', // Red value
-        marginTop: 12,
-    },
-    statTitle: {
-        fontSize: 12,
-        color: '#CCCCCC',
-        marginTop: 4,
-        textAlign: 'center',
+    statBar: {
+        marginTop: 10,
+        height: 2,
+        borderRadius: 999,
+        backgroundColor: '#141414',
     },
     section: {
-        padding: 16,
+        paddingHorizontal: 16,
+        paddingTop: 14,
+        paddingBottom: 10,
     },
     sectionTitle: {
-        fontSize: 18,
-        fontWeight: '600',
+        fontSize: 13,
+        fontWeight: '700',
         color: '#FFFFFF',
-        marginBottom: 12,
+        marginBottom: 10,
+        letterSpacing: 0.3,
     },
     actionsGrid: {
-        flexDirection: 'row',
-        gap: 12,
+        gap: 10,
     },
-    actionButton: {
-        flex: 1,
-        backgroundColor: '#1A1A1A', // Dark grey button
-        padding: 20,
+    actionCard: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 10,
+        padding: 14,
+        borderRadius: 14,
+        backgroundColor: '#0b0b0b',
+        borderWidth: 1,
+        borderColor: '#1f1f1f',
+    },
+    actionCardPrimary: {
+        backgroundColor: '#E50914',
+        borderColor: '#E50914',
+    },
+    actionIconWrap: {
+        width: 36,
+        height: 36,
         borderRadius: 12,
+        backgroundColor: '#111111',
+        borderWidth: 1,
+        borderColor: '#222222',
+        justifyContent: 'center',
         alignItems: 'center',
     },
-    actionButtonText: {
-        fontSize: 14,
-        fontWeight: '500',
-        color: '#FFFFFF',
-        marginTop: 8,
-        textAlign: 'center',
+    actionIconWrapPrimary: {
+        backgroundColor: '#000000',
+        borderColor: '#000000',
     },
-    animeItem: {
+    actionText: {
+        flex: 1,
+        minWidth: 0,
+    },
+    actionTitle: {
+        fontSize: 14,
+        fontWeight: '800',
+        color: '#FFFFFF',
+    },
+    actionTitlePrimary: {
+        color: '#000000',
+    },
+    actionSubtitle: {
+        fontSize: 12,
+        color: '#9ca3af',
+        marginTop: 2,
+    },
+    actionSubtitlePrimary: {
+        color: '#000000',
+        opacity: 0.85,
+    },
+    panelCard: {
+        padding: 14,
+        borderRadius: 14,
+        backgroundColor: '#0b0b0b',
+        borderWidth: 1,
+        borderColor: '#1f1f1f',
+    },
+    panelHeader: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        backgroundColor: '#1A1A1A', // Dark grey item
-        padding: 16,
-        borderRadius: 12,
-        marginBottom: 8,
+        marginBottom: 10,
     },
-    animeInfo: {
-        flex: 1,
-    },
-    animeTitle: {
-        fontSize: 16,
-        fontWeight: '500',
+    panelTitle: {
+        fontSize: 13,
+        fontWeight: '800',
         color: '#FFFFFF',
     },
-    animeSubtitle: {
+    panelLink: {
+        fontSize: 12,
+        fontWeight: '700',
+        color: '#E50914',
+    },
+    activityRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 10,
+        paddingVertical: 12,
+        borderTopWidth: 1,
+        borderTopColor: '#141414',
+    },
+    activityIcon: {
+        width: 30,
+        height: 30,
+        borderRadius: 12,
+        backgroundColor: '#111111',
+        borderWidth: 1,
+        borderColor: '#222222',
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    rowMain: {
+        flex: 1,
+        minWidth: 0,
+    },
+    activityMeta: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+    },
+    activityTime: {
+        fontSize: 11,
+        fontWeight: '700',
+        color: '#6b7280',
+    },
+    rowTitle: {
         fontSize: 13,
-        color: '#999999',
-        marginTop: 4,
+        fontWeight: '700',
+        color: '#FFFFFF',
+    },
+    rowSub: {
+        fontSize: 12,
+        color: '#9ca3af',
+        marginTop: 2,
+    },
+    emptyText: {
+        fontSize: 12,
+        color: '#9ca3af',
+        paddingVertical: 10,
+    },
+    hovered: {
+        backgroundColor: '#0f0f0f',
+    },
+    pressed: {
+        opacity: 0.9,
+    },
+    summaryRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        paddingVertical: 10,
+    },
+    summaryLabel: {
+        fontSize: 12,
+        color: '#9ca3af',
+    },
+    summaryValue: {
+        fontSize: 13,
+        fontWeight: '800',
+        color: '#FFFFFF',
+    },
+    divider: {
+        height: 1,
+        backgroundColor: '#141414',
     },
 });

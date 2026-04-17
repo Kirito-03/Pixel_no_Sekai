@@ -270,20 +270,10 @@ export const getEpisodeSources = async (episodeId: string, animeTitle?: string, 
               body: new URLSearchParams({ src: url }).toString(),
             });
             const data = await resp.json().catch(() => null);
-            const playlist = data?.playlist_url || '';
-            if (playlist) {
-              // Poll for playlist availability (up to ~10s)
-              const maxTries = 60;
-              for (let i = 0; i < maxTries; i++) {
-                try {
-                  const check = await fetch(playlist, { method: 'GET', cache: 'no-store' as any });
-                  if (check.ok) {
-                    console.log(`Using HLS playlist: ${playlist}`);
-                    return [{ url: playlist, isM3U8: true }];
-                  }
-                } catch { }
-                await new Promise(r => setTimeout(r, 500));
-              }
+            const streamUrl = data?.stream_url || '';
+            if (streamUrl) {
+              console.log(`Using HLS stream from R2: ${streamUrl}`);
+              return [{ url: streamUrl, isM3U8: true }];
             }
           } catch (e) {
             console.error('Error requesting HLS transcode:', e);

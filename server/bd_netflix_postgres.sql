@@ -1,19 +1,30 @@
 -- PostgreSQL Schema for Netflix Clone App
--- Converted from MySQL schema
-
--- Database creation (PostgreSQL uses different syntax)
--- In PostgreSQL with Docker, the database is created by POSTGRES_DB env var
 -- This script assumes we're already connected to the bd_netflix database
 
 -- Set client encoding
 SET client_encoding = 'UTF8';
 
--- Create ENUM types first (used in multiple tables)
-CREATE TYPE content_type_enum AS ENUM ('movie', 'tv', 'anime');
-CREATE TYPE list_type_enum AS ENUM ('MY_LIST');
-CREATE TYPE image_type_enum AS ENUM ('poster', 'backdrop', 'avatar', 'thumbnail');
-CREATE TYPE entity_type_enum AS ENUM ('contenido', 'perfil', 'anime');
-CREATE TYPE download_status_enum AS ENUM ('PENDING', 'DOWNLOADING', 'COMPLETED', 'FAILED');
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'content_type_enum') THEN
+    CREATE TYPE content_type_enum AS ENUM ('movie', 'tv', 'anime');
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'list_type_enum') THEN
+    CREATE TYPE list_type_enum AS ENUM ('MY_LIST');
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'image_type_enum') THEN
+    CREATE TYPE image_type_enum AS ENUM ('poster', 'backdrop', 'avatar', 'thumbnail');
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'entity_type_enum') THEN
+    CREATE TYPE entity_type_enum AS ENUM ('contenido', 'perfil', 'anime');
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'download_status_enum') THEN
+    CREATE TYPE download_status_enum AS ENUM ('PENDING', 'DOWNLOADING', 'COMPLETED', 'FAILED');
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'user_role_enum') THEN
+    CREATE TYPE user_role_enum AS ENUM ('user', 'admin');
+  END IF;
+END $$;
 
 -- ========================================
 -- Table: usuarios
@@ -22,10 +33,11 @@ CREATE TABLE IF NOT EXISTS usuarios (
   id SERIAL PRIMARY KEY,
   email VARCHAR(255) NOT NULL UNIQUE,
   password_hash VARCHAR(255) NOT NULL,
+  role user_role_enum NOT NULL DEFAULT 'user',
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE UNIQUE INDEX uniq_usuarios_email ON usuarios(email);
+CREATE UNIQUE INDEX IF NOT EXISTS uniq_usuarios_email ON usuarios(email);
 
 -- ========================================
 -- Table: perfiles
@@ -43,7 +55,7 @@ CREATE TABLE IF NOT EXISTS perfiles (
     ON DELETE CASCADE
 );
 
-CREATE INDEX idx_perfiles_usuario_id ON perfiles(usuario_id);
+CREATE INDEX IF NOT EXISTS idx_perfiles_usuario_id ON perfiles(usuario_id);
 
 -- ========================================
 -- Table: listas (ej.: MY_LIST)
@@ -60,7 +72,7 @@ CREATE TABLE IF NOT EXISTS listas (
     ON DELETE CASCADE
 );
 
-CREATE INDEX idx_listas_perfil_id ON listas(perfil_id);
+CREATE INDEX IF NOT EXISTS idx_listas_perfil_id ON listas(perfil_id);
 
 -- ========================================
 -- Table: lista_items
@@ -79,8 +91,8 @@ CREATE TABLE IF NOT EXISTS lista_items (
     UNIQUE (lista_id, content_id, content_type)
 );
 
-CREATE INDEX idx_lista_items_lista_id ON lista_items(lista_id);
-CREATE INDEX idx_lista_items_content_id ON lista_items(content_id);
+CREATE INDEX IF NOT EXISTS idx_lista_items_lista_id ON lista_items(lista_id);
+CREATE INDEX IF NOT EXISTS idx_lista_items_content_id ON lista_items(content_id);
 
 -- ========================================
 -- Table: contenido
@@ -95,7 +107,7 @@ CREATE TABLE IF NOT EXISTS contenido (
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX idx_contenido_type ON contenido(type);
+CREATE INDEX IF NOT EXISTS idx_contenido_type ON contenido(type);
 
 -- ========================================
 -- Table: imagenes
@@ -115,7 +127,7 @@ CREATE TABLE IF NOT EXISTS imagenes (
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX idx_imagenes_entity ON imagenes(entity_type, entity_id);
+CREATE INDEX IF NOT EXISTS idx_imagenes_entity ON imagenes(entity_type, entity_id);
 
 -- ========================================
 -- Table: password_resets
@@ -133,8 +145,8 @@ CREATE TABLE IF NOT EXISTS password_resets (
     ON DELETE CASCADE
 );
 
-CREATE UNIQUE INDEX uniq_password_resets_token ON password_resets(token);
-CREATE INDEX idx_password_resets_usuario_id ON password_resets(usuario_id);
+CREATE UNIQUE INDEX IF NOT EXISTS uniq_password_resets_token ON password_resets(token);
+CREATE INDEX IF NOT EXISTS idx_password_resets_usuario_id ON password_resets(usuario_id);
 
 -- ========================================
 -- Table: descargas
@@ -150,8 +162,8 @@ CREATE TABLE IF NOT EXISTS descargas (
     ON DELETE CASCADE
 );
 
-CREATE UNIQUE INDEX uniq_descargas_perfil ON descargas(perfil_id);
-CREATE INDEX idx_descargas_perfil_id ON descargas(perfil_id);
+CREATE UNIQUE INDEX IF NOT EXISTS uniq_descargas_perfil ON descargas(perfil_id);
+CREATE INDEX IF NOT EXISTS idx_descargas_perfil_id ON descargas(perfil_id);
 
 -- ========================================
 -- Table: descarga_items
@@ -174,7 +186,7 @@ CREATE TABLE IF NOT EXISTS descarga_items (
     UNIQUE (descarga_id, content_id, content_type)
 );
 
-CREATE INDEX idx_descarga_items_descarga_id ON descarga_items(descarga_id);
+CREATE INDEX IF NOT EXISTS idx_descarga_items_descarga_id ON descarga_items(descarga_id);
 
 -- ========================================
 -- Trigger for updated_at auto-update
@@ -187,19 +199,15 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-CREATE TRIGGER update_descarga_items_updated_at
-    BEFORE UPDATE ON descarga_items
-    FOR EACH ROW
-    EXECUTE FUNCTION update_updated_at_column();
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_trigger WHERE tgname = 'update_descarga_items_updated_at'
+  ) THEN
+    CREATE TRIGGER update_descarga_items_updated_at
+      BEFORE UPDATE ON descarga_items
+      FOR EACH ROW
+      EXECUTE FUNCTION update_updated_at_column();
+  END IF;
+END $$;
 
--- ========================================
--- Notas de migración
--- ========================================
--- 1. AUTO_INCREMENT → SERIAL (manejado automáticamente por PostgreSQL)
--- 2. tinyint(1) → BOOLEAN
--- 3. int(11) → INTEGER
--- 4. ENUM → custom ENUM types
--- 5. timestamp DEFAULT current_timestamp() → TIMESTAMP DEFAULT CURRENT_TIMESTAMP
--- 6. ENGINE=InnoDB → No necesario en PostgreSQL
--- 7. CHARSET/COLLATE → UTF8 por defecto en PostgreSQL
--- 8. Backticks (`) → No necesarios en PostgreSQL (usa comillas dobles si es necesario)

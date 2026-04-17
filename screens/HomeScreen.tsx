@@ -1,23 +1,15 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, ScrollView, StyleSheet, ActivityIndicator, Platform, Dimensions, Alert } from 'react-native';
+import { View, Text, ScrollView, StyleSheet, ActivityIndicator, Dimensions, Alert } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { HomeStackParamList, MovieDetail, TVShowDetail, ContentItem, Movie, TVShow, AnimeDetail } from '../types';
-import {
-    getMovieDetails,
-    ENHANCED_CATEGORIES,
-    fetchCategoryPage,
-    animeToContentItem
-} from '../services/api';
-import { getAnimeDetails } from '../services/anilistService';
+import { HomeStackParamList, MovieDetail, ContentItem, AnimeDetail } from '../types';
 import { colors } from '../theme';
 import Header from '../components/Header';
-import FeaturedMovie from '../components/FeaturedMovie';
 import FeaturedCarousel from '../components/FeaturedCarousel';
 import MovieRow from '../components/MovieRow';
 import MovieModal from '../components/MovieModal';
 import { useProfile } from '../contexts/ProfileContext';
-import databaseService from '../services/databaseService';
 import { useMyList } from '../contexts/MyListContext';
+import { catalogService } from '../services/catalogService';
 
 type Props = NativeStackScreenProps<HomeStackParamList, 'Inicio'>;
 
@@ -51,33 +43,64 @@ export default function HomeScreen({ navigation }: Props) {
     const [extraRows, setExtraRows] = useState<{ key: string; title: string; items: ContentItem[] }[]>([]);
     const [categorySequenceIndex, setCategorySequenceIndex] = useState(0);
     const [pagesByCategory, setPagesByCategory] = useState<Record<string, number>>({
-        popular_all: 1,
-        top_rated_all: 1,
-        current_all: 1,
-        popular_anime: 1,
-        airing_anime: 1,
-        top_anime: 1,
-        popular_movies: 1,
-        popular_tv: 1,
+        airing: 1,
+        finished: 1,
+        upcoming: 1,
     });
 
     // Pools de categorías por filtro para lograr variedad en cada carga
     const CATEGORY_LABELS: Record<string, string> = {
-        popular_all: 'Popular Ahora',
-        top_rated_all: 'Mejor Valorado',
-        current_all: 'En Emisión/Cartelera',
-        popular_anime: 'Anime Popular',
-        airing_anime: 'Anime en Emisión',
-        top_anime: 'Mejor Anime',
-        popular_movies: 'Películas Populares',
-        popular_tv: 'Series Populares',
+        airing: 'En emisión',
+        finished: 'Finalizados',
+        upcoming: 'Próximos',
     };
 
     const CATEGORY_POOLS: Record<'all' | 'movies' | 'series' | 'anime', string[]> = {
-        all: ['popular_all', 'current_all', 'top_rated_all', 'popular_anime', 'airing_anime', 'top_anime', 'popular_movies', 'popular_tv'],
-        movies: ['popular_all', 'top_rated_all', 'current_all', 'popular_movies'],
-        series: ['popular_all', 'top_rated_all', 'current_all', 'popular_tv'],
-        anime: ['popular_all', 'top_rated_all', 'current_all', 'popular_anime', 'airing_anime', 'top_anime'],
+        all: ['airing', 'finished', 'upcoming'],
+        movies: [],
+        series: [],
+        anime: ['airing', 'finished', 'upcoming'],
+    };
+
+    const mapCatalogAnimeToContentItem = (anime: any): ContentItem => ({
+        id: Number(anime.id),
+        type: 'anime',
+        title: anime.title || 'Sin título',
+        overview: anime.description || '',
+        poster_path: anime.poster_url || '',
+        backdrop_path: anime.banner_url || anime.poster_url || '',
+        release_date: anime.release_date || '',
+        vote_average: typeof anime.rating === 'number' ? anime.rating : 0,
+        source: 'anilist',
+        genres: Array.isArray(anime.genres) ? anime.genres : [],
+    });
+
+    const mapCatalogAnimeToAnimeDetail = (anime: any): AnimeDetail => {
+        const releaseYear = anime.release_date ? new Date(anime.release_date).getFullYear() : 0;
+        return {
+            id: Number(anime.id),
+            title: {
+                romaji: anime.title || 'Sin título',
+                english: anime.title_english || undefined,
+                native: anime.title_japanese || anime.title || 'Sin título',
+            },
+            description: anime.description || '',
+            coverImage: {
+                large: anime.poster_url || '',
+                medium: anime.poster_url || '',
+            },
+            bannerImage: anime.banner_url || undefined,
+            startDate: { year: Number.isFinite(releaseYear) ? releaseYear : 0 },
+            averageScore: typeof anime.rating === 'number' ? anime.rating * 10 : 0,
+            episodes: typeof anime.total_episodes === 'number' ? anime.total_episodes : undefined,
+            status: anime.status || 'UNKNOWN',
+            genres: Array.isArray(anime.genres) ? anime.genres : [],
+            format: 'TV',
+            source: 'anilist',
+            studios: { nodes: [] },
+            characters: { nodes: [] },
+            recommendations: { nodes: [] },
+        } as any;
     };
 
     useEffect(() => {
@@ -87,50 +110,20 @@ export default function HomeScreen({ navigation }: Props) {
     const loadContent = async () => {
         try {
             setLoading(true);
+            const sections = await catalogService.getHomeSections();
 
-            // Cargar todas las categorías de contenido unificado (TMDB + AniList)
-            const categoryPromises = ENHANCED_CATEGORIES.map(async (category) => {
-                try {
-                    const content = await category.fetcher();
-                    return { id: category.id, content };
-                } catch (error) {
-                    console.error(`Error loading category ${category.name}:`, error);
-                    return { id: category.id, content: [] };
-                }
-            });
-
-            const categoryResults = await Promise.allSettled(categoryPromises);
-            const newContentSections: { [key: string]: ContentItem[] } = {};
-
-            categoryResults.forEach((result) => {
-                if (result.status === 'fulfilled') {
-                    newContentSections[result.value.id] = result.value.content;
-                }
-            });
-
-            setContentSections(newContentSections);
-
-            const airingAnime = newContentSections['airing_anime'];
-            const popularAnime = newContentSections['popular_anime'];
-            const selectFrom = (list?: ContentItem[]) => {
-                if (!list || list.length === 0) return [] as ContentItem[];
-                const onlyAnime = list.filter(item => item.type === 'anime');
-                const filtered = adultContentEnabled ? onlyAnime : onlyAnime.filter(i => !i.isAdult);
-                return filtered.slice(0, 5);
+            const newContentSections: { [key: string]: ContentItem[] } = {
+                airing: sections.airing.map(mapCatalogAnimeToContentItem),
+                finished: sections.finished.map(mapCatalogAnimeToContentItem),
+                upcoming: sections.upcoming.map(mapCatalogAnimeToContentItem),
             };
 
-            let topFeatured = selectFrom(airingAnime);
-            if (topFeatured.length === 0) {
-                topFeatured = selectFrom(popularAnime);
-            }
-            if (topFeatured.length > 0) {
-                try {
-                    const details = await Promise.all(topFeatured.map(a => getAnimeDetails(a.id)));
-                    setFeaturedMovies(details);
-                } catch (error) {
-                    console.error('Error loading featured anime:', error);
-                }
-            }
+            const featuredBase = newContentSections.airing.length
+                ? sections.airing
+                : (sections.finished.length ? sections.finished : sections.upcoming);
+
+            setFeaturedMovies(featuredBase.slice(0, 5).map(mapCatalogAnimeToAnimeDetail));
+            setContentSections(newContentSections);
         } catch (error) {
             console.error('Critical error loading content:', error);
             Alert.alert('Error', 'No se pudo cargar el contenido. Por favor, intente de nuevo más tarde.');
@@ -189,14 +182,9 @@ export default function HomeScreen({ navigation }: Props) {
         // Limpiar keys cargadas
         loadedRowKeysRef.current = new Set();
         setPagesByCategory({
-            popular_all: 1,
-            top_rated_all: 1,
-            current_all: 1,
-            popular_anime: 1,
-            airing_anime: 1,
-            top_anime: 1,
-            popular_movies: 1,
-            popular_tv: 1,
+            airing: 1,
+            finished: 1,
+            upcoming: 1,
         });
     };
 
@@ -210,6 +198,9 @@ export default function HomeScreen({ navigation }: Props) {
             setIsLoadingMore(true);
 
             const pool = CATEGORY_POOLS[contentFilter];
+            if (!pool || pool.length === 0) {
+                return;
+            }
             const batchSize = 3; // número de filas nuevas por carga para variedad
             const newExtraRows: { key: string; title: string; items: ContentItem[] }[] = [];
             // Usar un mapa local para evitar condiciones de carrera al actualizar páginas
@@ -219,16 +210,26 @@ export default function HomeScreen({ navigation }: Props) {
                 const idx = (categorySequenceIndex + i) % pool.length;
                 const categoryId = pool[idx];
                 const nextPage = (updatedPages[categoryId] || 1) + 1;
-                const items = await fetchCategoryPage(categoryId, nextPage);
+                const status =
+                    categoryId === 'airing' ? 'Airing' : (categoryId === 'finished' ? 'Finished' : 'Upcoming');
+                const response = await catalogService.getAnimeList({ status, page: nextPage, limit: 20 });
+                const items = (response?.data || []).map(mapCatalogAnimeToContentItem);
 
                 if (items.length > 0) {
+                    // Deduplicar por id+source dentro de la fila cargada
+                    const seen = new Set<string>();
+                    const uniqueItems = items.filter(item => {
+                        const key = `${item.source}_${item.id}`;
+                        if (seen.has(key)) return false;
+                        seen.add(key);
+                        return true;
+                    });
                     const rowKey = `${categoryId}_page_${nextPage}`;
-                    // Si ya existe esa key, saltarla para evitar duplicado
                     if (!loadedRowKeysRef.current.has(rowKey)) {
                         newExtraRows.push({
                             key: rowKey,
                             title: CATEGORY_LABELS[categoryId],
-                            items,
+                            items: uniqueItems,
                         });
                         loadedRowKeysRef.current.add(rowKey);
                     }
@@ -275,13 +276,13 @@ export default function HomeScreen({ navigation }: Props) {
 
         // Filtros específicos por tipo de contenido
         if (contentFilter === 'movies') {
-            return categoryId.includes('movie') || categoryId === 'popular_all' || categoryId === 'top_rated_all' || categoryId === 'current_all';
+            return false;
         }
         if (contentFilter === 'series') {
-            return categoryId.includes('tv') || categoryId === 'popular_all' || categoryId === 'top_rated_all' || categoryId === 'current_all';
+            return false;
         }
         if (contentFilter === 'anime') {
-            return categoryId.includes('anime') || categoryId === 'popular_all' || categoryId === 'top_rated_all' || categoryId === 'current_all';
+            return categoryId === 'airing' || categoryId === 'finished' || categoryId === 'upcoming';
         }
 
         return false;
@@ -357,14 +358,26 @@ export default function HomeScreen({ navigation }: Props) {
                                     source: 'tmdb'
                                 });
                             } else {
-                                const contentItem = animeToContentItem(movie as AnimeDetail);
-                                handleContentNavigation(contentItem);
+                                handleContentNavigation(mapCatalogAnimeToContentItem({
+                                    id: movie.id,
+                                    title: (movie as any).title?.romaji || (movie as any).title?.native || '',
+                                    description: (movie as any).description || '',
+                                    poster_url: (movie as any).coverImage?.large || '',
+                                    banner_url: (movie as any).bannerImage || '',
+                                    rating: (movie as any).averageScore ? (movie as any).averageScore / 10 : 0,
+                                    release_date: '',
+                                    genres: (movie as any).genres || [],
+                                }));
                             }
                         }}
                     />
                 )}
 
-                {ENHANCED_CATEGORIES.map((category) => {
+                {([
+                    { id: 'airing', name: 'En emisión' },
+                    { id: 'finished', name: 'Finalizados' },
+                    { id: 'upcoming', name: 'Próximos' },
+                ] as const).map((category) => {
                     if (!shouldShowCategory(category.id)) return null;
 
                     const categoryContent = contentSections[category.id];
@@ -387,6 +400,13 @@ export default function HomeScreen({ navigation }: Props) {
                         />
                     );
                 })}
+
+                {(!contentSections.airing?.length && !contentSections.finished?.length && !contentSections.upcoming?.length) && (
+                    <View style={styles.emptyState}>
+                        <Text style={styles.emptyTitle}>Aún no hay anime disponible</Text>
+                        <Text style={styles.emptySubtitle}>Agrega contenido desde el panel de administrador.</Text>
+                    </View>
+                )}
 
                 {/* Filas adicionales cargadas dinámicamente al llegar al final */}
                 {extraRows.map((row) => (
@@ -428,7 +448,8 @@ const styles = StyleSheet.create({
         flex: 1,
     },
     scrollContent: {
-        paddingTop: 100, // Ajustado para un Header estándar
+        paddingTop: 100,
+        paddingBottom: 80,
     },
     loadingMore: {
         paddingVertical: 16,
@@ -440,5 +461,19 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         alignItems: 'center',
         backgroundColor: colors.background,
+    },
+    emptyState: {
+        paddingHorizontal: 20,
+        paddingTop: 24,
+    },
+    emptyTitle: {
+        color: '#FFFFFF',
+        fontSize: 18,
+        fontWeight: '700',
+        marginBottom: 6,
+    },
+    emptySubtitle: {
+        color: 'rgba(255,255,255,0.75)',
+        fontSize: 14,
     },
 });

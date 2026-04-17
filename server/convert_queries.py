@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Script para convertir queries MySQL a PostgreSQL en index.js
+Script para convertir queries legacy a PostgreSQL en index.js
 - Reemplaza placeholders ? por $1, $2, $3, etc.
 - Actualiza destructuring [rows] por result.rows
 - Actualiza [result] por result (para INSERT/UPDATE)
@@ -9,8 +9,8 @@ Script para convertir queries MySQL a PostgreSQL en index.js
 import re
 import sys
 
-def convert_mysql_to_postgres_query(line):
-    """Convierte placeholders y destructuring de MySQL a PostgreSQL"""
+def convert_legacy_to_postgres_query(line):
+    """Convierte placeholders y destructuring a PostgreSQL"""
     
     # Caso 1: const [rows] = await pool.query(...) → const result = await pool.query(...)
     # Luego acceder con result.rows
@@ -101,7 +101,7 @@ def main():
     
     converted_lines = []
     for line in lines:
-        converted = convert_mysql_to_postgres_query(line.rstrip('\\n'))
+        converted = convert_legacy_to_postgres_query(line.rstrip('\\n'))
         converted_lines.append(converted + '\\n')
     
     with open(output_file, 'w', encoding='utf-8') as f:

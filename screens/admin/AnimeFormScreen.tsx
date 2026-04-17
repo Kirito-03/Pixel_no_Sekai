@@ -11,6 +11,7 @@ import {
     Modal,
     FlatList,
     Image,
+    Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -18,6 +19,7 @@ import { adminApiService } from '../../services/adminApiService';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { AdminStackParamList } from '../../types/navigation';
+import { AdminShell } from '../../components/admin/AdminShell';
 
 type NavigationProp = NativeStackNavigationProp<AdminStackParamList>;
 type AnimeFormRouteProp = RouteProp<AdminStackParamList, 'AnimeForm'>;
@@ -82,12 +84,13 @@ export default function AnimeFormScreen() {
         }
     };
 
-    const searchTMDB = async () => {
-        if (!tmdbSearchQuery.trim()) return;
+    const searchTMDB = async (overrideQuery?: string) => {
+        const queryToSearch = overrideQuery !== undefined ? overrideQuery : tmdbSearchQuery;
+        if (!queryToSearch.trim()) return;
 
         try {
             setIsSearching(true);
-            const data = await adminApiService.searchTMDB(tmdbSearchQuery);
+            const data = await adminApiService.searchTMDB(queryToSearch);
             setTmdbResults(data.results || []);
         } catch (error) {
             console.error('Error searching TMDB:', error);
@@ -115,7 +118,7 @@ export default function AnimeFormScreen() {
                 total_episodes: data.number_of_episodes?.toString() || '',
                 rating: data.vote_average?.toString() || '',
                 release_date: data.first_air_date || '',
-                status: data.status || 'Unknown',
+                status: mapTMDBStatus(data.status),
             });
 
             setShowTMDBSearch(false);
@@ -126,6 +129,15 @@ export default function AnimeFormScreen() {
         } finally {
             setIsSearching(false);
         }
+    };
+
+    const mapTMDBStatus = (status: string) => {
+        if (!status) return 'Unknown';
+        const lowerStatus = status.toLowerCase();
+        if (lowerStatus.includes('returning') || lowerStatus.includes('airing')) return 'Airing';
+        if (lowerStatus.includes('ended') || lowerStatus.includes('canceled')) return 'Finished';
+        if (lowerStatus.includes('planned') || lowerStatus.includes('production')) return 'Upcoming';
+        return 'Unknown';
     };
 
     const handleSave = async () => {
@@ -159,7 +171,8 @@ export default function AnimeFormScreen() {
             }
         } catch (error: any) {
             console.error('Error saving anime:', error);
-            Alert.alert('Error', error.message || 'No se pudo guardar el anime');
+            const backendMsg = error?.response?.data?.message;
+            Alert.alert('Error', backendMsg || error.message || 'No se pudo guardar el anime');
         } finally {
             setIsSaving(false);
         }
@@ -167,258 +180,281 @@ export default function AnimeFormScreen() {
 
     if (isLoading) {
         return (
-            <View style={styles.loadingContainer}>
-                <ActivityIndicator size="large" color="#0A2342" />
-            </View>
+            <AdminShell activeKey="anime">
+                <View style={styles.loadingContainer}>
+                    <ActivityIndicator size="large" color="#E50914" />
+                </View>
+            </AdminShell>
         );
     }
 
     return (
-        <SafeAreaView style={styles.container} edges={['top']}>
-            {/* Header */}
-            <View style={styles.header}>
-                <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
-                    <Ionicons name="arrow-back" size={24} color="#E50914" />
-                </TouchableOpacity>
-                <Text style={styles.headerTitle}>
-                    {mode === 'create' ? 'Agregar Anime' : 'Editar Anime'}
-                </Text>
-                <TouchableOpacity
-                    style={styles.tmdbButton}
-                    onPress={() => setShowTMDBSearch(true)}
-                >
-                    <Ionicons name="search" size={24} color="#E50914" />
-                </TouchableOpacity>
-            </View>
-
-            <ScrollView style={styles.content} contentContainerStyle={styles.contentContainer}>
-
-                {/* Image Previews */}
-                {(formData.poster_url || formData.banner_url) && (
-                    <View style={styles.previewContainer}>
-                        {formData.banner_url ? (
-                            <Image source={{ uri: formData.banner_url }} style={styles.bannerPreview} resizeMode="cover" />
-                        ) : null}
-                        {formData.poster_url ? (
-                            <Image source={{ uri: formData.poster_url }} style={styles.posterPreview} resizeMode="cover" />
-                        ) : null}
-                    </View>
-                )}
-
-                {/* Título y Autocomplete */}
-                <View style={styles.formGroup}>
-                    <Text style={styles.label}>Título *</Text>
-                    <View style={styles.inputContainer}>
-                        <TextInput
-                            style={styles.input}
-                            value={formData.title}
-                            onChangeText={(text) => {
-                                setFormData({ ...formData, title: text });
-                                // Trigger search on typing (debounce needed ideally, or just button)
-                            }}
-                            placeholder="Nombre del anime"
-                            placeholderTextColor="#999999"
-                        />
-                        <TouchableOpacity
-                            style={styles.searchIcon}
-                            onPress={() => {
-                                setTmdbSearchQuery(formData.title);
-                                setShowTMDBSearch(true);
-                                searchTMDB();
-                            }}
-                        >
-                            <Ionicons name="cloud-download-outline" size={20} color="#E50914" />
-                        </TouchableOpacity>
-                    </View>
-                </View>
-
-                {/* Título en Inglés */}
-                <View style={styles.formGroup}>
-                    <Text style={styles.label}>Título en Inglés</Text>
-                    <TextInput
-                        style={styles.input}
-                        value={formData.title_english}
-                        onChangeText={(text) => setFormData({ ...formData, title_english: text })}
-                        placeholder="English title"
-                        placeholderTextColor="#999999"
-                    />
-                </View>
-
-                {/* Descripción */}
-                <View style={styles.formGroup}>
-                    <Text style={styles.label}>Descripción</Text>
-                    <TextInput
-                        style={[styles.input, styles.textArea]}
-                        value={formData.description}
-                        onChangeText={(text) => setFormData({ ...formData, description: text })}
-                        placeholder="Sinopsis del anime"
-                        placeholderTextColor="#999999"
-                        multiline
-                        numberOfLines={4}
-                    />
-                </View>
-
-                {/* Poster URL */}
-                <View style={styles.formGroup}>
-                    <Text style={styles.label}>URL del Póster</Text>
-                    <TextInput
-                        style={styles.input}
-                        value={formData.poster_url}
-                        onChangeText={(text) => setFormData({ ...formData, poster_url: text })}
-                        placeholder="https://..."
-                        placeholderTextColor="#999999"
-                        autoCapitalize="none"
-                    />
-                </View>
-
-                {/* Banner URL */}
-                <View style={styles.formGroup}>
-                    <Text style={styles.label}>URL del Banner</Text>
-                    <TextInput
-                        style={styles.input}
-                        value={formData.banner_url}
-                        onChangeText={(text) => setFormData({ ...formData, banner_url: text })}
-                        placeholder="https://..."
-                        placeholderTextColor="#999999"
-                        autoCapitalize="none"
-                    />
-                </View>
-
-                {/* Géneros */}
-                <View style={styles.formGroup}>
-                    <Text style={styles.label}>Géneros (separados por coma)</Text>
-                    <TextInput
-                        style={styles.input}
-                        value={formData.genres}
-                        onChangeText={(text) => setFormData({ ...formData, genres: text })}
-                        placeholder="Acción, Aventura, Fantasía"
-                        placeholderTextColor="#999999"
-                    />
-                </View>
-
-                {/* Estado */}
-                <View style={styles.formGroup}>
-                    <Text style={styles.label}>Estado</Text>
-                    <View style={styles.statusButtons}>
-                        {['Airing', 'Finished', 'Upcoming'].map((status) => (
-                            <TouchableOpacity
-                                key={status}
-                                style={[
-                                    styles.statusButton,
-                                    formData.status === status && styles.statusButtonActive
-                                ]}
-                                onPress={() => setFormData({ ...formData, status })}
-                            >
-                                <Text style={[
-                                    styles.statusButtonText,
-                                    formData.status === status && styles.statusButtonTextActive
-                                ]}>
-                                    {status}
-                                </Text>
+        <AdminShell activeKey="anime">
+            <SafeAreaView style={styles.container} edges={['top']}>
+                {/* Header */}
+                <View style={styles.header}>
+                    <View style={styles.headerLeft}>
+                        {Platform.OS !== 'web' && (
+                            <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
+                                <Ionicons name="arrow-back" size={24} color="#FFFFFF" />
                             </TouchableOpacity>
-                        ))}
-                    </View>
-                </View>
-
-                {/* Total Episodios */}
-                <View style={styles.formGroup}>
-                    <Text style={styles.label}>Total de Episodios</Text>
-                    <TextInput
-                        style={styles.input}
-                        value={formData.total_episodes}
-                        onChangeText={(text) => setFormData({ ...formData, total_episodes: text.replace(/[^0-9]/g, '') })}
-                        placeholder="12"
-                        placeholderTextColor="#999999"
-                        keyboardType="numeric"
-                    />
-                </View>
-
-                {/* Save Button */}
-                <TouchableOpacity
-                    style={[styles.saveButton, isSaving && styles.saveButtonDisabled]}
-                    onPress={handleSave}
-                    disabled={isSaving}
-                >
-                    {isSaving ? (
-                        <ActivityIndicator color="#FFFFFF" />
-                    ) : (
-                        <Text style={styles.saveButtonText}>
-                            {mode === 'create' ? 'Crear Anime' : 'Guardar Cambios'}
+                        )}
+                        <Text style={styles.headerTitle}>
+                            {mode === 'create' ? 'Agregar Anime' : 'Editar Anime'}
                         </Text>
-                    )}
-                </TouchableOpacity>
-            </ScrollView>
-
-            {/* TMDB Search Modal */}
-            <Modal
-                visible={showTMDBSearch}
-                animationType="slide"
-                onRequestClose={() => setShowTMDBSearch(false)}
-            >
-                <SafeAreaView style={styles.modalContainer}>
-                    <View style={styles.modalHeader}>
-                        <Text style={styles.modalTitle}>Buscar en TMDB</Text>
-                        <TouchableOpacity onPress={() => setShowTMDBSearch(false)}>
-                            <Ionicons name="close" size={28} color="#E50914" />
-                        </TouchableOpacity>
                     </View>
+                    <TouchableOpacity
+                        style={styles.tmdbButton}
+                        onPress={() => setShowTMDBSearch(true)}
+                    >
+                        <Ionicons name="search" size={20} color="#FFFFFF" />
+                        <Text style={styles.tmdbButtonText}>Buscar en TMDB</Text>
+                    </TouchableOpacity>
+                </View>
 
-                    <View style={styles.searchContainer}>
-                        <TextInput
-                            style={styles.searchInput}
-                            value={tmdbSearchQuery}
-                            onChangeText={setTmdbSearchQuery}
-                            placeholder="Buscar anime..."
-                            placeholderTextColor="#999999"
-                            onSubmitEditing={searchTMDB}
-                        />
-                        <TouchableOpacity style={styles.searchButton} onPress={searchTMDB}>
-                            <Ionicons name="search" size={20} color="#FFFFFF" />
-                        </TouchableOpacity>
-                    </View>
+                <ScrollView style={styles.content} contentContainerStyle={styles.contentContainer}>
+                    <View style={styles.formCard}>
+                        {/* Image Previews */}
+                        {(formData.poster_url || formData.banner_url) && (
+                            <View style={styles.previewContainer}>
+                                {formData.banner_url ? (
+                                    <Image source={{ uri: formData.banner_url }} style={styles.bannerPreview} resizeMode="cover" />
+                                ) : null}
+                                {formData.poster_url ? (
+                                    <Image source={{ uri: formData.poster_url }} style={styles.posterPreview} resizeMode="cover" />
+                                ) : null}
+                            </View>
+                        )}
 
-                    {isSearching ? (
-                        <View style={styles.loadingContainer}>
-                            <ActivityIndicator size="large" color="#E50914" />
-                        </View>
-                    ) : (
-                        <FlatList
-                            data={tmdbResults}
-                            keyExtractor={(item) => item.id.toString()}
-                            renderItem={({ item }) => (
+                        {/* Título y Autocomplete */}
+                        <View style={styles.formGroup}>
+                            <Text style={styles.label}>Título *</Text>
+                            <View style={styles.inputContainer}>
+                                <TextInput
+                                    style={styles.input}
+                                    value={formData.title}
+                                    onChangeText={(text) => {
+                                        setFormData({ ...formData, title: text });
+                                    }}
+                                    placeholder="Nombre del anime"
+                                    placeholderTextColor="#808080"
+                                />
                                 <TouchableOpacity
-                                    style={styles.tmdbResultItem}
-                                    onPress={() => selectTMDBResult(item.id)}
+                                    style={styles.searchIcon}
+                                    onPress={() => {
+                                        setTmdbSearchQuery(formData.title);
+                                        setShowTMDBSearch(true);
+                                        searchTMDB(formData.title);
+                                    }}
                                 >
-                                    <Image
-                                        source={{ uri: item.poster_path ? `https://image.tmdb.org/t/p/w200${item.poster_path}` : 'https://via.placeholder.com/100x150' }}
-                                        style={styles.tmdbResultImage}
-                                    />
-                                    <View style={styles.tmdbResultInfo}>
-                                        <Text style={styles.tmdbResultTitle}>{item.name || item.original_name}</Text>
-                                        <Text style={styles.tmdbResultOverview} numberOfLines={2}>
-                                            {item.overview || 'Sin descripción'}
-                                        </Text>
-                                        <Text style={styles.tmdbResultDate}>
-                                            {item.first_air_date ? `Estreno: ${item.first_air_date}` : ''}
-                                        </Text>
-                                    </View>
-                                    <Ionicons name="chevron-forward" size={20} color="#666666" />
+                                    <Ionicons name="cloud-download-outline" size={20} color="#FFFFFF" />
                                 </TouchableOpacity>
+                            </View>
+                        </View>
+
+                        <View style={styles.row}>
+                            {/* Título en Inglés */}
+                            <View style={[styles.formGroup, { flex: 1 }]}>
+                                <Text style={styles.label}>Título en Inglés</Text>
+                                <TextInput
+                                    style={styles.input}
+                                    value={formData.title_english}
+                                    onChangeText={(text) => setFormData({ ...formData, title_english: text })}
+                                    placeholder="English title"
+                                    placeholderTextColor="#808080"
+                                />
+                            </View>
+
+                            {/* Total Episodios */}
+                            <View style={[styles.formGroup, { flex: 1 }]}>
+                                <Text style={styles.label}>Total de Episodios</Text>
+                                <TextInput
+                                    style={styles.input}
+                                    value={formData.total_episodes}
+                                    onChangeText={(text) => setFormData({ ...formData, total_episodes: text.replace(/[^0-9]/g, '') })}
+                                    placeholder="12"
+                                    placeholderTextColor="#808080"
+                                    keyboardType="numeric"
+                                />
+                            </View>
+                        </View>
+
+                        {/* Descripción */}
+                        <View style={styles.formGroup}>
+                            <Text style={styles.label}>Descripción</Text>
+                            <TextInput
+                                style={[styles.input, styles.textArea]}
+                                value={formData.description}
+                                onChangeText={(text) => setFormData({ ...formData, description: text })}
+                                placeholder="Sinopsis del anime"
+                                placeholderTextColor="#808080"
+                                multiline
+                                numberOfLines={4}
+                            />
+                        </View>
+
+                        <View style={styles.row}>
+                            {/* Poster URL */}
+                            <View style={[styles.formGroup, { flex: 1 }]}>
+                                <Text style={styles.label}>URL del Póster</Text>
+                                <TextInput
+                                    style={styles.input}
+                                    value={formData.poster_url}
+                                    onChangeText={(text) => setFormData({ ...formData, poster_url: text })}
+                                    placeholder="https://..."
+                                    placeholderTextColor="#808080"
+                                    autoCapitalize="none"
+                                />
+                            </View>
+
+                            {/* Banner URL */}
+                            <View style={[styles.formGroup, { flex: 1 }]}>
+                                <Text style={styles.label}>URL del Banner</Text>
+                                <TextInput
+                                    style={styles.input}
+                                    value={formData.banner_url}
+                                    onChangeText={(text) => setFormData({ ...formData, banner_url: text })}
+                                    placeholder="https://..."
+                                    placeholderTextColor="#808080"
+                                    autoCapitalize="none"
+                                />
+                            </View>
+                        </View>
+
+                        {/* Géneros */}
+                        <View style={styles.formGroup}>
+                            <Text style={styles.label}>Géneros (separados por coma)</Text>
+                            <TextInput
+                                style={styles.input}
+                                value={formData.genres}
+                                onChangeText={(text) => setFormData({ ...formData, genres: text })}
+                                placeholder="Acción, Aventura, Fantasía"
+                                placeholderTextColor="#808080"
+                            />
+                        </View>
+
+                        {/* Estado */}
+                        <View style={styles.formGroup}>
+                            <Text style={styles.label}>Estado</Text>
+                            <View style={styles.statusButtons}>
+                                {['Airing', 'Finished', 'Upcoming'].map((status) => (
+                                    <TouchableOpacity
+                                        key={status}
+                                        style={[
+                                            styles.statusButton,
+                                            formData.status === status && styles.statusButtonActive
+                                        ]}
+                                        onPress={() => setFormData({ ...formData, status })}
+                                    >
+                                        <Text style={[
+                                            styles.statusButtonText,
+                                            formData.status === status && styles.statusButtonTextActive
+                                        ]}>
+                                            {status}
+                                        </Text>
+                                    </TouchableOpacity>
+                                ))}
+                            </View>
+                        </View>
+
+                        {/* Save Button */}
+                        <TouchableOpacity
+                            style={[styles.saveButton, isSaving && styles.saveButtonDisabled]}
+                            onPress={handleSave}
+                            disabled={isSaving}
+                        >
+                            {isSaving ? (
+                                <ActivityIndicator color="#FFFFFF" />
+                            ) : (
+                                <Text style={styles.saveButtonText}>
+                                    {mode === 'create' ? 'Crear Anime' : 'Guardar Cambios'}
+                                </Text>
                             )}
-                            contentContainerStyle={styles.tmdbResultsList}
-                        />
-                    )}
-                </SafeAreaView>
-            </Modal>
-        </SafeAreaView>
+                        </TouchableOpacity>
+                    </View>
+                </ScrollView>
+
+                {/* TMDB Search Modal */}
+                <Modal
+                    visible={showTMDBSearch}
+                    animationType="slide"
+                    transparent={true}
+                    onRequestClose={() => setShowTMDBSearch(false)}
+                >
+                    <View style={styles.modalOverlay}>
+                        <View style={styles.modalContainer}>
+                            <View style={styles.modalHeader}>
+                                <Text style={styles.modalTitle}>Buscar en TMDB</Text>
+                                <TouchableOpacity onPress={() => setShowTMDBSearch(false)}>
+                                    <Ionicons name="close" size={28} color="#FFFFFF" />
+                                </TouchableOpacity>
+                            </View>
+
+                            <View style={styles.modalSearchContainer}>
+                                <TextInput
+                                    style={styles.modalSearchInput}
+                                    value={tmdbSearchQuery}
+                                    onChangeText={setTmdbSearchQuery}
+                                    placeholder="Buscar anime..."
+                                    placeholderTextColor="#808080"
+                                    onSubmitEditing={() => searchTMDB()}
+                                />
+                                <TouchableOpacity style={styles.modalSearchButton} onPress={() => searchTMDB()}>
+                                    <Ionicons name="search" size={20} color="#FFFFFF" />
+                                </TouchableOpacity>
+                            </View>
+
+                            {isSearching ? (
+                                <View style={styles.loadingContainer}>
+                                    <ActivityIndicator size="large" color="#E50914" />
+                                </View>
+                            ) : (
+                                <FlatList
+                                    data={tmdbResults}
+                                    keyExtractor={(item) => item.id.toString()}
+                                    renderItem={({ item }) => (
+                                        <TouchableOpacity
+                                            style={styles.tmdbResultItem}
+                                            onPress={() => selectTMDBResult(item.id)}
+                                        >
+                                            <Image
+                                                source={{ uri: item.poster_path ? `https://image.tmdb.org/t/p/w200${item.poster_path}` : 'https://via.placeholder.com/100x150' }}
+                                                style={styles.tmdbResultImage}
+                                            />
+                                            <View style={styles.tmdbResultInfo}>
+                                                <Text style={styles.tmdbResultTitle}>{item.name || item.original_name}</Text>
+                                                <Text style={styles.tmdbResultOverview} numberOfLines={2}>
+                                                    {item.overview || 'Sin descripción'}
+                                                </Text>
+                                                <Text style={styles.tmdbResultDate}>
+                                                    {item.first_air_date ? `Estreno: ${item.first_air_date}` : ''}
+                                                </Text>
+                                            </View>
+                                            <Ionicons name="chevron-forward" size={20} color="#666666" />
+                                        </TouchableOpacity>
+                                    )}
+                                    contentContainerStyle={styles.tmdbResultsList}
+                                    ListEmptyComponent={
+                                        tmdbSearchQuery && !isSearching ? (
+                                            <View style={styles.emptyContainer}>
+                                                <Text style={styles.emptyText}>No se encontraron resultados en TMDB</Text>
+                                            </View>
+                                        ) : null
+                                    }
+                                />
+                            )}
+                        </View>
+                    </View>
+                </Modal>
+            </SafeAreaView>
+        </AdminShell>
     );
 }
 
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        backgroundColor: '#000000', // Black background
+        backgroundColor: '#000000',
     },
     loadingContainer: {
         flex: 1,
@@ -430,43 +466,69 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        padding: 16,
-        backgroundColor: '#000000',
-        borderBottomWidth: 1,
-        borderBottomColor: '#333333',
+        padding: 24,
+        paddingBottom: 16,
+    },
+    headerLeft: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 16,
     },
     backButton: {
         padding: 4,
     },
     headerTitle: {
-        fontSize: 20,
-        fontWeight: '600',
-        color: '#E50914', // Red text
+        fontSize: 24,
+        fontWeight: 'bold',
+        color: '#FFFFFF',
+        letterSpacing: -0.5,
     },
     tmdbButton: {
-        padding: 4,
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#262626',
+        paddingHorizontal: 16,
+        paddingVertical: 10,
+        borderRadius: 4,
+        gap: 8,
+    },
+    tmdbButtonText: {
+        color: '#FFFFFF',
+        fontWeight: '600',
+        fontSize: 14,
     },
     content: {
         flex: 1,
     },
     contentContainer: {
-        padding: 16,
+        paddingHorizontal: 24,
+        paddingBottom: 40,
     },
-    // Preview Styles
+    formCard: {
+        backgroundColor: '#141414',
+        borderRadius: 8,
+        padding: 24,
+        borderWidth: 1,
+        borderColor: '#262626',
+    },
+    row: {
+        flexDirection: 'row',
+        gap: 16,
+    },
     previewContainer: {
-        marginBottom: 24,
+        marginBottom: 32,
         alignItems: 'center',
     },
     bannerPreview: {
         width: '100%',
-        height: 150,
-        borderRadius: 12,
-        marginBottom: -40, // Overlap effect
-        opacity: 0.8,
+        height: 160,
+        borderRadius: 8,
+        marginBottom: -50,
+        opacity: 0.6,
     },
     posterPreview: {
-        width: 100,
-        height: 150,
+        width: 120,
+        height: 180,
         borderRadius: 8,
         borderWidth: 2,
         borderColor: '#E50914',
@@ -477,7 +539,7 @@ const styles = StyleSheet.create({
     label: {
         fontSize: 14,
         fontWeight: '500',
-        color: '#FFFFFF', // White text
+        color: '#B3B3B3',
         marginBottom: 8,
     },
     inputContainer: {
@@ -486,59 +548,56 @@ const styles = StyleSheet.create({
         gap: 8,
     },
     searchIcon: {
-        padding: 10,
-        backgroundColor: '#1A1A1A',
-        borderRadius: 8,
-        borderWidth: 1,
-        borderColor: '#333333',
+        padding: 12,
+        backgroundColor: '#262626',
+        borderRadius: 4,
     },
     input: {
         flex: 1,
-        backgroundColor: '#1A1A1A', // Dark input
+        backgroundColor: '#000000',
         borderWidth: 1,
         borderColor: '#333333',
-        borderRadius: 8,
+        borderRadius: 4,
         padding: 12,
-        fontSize: 16,
-        color: '#FFFFFF', // White text
+        fontSize: 15,
+        color: '#FFFFFF',
     },
     textArea: {
-        minHeight: 100,
+        minHeight: 120,
         textAlignVertical: 'top',
     },
     statusButtons: {
         flexDirection: 'row',
-        gap: 8,
+        gap: 12,
     },
     statusButton: {
         flex: 1,
         paddingVertical: 12,
         paddingHorizontal: 16,
-        borderRadius: 8,
+        borderRadius: 4,
         borderWidth: 1,
         borderColor: '#333333',
-        backgroundColor: '#1A1A1A',
+        backgroundColor: '#000000',
         alignItems: 'center',
     },
     statusButtonActive: {
-        backgroundColor: '#E50914', // Red active
+        backgroundColor: 'rgba(229, 9, 20, 0.1)',
         borderColor: '#E50914',
     },
     statusButtonText: {
         fontSize: 14,
-        fontWeight: '500',
-        color: '#999999',
+        fontWeight: '600',
+        color: '#808080',
     },
     statusButtonTextActive: {
-        color: '#FFFFFF',
+        color: '#E50914',
     },
     saveButton: {
-        backgroundColor: '#E50914', // Red button
+        backgroundColor: '#E50914',
         padding: 16,
-        borderRadius: 8,
+        borderRadius: 4,
         alignItems: 'center',
-        marginTop: 8,
-        marginBottom: 32,
+        marginTop: 16,
     },
     saveButtonDisabled: {
         opacity: 0.6,
@@ -549,83 +608,108 @@ const styles = StyleSheet.create({
         fontWeight: '600',
     },
     // Modal Styles
-    modalContainer: {
+    modalOverlay: {
         flex: 1,
+        backgroundColor: 'rgba(0, 0, 0, 0.85)',
+        justifyContent: 'center',
+        alignItems: 'center',
+        padding: 24,
+    },
+    modalContainer: {
+        width: '100%',
+        maxWidth: 700,
+        maxHeight: '80%',
         backgroundColor: '#000000',
+        borderRadius: 12,
+        overflow: 'hidden',
     },
     modalHeader: {
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
-        padding: 16,
-        backgroundColor: '#000000',
+        padding: 24,
+        paddingBottom: 16,
         borderBottomWidth: 1,
-        borderBottomColor: '#333333',
+        borderBottomColor: '#262626',
     },
     modalTitle: {
         fontSize: 20,
-        fontWeight: '600',
-        color: '#E50914',
-    },
-    searchContainer: {
-        flexDirection: 'row',
-        padding: 16,
-        gap: 8,
-    },
-    searchInput: {
-        flex: 1,
-        backgroundColor: '#1A1A1A',
-        borderWidth: 1,
-        borderColor: '#333333',
-        borderRadius: 8,
-        padding: 12,
-        fontSize: 16,
+        fontWeight: 'bold',
         color: '#FFFFFF',
     },
-    searchButton: {
+    modalSearchContainer: {
+        flexDirection: 'row',
+        paddingHorizontal: 24,
+        paddingBottom: 16,
+        gap: 12,
+    },
+    modalSearchInput: {
+        flex: 1,
+        backgroundColor: '#141414',
+        borderWidth: 1,
+        borderColor: '#333333',
+        borderRadius: 4,
+        padding: 12,
+        fontSize: 15,
+        color: '#FFFFFF',
+    },
+    modalSearchButton: {
         backgroundColor: '#E50914',
         width: 48,
         height: 48,
-        borderRadius: 8,
+        borderRadius: 4,
         justifyContent: 'center',
         alignItems: 'center',
     },
     tmdbResultsList: {
-        padding: 16,
+        paddingHorizontal: 24,
+        paddingBottom: 24,
     },
     tmdbResultItem: {
         flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: '#1A1A1A',
+        backgroundColor: '#141414',
         padding: 12,
-        borderRadius: 12,
+        borderRadius: 8,
         marginBottom: 12,
         borderWidth: 1,
-        borderColor: '#333333',
+        borderColor: '#262626',
     },
     tmdbResultImage: {
-        width: 50,
-        height: 75,
+        width: 60,
+        height: 90,
         borderRadius: 4,
-        marginRight: 12,
-        backgroundColor: '#333333',
+        marginRight: 16,
+        backgroundColor: '#262626',
     },
     tmdbResultInfo: {
         flex: 1,
+        marginRight: 12,
     },
     tmdbResultTitle: {
         fontSize: 16,
         fontWeight: '600',
         color: '#FFFFFF',
-        marginBottom: 4,
+        marginBottom: 6,
     },
     tmdbResultOverview: {
         fontSize: 13,
-        color: '#999999',
-        marginBottom: 4,
+        color: '#B3B3B3',
+        marginBottom: 8,
+        lineHeight: 18,
     },
     tmdbResultDate: {
         fontSize: 12,
-        color: '#666666',
+        color: '#808080',
+        fontWeight: '500',
     },
+    emptyContainer: {
+        padding: 32,
+        alignItems: 'center',
+    },
+    emptyText: {
+        color: '#808080',
+        fontSize: 15,
+        textAlign: 'center',
+    }
 });

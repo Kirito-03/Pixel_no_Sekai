@@ -3,7 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { auth, db } from '../services/firebase';
 import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 
-interface Profile {
+export interface Profile {
   id: number;
   name: string;
   avatar_url: string;

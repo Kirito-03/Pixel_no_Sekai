@@ -9,6 +9,9 @@ import {
     ActivityIndicator,
     Alert,
     Modal,
+    Platform,
+    Pressable,
+    Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -16,9 +19,13 @@ import { adminApiService } from '../../services/adminApiService';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { AdminStackParamList } from '../../types/navigation';
+import { AdminShell } from '../../components/admin/AdminShell';
 
 type NavigationProp = NativeStackNavigationProp<AdminStackParamList>;
 type EpisodeManagerRouteProp = RouteProp<AdminStackParamList, 'EpisodeManager'>;
+
+const EPISODE_STATUSES = ['missing', 'queued', 'processing', 'ready', 'error'] as const;
+type EpisodeStatus = typeof EPISODE_STATUSES[number];
 
 export default function EpisodeManagerScreen() {
     const navigation = useNavigation<NavigationProp>();
@@ -27,14 +34,29 @@ export default function EpisodeManagerScreen() {
 
     const [episodes, setEpisodes] = useState<any[]>([]);
     const [isLoading, setIsLoading] = useState(true);
+    const [uploadingEpisodeId, setUploadingEpisodeId] = useState<number | null>(null);
+    const [processingEpisodeId, setProcessingEpisodeId] = useState<number | null>(null);
+    const [autoProcessAfterUpload, setAutoProcessAfterUpload] = useState(true);
+    const [cleanupLocalAfterProcess, setCleanupLocalAfterProcess] = useState(false);
     const [showAddModal, setShowAddModal] = useState(false);
     const [editingEpisode, setEditingEpisode] = useState<any>(null);
 
-    const [episodeForm, setEpisodeForm] = useState({
+    const [episodeForm, setEpisodeForm] = useState<{
+        episode_number: string;
+        title: string;
+        duration: string;
+        video_url: string;
+        season: string;
+        status: EpisodeStatus;
+        quality: string;
+        storage_type: 'gdrive' | 'local' | 'r2';
+    }>({
         episode_number: '',
         title: '',
+        duration: '',
         video_url: '',
         season: '1',
+        status: 'missing',
         quality: '1080p',
         storage_type: 'gdrive',
     });
@@ -49,7 +71,7 @@ export default function EpisodeManagerScreen() {
         try {
             setIsLoading(true);
             const data = await adminApiService.getEpisodes(animeId);
-            setEpisodes(data.episodes || []);
+            setEpisodes(Array.isArray(data) ? data : (data?.episodes || []));
         } catch (error) {
             console.error('Error loading episodes:', error);
         } finally {
@@ -57,13 +79,30 @@ export default function EpisodeManagerScreen() {
         }
     };
 
+    const STATUS_LABELS: Record<string, string> = {
+        missing: 'Faltante',
+        queued: 'En cola',
+        processing: 'Procesando',
+        ready: 'Listo',
+        error: 'Error',
+    };
+
+    const STORAGE_LABELS: Record<string, string> = {
+        gdrive: 'GDrive',
+        local: 'Local',
+        r2: 'R2',
+        external: 'External',
+    };
+
     const openAddModal = () => {
         setEditingEpisode(null);
         setEpisodeForm({
             episode_number: (episodes.length + 1).toString(),
             title: '',
+            duration: '',
             video_url: '',
             season: '1',
+            status: 'missing',
             quality: '1080p',
             storage_type: 'gdrive',
         });
@@ -71,12 +110,19 @@ export default function EpisodeManagerScreen() {
     };
 
     const openEditModal = (episode: any) => {
+        const incomingStatus = typeof episode.status === 'string' ? episode.status : '';
+        const statusValue: EpisodeStatus = (EPISODE_STATUSES as readonly string[]).includes(incomingStatus)
+            ? (incomingStatus as EpisodeStatus)
+            : (episode.video_url ? 'queued' : 'missing');
+
         setEditingEpisode(episode);
         setEpisodeForm({
             episode_number: episode.episode_number.toString(),
             title: episode.title || '',
+            duration: episode.duration?.toString() || '',
             video_url: episode.video_url || '',
             season: episode.season?.toString() || '1',
+            status: statusValue,
             quality: episode.quality || '1080p',
             storage_type: episode.storage_type || 'gdrive',
         });
@@ -84,20 +130,25 @@ export default function EpisodeManagerScreen() {
     };
 
     const handleSaveEpisode = async () => {
-        if (!episodeForm.episode_number || !episodeForm.video_url) {
-            Alert.alert('Error', 'Número de episodio y URL de video son requeridos');
+        if (!episodeForm.episode_number) {
+            Alert.alert('Error', 'Número de episodio es requerido');
             return;
         }
 
         try {
+            const normalizedVideoUrl = episodeForm.video_url.trim();
+            const normalizedStatus: EpisodeStatus = episodeForm.status || (normalizedVideoUrl ? 'queued' : 'missing');
+
             const payload = {
                 anime_id: animeId,
                 episode_number: parseInt(episodeForm.episode_number),
                 title: episodeForm.title || undefined,
-                video_url: episodeForm.video_url,
+                duration: episodeForm.duration ? parseInt(episodeForm.duration) : undefined,
+                video_url: normalizedVideoUrl ? normalizedVideoUrl : null,
                 season: parseInt(episodeForm.season),
+                status: normalizedStatus,
                 quality: episodeForm.quality,
-                storage_type: episodeForm.storage_type as 'gdrive' | 'local',
+                storage_type: episodeForm.storage_type as 'gdrive' | 'local' | 'r2',
             };
 
             if (editingEpisode) {
@@ -139,21 +190,121 @@ export default function EpisodeManagerScreen() {
         );
     };
 
+    const handleUploadVideo = async (episode: any) => {
+        if (Platform.OS !== 'web') {
+            Alert.alert('No disponible', 'La subida manual de archivos está habilitada solo en web por ahora.');
+            return;
+        }
+        if (uploadingEpisodeId === episode.id) return;
+
+        const doc = (globalThis as any)?.document;
+        if (!doc?.createElement) {
+            Alert.alert('Error', 'No se pudo abrir el selector de archivos.');
+            return;
+        }
+
+        const input = doc.createElement('input') as any;
+        input.type = 'file';
+        input.accept = 'video/*';
+        input.onchange = async () => {
+            const file = input?.files?.[0];
+            if (!file) return;
+
+            setUploadingEpisodeId(episode.id);
+            try {
+                const result = await adminApiService.uploadEpisodeVideo(episode.id, file);
+                if (autoProcessAfterUpload) {
+                    setUploadingEpisodeId(null);
+                    setProcessingEpisodeId(episode.id);
+                    try {
+                        const proc = await adminApiService.processEpisodeVideo(episode.id, { cleanup: cleanupLocalAfterProcess });
+                        Alert.alert('Éxito', proc?.message || 'Procesamiento completado');
+                    } catch (error: any) {
+                        const message =
+                            error?.response?.data?.message ||
+                            error?.message ||
+                            'No se pudo procesar el episodio';
+                        Alert.alert('Error', message);
+                    } finally {
+                        setProcessingEpisodeId(null);
+                    }
+                } else {
+                    Alert.alert('Éxito', result?.message || 'Video subido');
+                }
+                await loadEpisodes();
+            } catch (error: any) {
+                const message =
+                    error?.response?.data?.message ||
+                    error?.message ||
+                    'No se pudo subir el video';
+                Alert.alert('Error', message);
+            } finally {
+                setUploadingEpisodeId(null);
+            }
+        };
+
+        input.click();
+    };
+
+    const handleProcessVideo = async (episode: any) => {
+        if (processingEpisodeId === episode.id) return;
+        if (String(episode.status) === 'processing') return;
+        if (!episode.video_url) {
+            Alert.alert('Sin video', 'Este episodio no tiene video_url. Sube un video primero.');
+            return;
+        }
+
+        setProcessingEpisodeId(episode.id);
+        try {
+            const result = await adminApiService.processEpisodeVideo(episode.id, { cleanup: cleanupLocalAfterProcess });
+            Alert.alert('Éxito', result?.message || 'Procesamiento completado');
+            await loadEpisodes();
+        } catch (error: any) {
+            const message =
+                error?.response?.data?.message ||
+                error?.message ||
+                'No se pudo procesar el episodio';
+            Alert.alert('Error', message);
+            await loadEpisodes();
+        } finally {
+            setProcessingEpisodeId(null);
+        }
+    };
+
     const renderEpisodeItem = ({ item }: any) => (
-        <View style={styles.episodeCard}>
+        <Pressable
+            style={({ hovered }: any) => [
+                styles.episodeCard,
+                hovered && styles.episodeCardHovered
+            ]}
+        >
             <View style={styles.episodeInfo}>
                 <View style={styles.episodeHeader}>
-                    <Text style={styles.episodeNumber}>Episodio {item.episode_number}</Text>
+                    <Text style={styles.episodeNumber}>
+                        S{item.season || 1} • E{item.episode_number}
+                    </Text>
                     <View style={styles.badges}>
+                        <View style={[styles.statusBadge, getEpisodeStatusBadgeStyle(item.status)]}>
+                            <Text style={[styles.statusBadgeText, getEpisodeStatusTextStyle(item.status)]}>
+                                {STATUS_LABELS[item.status || (item.video_url ? 'queued' : 'missing')] || (item.status || (item.video_url ? 'queued' : 'missing'))}
+                            </Text>
+                        </View>
                         <View style={styles.qualityBadge}>
                             <Text style={styles.badgeText}>{item.quality || '1080p'}</Text>
                         </View>
-                        <View style={[styles.storageBadge, item.storage_type === 'gdrive' && styles.gdriveBadge]}>
+                        <View style={[
+                            styles.storageBadge,
+                            item.storage_type === 'gdrive' && styles.gdriveBadge,
+                            item.storage_type === 'r2' && styles.r2Badge
+                        ]}>
                             <Ionicons
-                                name={item.storage_type === 'gdrive' ? 'cloud' : 'server'}
+                                name={item.storage_type === 'r2' ? 'cloud-done-outline' : (item.storage_type === 'gdrive' ? 'cloud' : 'server')}
                                 size={12}
                                 color="#FFFFFF"
                             />
+                            <Text style={styles.storageBadgeText}>
+                                {STORAGE_LABELS[item.storage_type] || String(item.storage_type || '').toUpperCase()}
+                            </Text>
                         </View>
                     </View>
                 </View>
@@ -162,361 +313,682 @@ export default function EpisodeManagerScreen() {
                         {item.title}
                     </Text>
                 )}
-                <Text style={styles.episodeUrl} numberOfLines={1}>
-                    {item.video_url}
-                </Text>
+                <View style={styles.episodeMetaRow}>
+                    {typeof item.duration === 'number' ? (
+                        <Text style={styles.episodeMetaText}>{item.duration} min</Text>
+                    ) : (
+                        <Text style={styles.episodeMetaMuted}>Duración: —</Text>
+                    )}
+                    <Text style={styles.metaDot}>•</Text>
+                    {item.stream_url && item.storage_type === 'r2' ? (
+                        <Text style={styles.episodeMetaText} numberOfLines={1}>R2: OK</Text>
+                    ) : item.stream_url ? (
+                        <Text style={styles.episodeMetaText} numberOfLines={1}>Stream: OK</Text>
+                    ) : item.video_url ? (
+                        <Text style={styles.episodeMetaText} numberOfLines={1}>Video: OK</Text>
+                    ) : (
+                        <Text style={styles.episodeMetaMuted} numberOfLines={1}>Fuente: faltante</Text>
+                    )}
+                </View>
+                {!!item.video_url && !item.stream_url && (
+                    <Text style={styles.episodeUrl} numberOfLines={1}>
+                        {item.video_url}
+                    </Text>
+                )}
+                {!!item.stream_url && (
+                    <Text style={styles.episodeUrl} numberOfLines={1}>
+                        {item.stream_url}
+                    </Text>
+                )}
             </View>
             <View style={styles.episodeActions}>
                 <TouchableOpacity
-                    style={styles.actionButton}
-                    onPress={() => openEditModal(item)}
+                    style={[
+                        styles.iconButton,
+                        (!item.video_url || item.status === 'processing') && styles.iconButtonDisabled
+                    ]}
+                    disabled={!item.video_url || item.status === 'processing' || processingEpisodeId === item.id}
+                    onPress={() => handleProcessVideo(item)}
                 >
-                    <Ionicons name="create-outline" size={20} color="#0A2342" />
+                    {processingEpisodeId === item.id || item.status === 'processing' ? (
+                        <ActivityIndicator size="small" color="#FFFFFF" />
+                    ) : (
+                        <Ionicons
+                            name="cog-outline"
+                            size={18}
+                            color={(!item.video_url || item.status === 'processing') ? '#666666' : '#FFFFFF'}
+                        />
+                    )}
                 </TouchableOpacity>
                 <TouchableOpacity
-                    style={styles.actionButton}
+                    style={[
+                        styles.iconButton,
+                        Platform.OS !== 'web' && styles.iconButtonDisabled
+                    ]}
+                    disabled={Platform.OS !== 'web' || uploadingEpisodeId === item.id}
+                    onPress={() => handleUploadVideo(item)}
+                >
+                    {uploadingEpisodeId === item.id ? (
+                        <ActivityIndicator size="small" color="#FFFFFF" />
+                    ) : (
+                        <Ionicons
+                            name="cloud-upload-outline"
+                            size={18}
+                            color={Platform.OS === 'web' ? '#FFFFFF' : '#666666'}
+                        />
+                    )}
+                </TouchableOpacity>
+                {!!item.stream_url && (
+                    <TouchableOpacity
+                        style={styles.iconButton}
+                        onPress={() => {
+                            const url = item.stream_url;
+                            if (!url) return;
+                            if (Platform.OS === 'web') {
+                                (globalThis as any)?.open?.(url, '_blank');
+                            } else {
+                                Linking.openURL(url);
+                            }
+                        }}
+                    >
+                        <Ionicons name="play" size={18} color="#2ecc71" />
+                    </TouchableOpacity>
+                )}
+                {!item.stream_url && (
+                    <TouchableOpacity
+                        style={[
+                            styles.iconButton,
+                            !item.video_url && styles.iconButtonDisabled
+                        ]}
+                        disabled={!item.video_url}
+                        onPress={() => {
+                            const url = item.video_url;
+                            if (!url) return;
+                            if (Platform.OS === 'web') {
+                                (globalThis as any)?.open?.(url, '_blank');
+                            } else {
+                                Linking.openURL(url);
+                            }
+                        }}
+                    >
+                        <Ionicons
+                            name="play-circle-outline"
+                            size={18}
+                            color={item.video_url ? '#FFFFFF' : '#666666'}
+                        />
+                    </TouchableOpacity>
+                )}
+                <TouchableOpacity
+                    style={styles.iconButton}
+                    onPress={() => openEditModal(item)}
+                >
+                    <Ionicons name="pencil" size={18} color="#B3B3B3" />
+                </TouchableOpacity>
+                <TouchableOpacity
+                    style={styles.iconButton}
                     onPress={() => handleDeleteEpisode(item)}
                 >
-                    <Ionicons name="trash-outline" size={20} color="#ef4444" />
+                    <Ionicons name="trash-outline" size={18} color="#E50914" />
                 </TouchableOpacity>
             </View>
-        </View>
+        </Pressable>
     );
 
     return (
-        <SafeAreaView style={styles.container} edges={['top']}>
-            {/* Header */}
-            <View style={styles.header}>
-                <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
-                    <Ionicons name="arrow-back" size={24} color="#0A2342" />
-                </TouchableOpacity>
-                <View style={styles.headerTitleContainer}>
-                    <Text style={styles.headerTitle} numberOfLines={1}>
-                        {animeTitle || 'Episodios'}
-                    </Text>
-                    <Text style={styles.headerSubtitle}>{episodes.length} episodios</Text>
-                </View>
-                <TouchableOpacity style={styles.addButton} onPress={openAddModal}>
-                    <Ionicons name="add-circle" size={28} color="#0A2342" />
-                </TouchableOpacity>
-            </View>
-
-            {/* Episodes List */}
-            {isLoading ? (
-                <View style={styles.loadingContainer}>
-                    <ActivityIndicator size="large" color="#0A2342" />
-                </View>
-            ) : episodes.length === 0 ? (
-                <View style={styles.emptyContainer}>
-                    <Ionicons name="play-circle-outline" size={64} color="#cccccc" />
-                    <Text style={styles.emptyText}>No hay episodios agregados</Text>
-                    <TouchableOpacity style={styles.emptyButton} onPress={openAddModal}>
-                        <Text style={styles.emptyButtonText}>Agregar Primer Episodio</Text>
+        <AdminShell activeKey="episodes">
+            <SafeAreaView style={styles.container} edges={['top']}>
+                {/* Header */}
+                <View style={styles.header}>
+                    <View style={styles.headerLeft}>
+                        {Platform.OS !== 'web' && (
+                            <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
+                                <Ionicons name="arrow-back" size={24} color="#FFFFFF" />
+                            </TouchableOpacity>
+                        )}
+                        <View style={styles.headerTitleContainer}>
+                            <Text style={styles.headerTitle} numberOfLines={1}>
+                                {animeTitle || 'Episodios'}
+                            </Text>
+                            <Text style={styles.headerSubtitle}>{episodes.length} episodios</Text>
+                        </View>
+                    </View>
+                    <TouchableOpacity style={styles.addButton} onPress={openAddModal}>
+                        <Ionicons name="add" size={20} color="#FFFFFF" />
+                        <Text style={styles.addButtonText}>Nuevo Episodio</Text>
                     </TouchableOpacity>
                 </View>
-            ) : (
-                <FlatList
-                    data={episodes}
-                    renderItem={renderEpisodeItem}
-                    keyExtractor={(item) => item.id.toString()}
-                    contentContainerStyle={styles.listContent}
-                />
-            )}
-
-            {/* Add/Edit Episode Modal */}
-            <Modal
-                visible={showAddModal}
-                animationType="slide"
-                onRequestClose={() => setShowAddModal(false)}
-            >
-                <SafeAreaView style={styles.modalContainer}>
-                    <View style={styles.modalHeader}>
-                        <Text style={styles.modalTitle}>
-                            {editingEpisode ? 'Editar Episodio' : 'Agregar Episodio'}
+                <View style={styles.optionsRow}>
+                    <TouchableOpacity
+                        style={[styles.optionChip, autoProcessAfterUpload && styles.optionChipActive]}
+                        onPress={() => setAutoProcessAfterUpload(v => !v)}
+                    >
+                        <Ionicons name="flash-outline" size={14} color={autoProcessAfterUpload ? '#E50914' : '#808080'} />
+                        <Text style={[styles.optionChipText, autoProcessAfterUpload && styles.optionChipTextActive]}>
+                            Auto procesar
                         </Text>
-                        <TouchableOpacity onPress={() => setShowAddModal(false)}>
-                            <Ionicons name="close" size={28} color="#0A2342" />
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                        style={[styles.optionChip, cleanupLocalAfterProcess && styles.optionChipActive]}
+                        onPress={() => setCleanupLocalAfterProcess(v => !v)}
+                        disabled={!autoProcessAfterUpload}
+                    >
+                        <Ionicons name="trash-outline" size={14} color={cleanupLocalAfterProcess ? '#E50914' : '#808080'} />
+                        <Text style={[styles.optionChipText, cleanupLocalAfterProcess && styles.optionChipTextActive]}>
+                            Borrar local
+                        </Text>
+                    </TouchableOpacity>
+                </View>
+
+                {/* Episodes List */}
+                {isLoading ? (
+                    <View style={styles.centerContainer}>
+                        <ActivityIndicator size="large" color="#E50914" />
+                    </View>
+                ) : episodes.length === 0 ? (
+                    <View style={styles.centerContainer}>
+                        <Ionicons name="play-circle-outline" size={64} color="#333333" />
+                        <Text style={styles.emptyText}>No hay episodios agregados</Text>
+                        <TouchableOpacity style={styles.emptyButton} onPress={openAddModal}>
+                            <Text style={styles.emptyButtonText}>Agregar Primer Episodio</Text>
                         </TouchableOpacity>
                     </View>
+                ) : (
+                    <FlatList
+                        data={episodes}
+                        renderItem={renderEpisodeItem}
+                        keyExtractor={(item) => item.id.toString()}
+                        contentContainerStyle={styles.listContent}
+                    />
+                )}
 
-                    <View style={styles.modalContent}>
-                        {/* Episode Number */}
-                        <View style={styles.formGroup}>
-                            <Text style={styles.label}>Número de Episodio *</Text>
-                            <TextInput
-                                style={styles.input}
-                                value={episodeForm.episode_number}
-                                onChangeText={(text) =>
-                                    setEpisodeForm({ ...episodeForm, episode_number: text.replace(/[^0-9]/g, '') })
-                                }
-                                placeholder="1"
-                                keyboardType="numeric"
-                                placeholderTextColor="#999999"
-                            />
-                        </View>
-
-                        {/* Title */}
-                        <View style={styles.formGroup}>
-                            <Text style={styles.label}>Título (opcional)</Text>
-                            <TextInput
-                                style={styles.input}
-                                value={episodeForm.title}
-                                onChangeText={(text) => setEpisodeForm({ ...episodeForm, title: text })}
-                                placeholder="Título del episodio"
-                                placeholderTextColor="#999999"
-                            />
-                        </View>
-
-                        {/* Video URL */}
-                        <View style={styles.formGroup}>
-                            <Text style={styles.label}>URL del Video *</Text>
-                            <TextInput
-                                style={styles.input}
-                                value={episodeForm.video_url}
-                                onChangeText={(text) => setEpisodeForm({ ...episodeForm, video_url: text })}
-                                placeholder="https://drive.google.com/file/d/..."
-                                placeholderTextColor="#999999"
-                                autoCapitalize="none"
-                                multiline
-                            />
-                            <Text style={styles.hint}>
-                                Enlace de Google Drive o URL directa del video
-                            </Text>
-                        </View>
-
-                        {/* Quality */}
-                        <View style={styles.formGroup}>
-                            <Text style={styles.label}>Calidad</Text>
-                            <View style={styles.qualityButtons}>
-                                {['720p', '1080p', '4K'].map((quality) => (
-                                    <TouchableOpacity
-                                        key={quality}
-                                        style={[
-                                            styles.qualityButton,
-                                            episodeForm.quality === quality && styles.qualityButtonActive,
-                                        ]}
-                                        onPress={() => setEpisodeForm({ ...episodeForm, quality })}
-                                    >
-                                        <Text
-                                            style={[
-                                                styles.qualityButtonText,
-                                                episodeForm.quality === quality && styles.qualityButtonTextActive,
-                                            ]}
-                                        >
-                                            {quality}
-                                        </Text>
-                                    </TouchableOpacity>
-                                ))}
-                            </View>
-                        </View>
-
-                        {/* Storage Type */}
-                        <View style={styles.formGroup}>
-                            <Text style={styles.label}>Tipo de Almacenamiento</Text>
-                            <View style={styles.storageButtons}>
-                                <TouchableOpacity
-                                    style={[
-                                        styles.storageButton,
-                                        episodeForm.storage_type === 'gdrive' && styles.storageButtonActive,
-                                    ]}
-                                    onPress={() => setEpisodeForm({ ...episodeForm, storage_type: 'gdrive' })}
-                                >
-                                    <Ionicons name="cloud" size={20} color={episodeForm.storage_type === 'gdrive' ? '#FFFFFF' : '#666666'} />
-                                    <Text
-                                        style={[
-                                            styles.storageButtonText,
-                                            episodeForm.storage_type === 'gdrive' && styles.storageButtonTextActive,
-                                        ]}
-                                    >
-                                        Google Drive
-                                    </Text>
-                                </TouchableOpacity>
-                                <TouchableOpacity
-                                    style={[
-                                        styles.storageButton,
-                                        episodeForm.storage_type === 'local' && styles.storageButtonActive,
-                                    ]}
-                                    onPress={() => setEpisodeForm({ ...episodeForm, storage_type: 'local' })}
-                                >
-                                    <Ionicons name="server" size={20} color={episodeForm.storage_type === 'local' ? '#FFFFFF' : '#666666'} />
-                                    <Text
-                                        style={[
-                                            styles.storageButtonText,
-                                            episodeForm.storage_type === 'local' && styles.storageButtonTextActive,
-                                        ]}
-                                    >
-                                        Local
-                                    </Text>
+                {/* Add/Edit Episode Modal */}
+                <Modal
+                    visible={showAddModal}
+                    animationType="slide"
+                    transparent={true}
+                    onRequestClose={() => setShowAddModal(false)}
+                >
+                    <View style={styles.modalOverlay}>
+                        <View style={styles.modalContainer}>
+                            <View style={styles.modalHeader}>
+                                <Text style={styles.modalTitle}>
+                                    {editingEpisode ? 'Editar Episodio' : 'Agregar Episodio'}
+                                </Text>
+                                <TouchableOpacity onPress={() => setShowAddModal(false)}>
+                                    <Ionicons name="close" size={28} color="#FFFFFF" />
                                 </TouchableOpacity>
                             </View>
-                        </View>
 
-                        {/* Save Button */}
-                        <TouchableOpacity style={styles.saveButton} onPress={handleSaveEpisode}>
-                            <Text style={styles.saveButtonText}>
-                                {editingEpisode ? 'Guardar Cambios' : 'Agregar Episodio'}
-                            </Text>
-                        </TouchableOpacity>
+                            <View style={styles.modalContent}>
+                                <View style={styles.row}>
+                                    {/* Episode Number */}
+                                    <View style={[styles.formGroup, { flex: 1 }]}>
+                                        <Text style={styles.label}>Número de Episodio *</Text>
+                                        <TextInput
+                                            style={styles.input}
+                                            value={episodeForm.episode_number}
+                                            onChangeText={(text) =>
+                                                setEpisodeForm({ ...episodeForm, episode_number: text.replace(/[^0-9]/g, '') })
+                                            }
+                                            placeholder="1"
+                                            keyboardType="numeric"
+                                            placeholderTextColor="#808080"
+                                        />
+                                    </View>
+
+                                    {/* Duration */}
+                                    <View style={[styles.formGroup, { flex: 1 }]}>
+                                        <Text style={styles.label}>Duración (min)</Text>
+                                        <TextInput
+                                            style={styles.input}
+                                            value={episodeForm.duration}
+                                            onChangeText={(text) =>
+                                                setEpisodeForm({ ...episodeForm, duration: text.replace(/[^0-9]/g, '') })
+                                            }
+                                            placeholder="24"
+                                            keyboardType="numeric"
+                                            placeholderTextColor="#808080"
+                                        />
+                                    </View>
+                                </View>
+
+                                <View style={styles.row}>
+                                    <View style={[styles.formGroup, { flex: 1 }]}>
+                                        <Text style={styles.label}>Temporada</Text>
+                                        <TextInput
+                                            style={styles.input}
+                                            value={episodeForm.season}
+                                            onChangeText={(text) =>
+                                                setEpisodeForm({ ...episodeForm, season: text.replace(/[^0-9]/g, '') })
+                                            }
+                                            placeholder="1"
+                                            keyboardType="numeric"
+                                            placeholderTextColor="#808080"
+                                        />
+                                    </View>
+                                    <View style={[styles.formGroup, { flex: 1 }]}>
+                                        <Text style={styles.label}>Estado</Text>
+                                        <View style={styles.statusButtons}>
+                                            {EPISODE_STATUSES.map((s) => (
+                                                <TouchableOpacity
+                                                    key={s}
+                                                    style={[styles.statusButton, episodeForm.status === s && styles.statusButtonActive]}
+                                                    onPress={() => setEpisodeForm({ ...episodeForm, status: s })}
+                                                >
+                                                    <Text
+                                                        style={[
+                                                            styles.statusButtonText,
+                                                            episodeForm.status === s && styles.statusButtonTextActive,
+                                                        ]}
+                                                    >
+                                                        {s}
+                                                    </Text>
+                                                </TouchableOpacity>
+                                            ))}
+                                        </View>
+                                    </View>
+                                </View>
+
+                                {/* Title */}
+                                <View style={styles.formGroup}>
+                                    <Text style={styles.label}>Título (opcional)</Text>
+                                    <TextInput
+                                        style={styles.input}
+                                        value={episodeForm.title}
+                                        onChangeText={(text) => setEpisodeForm({ ...episodeForm, title: text })}
+                                        placeholder="Título del episodio"
+                                        placeholderTextColor="#808080"
+                                    />
+                                </View>
+
+                                {/* Video URL */}
+                                <View style={styles.formGroup}>
+                                    <Text style={styles.label}>URL del Video</Text>
+                                    <TextInput
+                                        style={styles.input}
+                                        value={episodeForm.video_url}
+                                        onChangeText={(text) => setEpisodeForm({ ...episodeForm, video_url: text })}
+                                        placeholder="https://..."
+                                        placeholderTextColor="#808080"
+                                        autoCapitalize="none"
+                                        multiline
+                                    />
+                                    <Text style={styles.hint}>
+                                        Si lo dejas vacío, quedará como missing hasta que subas/proceses el video
+                                    </Text>
+                                </View>
+
+                                <View style={styles.row}>
+                                    {/* Quality */}
+                                    <View style={[styles.formGroup, { flex: 1 }]}>
+                                        <Text style={styles.label}>Calidad</Text>
+                                        <View style={styles.qualityButtons}>
+                                            {['720p', '1080p', '4K'].map((quality) => (
+                                                <TouchableOpacity
+                                                    key={quality}
+                                                    style={[
+                                                        styles.qualityButton,
+                                                        episodeForm.quality === quality && styles.qualityButtonActive,
+                                                    ]}
+                                                    onPress={() => setEpisodeForm({ ...episodeForm, quality })}
+                                                >
+                                                    <Text
+                                                        style={[
+                                                            styles.qualityButtonText,
+                                                            episodeForm.quality === quality && styles.qualityButtonTextActive,
+                                                        ]}
+                                                    >
+                                                        {quality}
+                                                    </Text>
+                                                </TouchableOpacity>
+                                            ))}
+                                        </View>
+                                    </View>
+
+                                    {/* Storage Type */}
+                                    <View style={[styles.formGroup, { flex: 1 }]}>
+                                        <Text style={styles.label}>Tipo de Almacenamiento</Text>
+                                        <View style={styles.storageButtons}>
+                                            <TouchableOpacity
+                                                style={[
+                                                    styles.storageButton,
+                                                    episodeForm.storage_type === 'gdrive' && styles.storageButtonActive,
+                                                ]}
+                                                onPress={() => setEpisodeForm({ ...episodeForm, storage_type: 'gdrive' })}
+                                            >
+                                                <Ionicons name="cloud" size={16} color={episodeForm.storage_type === 'gdrive' ? '#E50914' : '#808080'} />
+                                                <Text
+                                                    style={[
+                                                        styles.storageButtonText,
+                                                        episodeForm.storage_type === 'gdrive' && styles.storageButtonTextActive,
+                                                    ]}
+                                                >
+                                                    GDrive
+                                                </Text>
+                                            </TouchableOpacity>
+                                            <TouchableOpacity
+                                                style={[
+                                                    styles.storageButton,
+                                                    episodeForm.storage_type === 'local' && styles.storageButtonActive,
+                                                ]}
+                                                onPress={() => setEpisodeForm({ ...episodeForm, storage_type: 'local' })}
+                                            >
+                                                <Ionicons name="server" size={16} color={episodeForm.storage_type === 'local' ? '#E50914' : '#808080'} />
+                                                <Text
+                                                    style={[
+                                                        styles.storageButtonText,
+                                                        episodeForm.storage_type === 'local' && styles.storageButtonTextActive,
+                                                    ]}
+                                                >
+                                                    R2/Local
+                                                </Text>
+                                            </TouchableOpacity>
+                                        </View>
+                                    </View>
+                                </View>
+
+                                {/* Save Button */}
+                                <TouchableOpacity style={styles.saveButton} onPress={handleSaveEpisode}>
+                                    <Text style={styles.saveButtonText}>
+                                        {editingEpisode ? 'Guardar Cambios' : 'Agregar Episodio'}
+                                    </Text>
+                                </TouchableOpacity>
+                            </View>
+                        </View>
                     </View>
-                </SafeAreaView>
-            </Modal>
-        </SafeAreaView>
+                </Modal>
+            </SafeAreaView>
+        </AdminShell>
     );
+}
+
+function getEpisodeStatusBadgeStyle(status: string) {
+    switch (status) {
+        case 'ready': return { backgroundColor: 'rgba(46, 204, 113, 0.15)' };
+        case 'processing': return { backgroundColor: 'rgba(241, 196, 15, 0.15)' };
+        case 'queued': return { backgroundColor: 'rgba(52, 152, 219, 0.15)' };
+        case 'error': return { backgroundColor: 'rgba(231, 76, 60, 0.15)' };
+        case 'missing':
+        default: return { backgroundColor: '#262626' };
+    }
+}
+
+function getEpisodeStatusTextStyle(status: string) {
+    switch (status) {
+        case 'ready': return { color: '#2ecc71' };
+        case 'processing': return { color: '#f1c40f' };
+        case 'queued': return { color: '#3498db' };
+        case 'error': return { color: '#e74c3c' };
+        case 'missing':
+        default: return { color: '#B3B3B3' };
+    }
 }
 
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        backgroundColor: '#F8F9FA',
+        backgroundColor: '#000000',
     },
     header: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        padding: 16,
-        backgroundColor: '#FFFFFF',
-        borderBottomWidth: 1,
-        borderBottomColor: '#e0e0e0',
+        padding: 24,
+        paddingBottom: 16,
+    },
+    headerLeft: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 16,
     },
     backButton: {
         padding: 4,
     },
     headerTitleContainer: {
-        flex: 1,
-        alignItems: 'center',
-        paddingHorizontal: 16,
+        flexDirection: 'column',
     },
     headerTitle: {
-        fontSize: 18,
-        fontWeight: '600',
-        color: '#0A2342',
+        fontSize: 24,
+        fontWeight: 'bold',
+        color: '#FFFFFF',
+        letterSpacing: -0.5,
     },
     headerSubtitle: {
-        fontSize: 13,
-        color: '#666666',
+        fontSize: 14,
+        color: '#808080',
         marginTop: 2,
     },
     addButton: {
-        padding: 4,
-    },
-    loadingContainer: {
-        flex: 1,
-        justifyContent: 'center',
+        flexDirection: 'row',
         alignItems: 'center',
+        backgroundColor: '#E50914',
+        paddingHorizontal: 16,
+        paddingVertical: 10,
+        borderRadius: 4,
+        gap: 6,
     },
-    emptyContainer: {
+    addButtonText: {
+        color: '#FFFFFF',
+        fontWeight: '600',
+        fontSize: 14,
+    },
+    centerContainer: {
         flex: 1,
         justifyContent: 'center',
         alignItems: 'center',
         padding: 32,
     },
     emptyText: {
-        fontSize: 16,
-        color: '#666666',
+        fontSize: 15,
+        color: '#808080',
         marginTop: 16,
+        textAlign: 'center',
     },
     emptyButton: {
         marginTop: 24,
-        backgroundColor: '#0A2342',
+        backgroundColor: '#E50914',
         paddingHorizontal: 24,
         paddingVertical: 12,
-        borderRadius: 8,
+        borderRadius: 4,
     },
     emptyButtonText: {
         color: '#FFFFFF',
-        fontSize: 16,
-        fontWeight: '500',
+        fontSize: 15,
+        fontWeight: '600',
     },
     listContent: {
-        padding: 16,
+        paddingHorizontal: 24,
+        paddingBottom: 24,
+        gap: 12,
     },
     episodeCard: {
         flexDirection: 'row',
-        backgroundColor: '#FFFFFF',
+        alignItems: 'center',
+        backgroundColor: '#141414',
         padding: 16,
-        borderRadius: 12,
-        marginBottom: 12,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.05,
-        shadowRadius: 4,
-        elevation: 2,
+        borderRadius: 8,
+        borderWidth: 1,
+        borderColor: '#262626',
+    },
+    episodeCardHovered: {
+        borderColor: '#404040',
+        backgroundColor: '#1a1a1a',
+        transform: [{ translateY: -2 }],
     },
     episodeInfo: {
         flex: 1,
     },
     episodeHeader: {
         flexDirection: 'row',
-        justifyContent: 'space-between',
         alignItems: 'center',
-        marginBottom: 4,
+        gap: 12,
+        marginBottom: 8,
     },
     episodeNumber: {
         fontSize: 16,
         fontWeight: '600',
-        color: '#0A2342',
+        color: '#FFFFFF',
     },
     badges: {
         flexDirection: 'row',
         gap: 6,
+        alignItems: 'center',
     },
-    qualityBadge: {
-        backgroundColor: '#10b981',
+    statusBadge: {
         paddingHorizontal: 8,
         paddingVertical: 2,
-        borderRadius: 8,
+        borderRadius: 4,
+        borderWidth: 1,
+        borderColor: '#262626',
+    },
+    statusBadgeText: {
+        fontSize: 11,
+        fontWeight: '800',
+        textTransform: 'uppercase',
+    },
+    qualityBadge: {
+        backgroundColor: 'rgba(229, 9, 20, 0.15)',
+        paddingHorizontal: 8,
+        paddingVertical: 2,
+        borderRadius: 4,
     },
     storageBadge: {
-        backgroundColor: '#666666',
+        backgroundColor: '#262626',
         paddingHorizontal: 6,
         paddingVertical: 2,
-        borderRadius: 8,
+        borderRadius: 4,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
     },
     gdriveBadge: {
-        backgroundColor: '#4285F4',
+        backgroundColor: 'rgba(66, 133, 244, 0.15)',
+    },
+    r2Badge: {
+        backgroundColor: 'rgba(46, 204, 113, 0.15)',
+    },
+    storageBadgeText: {
+        fontSize: 11,
+        fontWeight: '700',
+        color: '#FFFFFF',
     },
     badgeText: {
-        fontSize: 10,
-        fontWeight: '600',
-        color: '#FFFFFF',
+        fontSize: 11,
+        fontWeight: '700',
+        color: '#E50914',
     },
     episodeTitle: {
         fontSize: 14,
-        color: '#1a1a1a',
+        color: '#B3B3B3',
         marginBottom: 4,
     },
     episodeUrl: {
         fontSize: 12,
-        color: '#999999',
+        color: '#666666',
+    },
+    episodeMetaRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+        marginTop: 2,
+    },
+    episodeMetaText: {
+        fontSize: 12,
+        color: '#B3B3B3',
+        fontWeight: '600',
+    },
+    episodeMetaMuted: {
+        fontSize: 12,
+        color: '#808080',
+        fontWeight: '600',
+    },
+    metaDot: {
+        color: '#404040',
+        fontSize: 12,
+        marginHorizontal: 2,
     },
     episodeActions: {
         flexDirection: 'row',
         gap: 8,
-        marginLeft: 12,
+        marginLeft: 16,
     },
-    actionButton: {
+    iconButton: {
         padding: 8,
+        borderRadius: 4,
+        backgroundColor: '#262626',
+    },
+    iconButtonDisabled: {
+        backgroundColor: '#141414',
+        borderWidth: 1,
+        borderColor: '#262626',
+        opacity: 0.8,
+    },
+    optionsRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 10,
+        paddingHorizontal: 24,
+        paddingBottom: 14,
+    },
+    optionChip: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+        paddingHorizontal: 10,
+        paddingVertical: 8,
+        borderRadius: 999,
+        borderWidth: 1,
+        borderColor: '#262626',
+        backgroundColor: '#141414',
+    },
+    optionChipActive: {
+        borderColor: 'rgba(229, 9, 20, 0.55)',
+        backgroundColor: 'rgba(229, 9, 20, 0.08)',
+    },
+    optionChipText: {
+        fontSize: 12,
+        fontWeight: '700',
+        color: '#808080',
+    },
+    optionChipTextActive: {
+        color: '#E50914',
+    },
+    modalOverlay: {
+        flex: 1,
+        backgroundColor: 'rgba(0, 0, 0, 0.8)',
+        justifyContent: 'center',
+        alignItems: 'center',
+        padding: 24,
     },
     modalContainer: {
-        flex: 1,
-        backgroundColor: '#F8F9FA',
+        width: '100%',
+        maxWidth: 600,
+        backgroundColor: '#141414',
+        borderRadius: 8,
+        borderWidth: 1,
+        borderColor: '#262626',
+        overflow: 'hidden',
     },
     modalHeader: {
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
-        padding: 16,
-        backgroundColor: '#FFFFFF',
+        padding: 24,
+        paddingBottom: 16,
         borderBottomWidth: 1,
-        borderBottomColor: '#e0e0e0',
+        borderBottomColor: '#262626',
     },
     modalTitle: {
         fontSize: 20,
-        fontWeight: '600',
-        color: '#0A2342',
+        fontWeight: 'bold',
+        color: '#FFFFFF',
     },
     modalContent: {
-        padding: 16,
+        padding: 24,
+    },
+    row: {
+        flexDirection: 'row',
+        gap: 16,
     },
     formGroup: {
         marginBottom: 20,
@@ -524,22 +996,48 @@ const styles = StyleSheet.create({
     label: {
         fontSize: 14,
         fontWeight: '500',
-        color: '#1a1a1a',
+        color: '#B3B3B3',
         marginBottom: 8,
     },
     input: {
-        backgroundColor: '#FFFFFF',
+        backgroundColor: '#000000',
         borderWidth: 1,
-        borderColor: '#e0e0e0',
-        borderRadius: 8,
+        borderColor: '#333333',
+        borderRadius: 4,
         padding: 12,
-        fontSize: 16,
-        color: '#1a1a1a',
+        fontSize: 15,
+        color: '#FFFFFF',
     },
     hint: {
         fontSize: 12,
-        color: '#999999',
-        marginTop: 4,
+        color: '#666666',
+        marginTop: 6,
+    },
+    statusButtons: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: 8,
+    },
+    statusButton: {
+        paddingVertical: 10,
+        paddingHorizontal: 10,
+        borderRadius: 4,
+        borderWidth: 1,
+        borderColor: '#333333',
+        backgroundColor: '#000000',
+    },
+    statusButtonActive: {
+        backgroundColor: 'rgba(229, 9, 20, 0.1)',
+        borderColor: '#E50914',
+    },
+    statusButtonText: {
+        fontSize: 12,
+        fontWeight: '800',
+        color: '#808080',
+        textTransform: 'uppercase',
+    },
+    statusButtonTextActive: {
+        color: '#E50914',
     },
     qualityButtons: {
         flexDirection: 'row',
@@ -547,24 +1045,24 @@ const styles = StyleSheet.create({
     },
     qualityButton: {
         flex: 1,
-        paddingVertical: 12,
-        borderRadius: 8,
+        paddingVertical: 10,
+        borderRadius: 4,
         borderWidth: 1,
-        borderColor: '#e0e0e0',
-        backgroundColor: '#FFFFFF',
+        borderColor: '#333333',
+        backgroundColor: '#000000',
         alignItems: 'center',
     },
     qualityButtonActive: {
-        backgroundColor: '#0A2342',
-        borderColor: '#0A2342',
+        backgroundColor: 'rgba(229, 9, 20, 0.1)',
+        borderColor: '#E50914',
     },
     qualityButtonText: {
-        fontSize: 14,
-        fontWeight: '500',
-        color: '#666666',
+        fontSize: 13,
+        fontWeight: '600',
+        color: '#808080',
     },
     qualityButtonTextActive: {
-        color: '#FFFFFF',
+        color: '#E50914',
     },
     storageButtons: {
         flexDirection: 'row',
@@ -575,29 +1073,29 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
-        gap: 8,
-        paddingVertical: 12,
-        borderRadius: 8,
+        gap: 6,
+        paddingVertical: 10,
+        borderRadius: 4,
         borderWidth: 1,
-        borderColor: '#e0e0e0',
-        backgroundColor: '#FFFFFF',
+        borderColor: '#333333',
+        backgroundColor: '#000000',
     },
     storageButtonActive: {
-        backgroundColor: '#0A2342',
-        borderColor: '#0A2342',
+        backgroundColor: 'rgba(229, 9, 20, 0.1)',
+        borderColor: '#E50914',
     },
     storageButtonText: {
-        fontSize: 14,
-        fontWeight: '500',
-        color: '#666666',
+        fontSize: 13,
+        fontWeight: '600',
+        color: '#808080',
     },
     storageButtonTextActive: {
-        color: '#FFFFFF',
+        color: '#E50914',
     },
     saveButton: {
-        backgroundColor: '#0A2342',
+        backgroundColor: '#E50914',
         padding: 16,
-        borderRadius: 8,
+        borderRadius: 4,
         alignItems: 'center',
         marginTop: 8,
     },

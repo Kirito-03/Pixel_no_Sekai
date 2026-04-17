@@ -23,7 +23,7 @@ Una aplicación móvil y web que replica la funcionalidad de Netflix, desarrolla
 
 ### Backend
 - **Node.js** con Express 4.19.2
-- **MySQL** con mysql2 3.9.7
+- **PostgreSQL** con pg 8.13.1
 - **bcryptjs** para encriptación de contraseñas
 - **CORS** habilitado para desarrollo
 
@@ -72,10 +72,10 @@ npm start
 
 - **Backend API**: `http://localhost:3001`
 - **Adminer** (gestión de BD): `http://localhost:8080`
-  - Server: `mysql`
+  - Server: `postgres`
   - Username: `root`
   - Password: `netflix_dev_pass`
-- **MySQL**: `localhost:3306`
+- **PostgreSQL**: `localhost:5432`
 
 ### Comandos útiles
 
@@ -95,8 +95,8 @@ docker-compose up -d --build
 # Acceder al container del backend
 docker-compose exec backend sh
 
-# Acceder a MySQL CLI
-docker-compose exec mysql mysql -uroot -pnetflix_dev_pass bd_netflix
+# Acceder a PostgreSQL CLI
+docker-compose exec postgres psql -U root -d bd_netflix
 ```
 
 ### Troubleshooting Docker
@@ -109,9 +109,9 @@ netstat -ano | findstr :3001
 # Detener otros servicios o cambiar puerto en docker-compose.yml
 ```
 
-**Backend no conecta a MySQL**
+**Backend no conecta a PostgreSQL**
 ```bash
-# Verificar que MySQL esté healthy
+# Verificar que PostgreSQL esté healthy
 docker-compose ps
 
 # Reiniciar servicios
@@ -128,7 +128,7 @@ docker-compose restart
 
 ### Prerrequisitos
 - Node.js (versión 16 o superior)
-- MySQL Server
+- PostgreSQL Server
 - Expo CLI (`npm install -g @expo/cli`)
 
 ### 1. Clonar el repositorio
@@ -151,7 +151,7 @@ npm install
 cd ..
 ```
 
-### 3. Configurar base de datos MySQL
+### 3. Configurar base de datos PostgreSQL
 
 Este proyecto utiliza las siguientes tablas en la base `bd_netflix`:
 - `usuarios`: registro y login de usuarios
@@ -160,9 +160,9 @@ Este proyecto utiliza las siguientes tablas en la base `bd_netflix`:
 - `lista_items`: elementos individuales de "Mi lista"
 
 #### Importar el esquema:
-1. Abre phpMyAdmin o tu cliente MySQL preferido
+1. Abre psql o tu cliente PostgreSQL preferido
 2. Crea la base de datos `bd_netflix` (si no existe)
-3. Importa el archivo `server/bd_netflix.sql`
+3. Importa el archivo `server/bd_netflix_postgres.sql`
 4. Verifica que se crearon las tablas: `usuarios`, `perfiles`, `listas`, `lista_items`
 
 ### 4. Variables de entorno
@@ -171,9 +171,9 @@ Crea/ajusta el archivo `.env` en la raíz del proyecto:
 ```env
 # Base de datos
 DB_HOST=localhost
-DB_PORT=3306
+DB_PORT=5432
 DB_USER=root
-DB_PASSWORD=tu_password_mysql
+DB_PASSWORD=tu_password_postgres
 DB_NAME=bd_netflix
 
 # Backend
@@ -252,7 +252,7 @@ Proyecto_Netflix/
 │   └── databaseService.ts
 ├── server/             # Backend Node.js
 │   ├── index.js       # Servidor Express
-│   ├── bd_netflix.sql # Esquema de BD
+│   ├── bd_netflix_postgres.sql # Esquema de BD
 │   └── package.json
 ├── navigation/         # Configuración de navegación
 ├── assets/            # Recursos (iconos, imágenes)
@@ -284,7 +284,7 @@ Proyecto_Netflix/
 - Verifica email y contraseña
 
 **Error de conexión a la base de datos:**
-- Verifica que MySQL esté ejecutándose
+- Verifica que PostgreSQL esté ejecutándose
 - Revisa las credenciales en `.env`
 - Confirma que la base `bd_netflix` existe
 

@@ -8,6 +8,11 @@ import {
     TextInput,
     ActivityIndicator,
     RefreshControl,
+    Platform,
+    Pressable,
+    Image,
+    Modal,
+    Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -15,30 +20,64 @@ import { adminApiService } from '../../services/adminApiService';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { AdminStackParamList } from '../../types/navigation';
+import { AdminShell } from '../../components/admin/AdminShell';
 
 type NavigationProp = NativeStackNavigationProp<AdminStackParamList>;
 
 export default function AnimeListScreen() {
     const navigation = useNavigation<NavigationProp>();
     const [animeList, setAnimeList] = useState<any[]>([]);
-    const [isLoading, setIsLoading] = useState(true);
+    const [isLoading, setIsLoading] = useState(false);
     const [refreshing, setRefreshing] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
+    const [statusFilter, setStatusFilter] = useState<'all' | 'Airing' | 'Finished' | 'Upcoming'>('all');
     const [page, setPage] = useState(1);
+    const [hasMore, setHasMore] = useState(true);
+    const [selectedAnime, setSelectedAnime] = useState<any | null>(null);
+    const [detailsVisible, setDetailsVisible] = useState(false);
 
     useEffect(() => {
-        loadAnime();
-    }, [searchQuery]);
+        resetAndLoad();
+    }, [searchQuery, statusFilter]);
 
-    const loadAnime = async () => {
+    const resetAndLoad = () => {
+        setPage(1);
+        setHasMore(true);
+        loadAnime(true);
+    };
+
+    const loadAnime = async (isRefreshing = false) => {
+        if (isLoading) return;
+
+        const currentPage = isRefreshing ? 1 : page;
+        if (!isRefreshing && !hasMore) return;
+
+        setIsLoading(true);
+        if (isRefreshing) setRefreshing(true);
+
         try {
-            setIsLoading(true);
             const data = await adminApiService.getAnimeList({
-                page: 1,
-                limit: 50,
+                page: currentPage,
+                limit: 25,
                 search: searchQuery || undefined,
+                status: statusFilter === 'all' ? undefined : statusFilter,
             });
-            setAnimeList(data.anime || []);
+
+            const newAnimes = data?.data || data?.anime || [];
+
+            if (isRefreshing) {
+                setAnimeList(newAnimes);
+            } else {
+                setAnimeList(prevList => [...prevList, ...newAnimes]);
+            }
+
+            setPage(currentPage + 1);
+            const totalPages = data?.pagination?.totalPages;
+            if (typeof totalPages === 'number') {
+                setHasMore(currentPage < totalPages);
+            } else {
+                setHasMore(newAnimes.length > 0);
+            }
         } catch (error) {
             console.error('Error loading anime:', error);
         } finally {
@@ -47,271 +86,724 @@ export default function AnimeListScreen() {
         }
     };
 
-    const handleRefresh = () => {
-        setRefreshing(true);
-        loadAnime();
+    const handleRefresh = () => loadAnime(true);
+    const handleLoadMore = () => {
+        if (!isLoading && hasMore) loadAnime();
     };
 
-    const handleSearch = (text: string) => {
-        setSearchQuery(text);
+    const renderFooter = () => {
+        if (!isLoading || refreshing) return null;
+        return <ActivityIndicator style={{ marginVertical: 20 }} size="large" color="#E50914" />;
+    };
+
+    const openDetails = (item: any) => {
+        setSelectedAnime(item);
+        setDetailsVisible(true);
+    };
+
+    const confirmDelete = (item: any) => {
+        const runDelete = async () => {
+            try {
+                await adminApiService.deleteAnime(item.id);
+                resetAndLoad();
+            } catch (e: any) {
+                const backendMsg = e?.response?.data?.message;
+                const msg = backendMsg || e?.message || 'No se pudo eliminar';
+                if (Platform.OS === 'web') {
+                    (globalThis as any)?.alert?.(msg);
+                } else {
+                    Alert.alert('Error', msg);
+                }
+            }
+        };
+
+        if (Platform.OS === 'web') {
+            const ok = (globalThis as any)?.confirm?.(`¿Eliminar "${item.title}"?`);
+            if (ok) runDelete();
+            return;
+        }
+
+        Alert.alert(
+            'Eliminar anime',
+            `¿Eliminar "${item.title}"?`,
+            [
+                { text: 'Cancelar', style: 'cancel' },
+                { text: 'Eliminar', style: 'destructive', onPress: runDelete }
+            ]
+        );
+    };
+
+    const formatCreatedAt = (value?: string) => {
+        if (!value) return '';
+        const d = new Date(value);
+        if (Number.isNaN(d.getTime())) return '';
+        return d.toLocaleDateString();
+    };
+
+    const formatGenres = (genres: any) => {
+        if (!genres) return '';
+        if (Array.isArray(genres)) return genres.filter(Boolean).slice(0, 3).join(' • ');
+        if (typeof genres === 'string') return genres;
+        return '';
+    };
+
+    const getEpisodeLabel = (item: any) => {
+        const uploaded = typeof item.episode_count === 'number' ? item.episode_count : undefined;
+        const planned = typeof item.total_episodes === 'number' ? item.total_episodes : (item.total_episodes ? Number(item.total_episodes) : 0);
+        if (typeof uploaded === 'number') {
+            if (uploaded === 0) return 'Sin episodios';
+            if (planned > 0) return `${uploaded}/${planned} episodios`;
+            return `${uploaded} episodios`;
+        }
+        return `${planned || 0} episodios`;
     };
 
     const renderAnimeItem = ({ item }: any) => (
-        <TouchableOpacity
-            style={styles.animeCard}
+        <Pressable
+            style={({ hovered }: any) => [
+                styles.row,
+                hovered && styles.rowHovered
+            ]}
             onPress={() => navigation.navigate('EpisodeManager', { animeId: item.id, animeTitle: item.title })}
         >
-            <View style={styles.animeInfo}>
-                <Text style={styles.animeTitle} numberOfLines={1}>
-                    {item.title}
-                </Text>
-                {item.title_english && (
-                    <Text style={styles.animeSubtitle} numberOfLines={1}>
-                        {item.title_english}
-                    </Text>
-                )}
-                <View style={styles.animeMetadata}>
-                    <View style={[styles.badge, getStatusBadgeStyle(item.status)]}>
-                        <Text style={styles.badgeText}>{item.status || 'Unknown'}</Text>
+            <View style={styles.thumbWrap}>
+                {item.poster_url ? (
+                    <Image source={{ uri: item.poster_url }} style={styles.thumb} resizeMode="cover" />
+                ) : (
+                    <View style={styles.thumbFallback}>
+                        <Ionicons name="image-outline" size={18} color="#666666" />
                     </View>
-                    <Text style={styles.episodeCount}>
-                        {item.total_episodes || 0} episodios
-                    </Text>
+                )}
+            </View>
+
+            <View style={styles.main}>
+                <View style={styles.titleRow}>
+                    <Text style={styles.title} numberOfLines={1}>{item.title}</Text>
+                    <View style={[styles.badge, getStatusBadgeStyle(item.status)]}>
+                        <Text style={[styles.badgeText, getStatusTextStyle(item.status)]}>{item.status || 'Unknown'}</Text>
+                    </View>
+                </View>
+                <View style={styles.metaRow}>
+                    <Text style={styles.metaText} numberOfLines={1}>{getEpisodeLabel(item)}</Text>
+                    {!!formatGenres(item.genres) && <Text style={styles.metaDot}>•</Text>}
+                    {!!formatGenres(item.genres) && <Text style={styles.metaText} numberOfLines={1}>{formatGenres(item.genres)}</Text>}
+                    {!!item.created_at && <Text style={styles.metaDot}>•</Text>}
+                    {!!item.created_at && <Text style={styles.metaMuted} numberOfLines={1}>{formatCreatedAt(item.created_at)}</Text>}
                 </View>
             </View>
-            <View style={styles.actions}>
+
+            <View style={styles.actionGroup}>
                 <TouchableOpacity
-                    style={styles.actionButton}
-                    onPress={(e) => {
-                        e.stopPropagation();
+                    style={[styles.actionPill, styles.actionPrimary]}
+                    onPress={() => {
+                        navigation.navigate('EpisodeManager', { animeId: item.id, animeTitle: item.title });
+                    }}
+                >
+                    <Ionicons name="albums-outline" size={16} color="#FFFFFF" />
+                    <Text style={styles.actionPrimaryText}>Episodios</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                    style={styles.iconButton}
+                    onPress={() => {
                         navigation.navigate('AnimeForm', { mode: 'edit', animeId: item.id });
                     }}
                 >
-                    <Ionicons name="create-outline" size={20} color="#0A2342" />
+                    <Ionicons name="pencil" size={18} color="#B3B3B3" />
                 </TouchableOpacity>
-                <Ionicons name="chevron-forward" size={20} color="#666666" />
+
+                <TouchableOpacity
+                    style={styles.iconButton}
+                    onPress={() => {
+                        openDetails(item);
+                    }}
+                >
+                    <Ionicons name="eye-outline" size={18} color="#B3B3B3" />
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                    style={styles.iconButton}
+                    onPress={() => {
+                        confirmDelete(item);
+                    }}
+                >
+                    <Ionicons name="trash-outline" size={18} color="#E50914" />
+                </TouchableOpacity>
             </View>
-        </TouchableOpacity>
+        </Pressable>
     );
 
     return (
-        <SafeAreaView style={styles.container} edges={['top']}>
-            {/* Header */}
-            <View style={styles.header}>
-                <TouchableOpacity
-                    onPress={() => navigation.goBack()}
-                    style={styles.backButton}
-                >
-                    <Ionicons name="arrow-back" size={24} color="#0A2342" />
-                </TouchableOpacity>
-                <View style={styles.headerTitleContainer}>
-                    <Text style={styles.headerTitle}>Biblioteca de Anime</Text>
-                </View>
-                <TouchableOpacity
-                    style={styles.addButton}
-                    onPress={() => navigation.navigate('AnimeForm', { mode: 'create' })}
-                >
-                    <Ionicons name="add-circle" size={28} color="#0A2342" />
-                </TouchableOpacity>
-            </View>
-
-            {/* Search Bar */}
-            <View style={styles.searchContainer}>
-                <Ionicons name="search" size={20} color="#666666" style={styles.searchIcon} />
-                <TextInput
-                    style={styles.searchInput}
-                    placeholder="Buscar anime..."
-                    value={searchQuery}
-                    onChangeText={handleSearch}
-                    placeholderTextColor="#999999"
-                />
-                {searchQuery.length > 0 && (
-                    <TouchableOpacity onPress={() => setSearchQuery('')}>
-                        <Ionicons name="close-circle" size={20} color="#666666" />
+        <AdminShell activeKey="anime">
+            <SafeAreaView style={styles.container} edges={['top']}>
+                {/* Header */}
+                <View style={styles.header}>
+                    <View style={styles.headerLeft}>
+                        {Platform.OS !== 'web' && (
+                            <TouchableOpacity
+                                onPress={() => navigation.goBack()}
+                                style={styles.backButton}
+                            >
+                                <Ionicons name="arrow-back" size={24} color="#FFFFFF" />
+                            </TouchableOpacity>
+                        )}
+                        <Text style={styles.headerTitle}>Biblioteca de Anime</Text>
+                    </View>
+                    <TouchableOpacity
+                        style={styles.addButton}
+                        onPress={() => navigation.navigate('AnimeForm', { mode: 'create' })}
+                    >
+                        <Ionicons name="add" size={20} color="#FFFFFF" />
+                        <Text style={styles.addButtonText}>Nuevo Anime</Text>
                     </TouchableOpacity>
-                )}
-            </View>
-
-            {/* Anime List */}
-            {isLoading ? (
-                <View style={styles.loadingContainer}>
-                    <ActivityIndicator size="large" color="#0A2342" />
                 </View>
-            ) : animeList.length === 0 ? (
-                <View style={styles.emptyContainer}>
-                    <Ionicons name="film-outline" size={64} color="#cccccc" />
-                    <Text style={styles.emptyText}>
-                        {searchQuery ? 'No se encontraron resultados' : 'No hay anime agregado aún'}
-                    </Text>
-                    {!searchQuery && (
-                        <TouchableOpacity
-                            style={styles.emptyButton}
-                            onPress={() => navigation.navigate('AnimeForm', { mode: 'create' })}
-                        >
-                            <Text style={styles.emptyButtonText}>Agregar Anime</Text>
+
+                {/* Search */}
+                <View style={styles.searchContainer}>
+                    <Ionicons name="search" size={20} color="#808080" style={styles.searchIcon} />
+                    <TextInput
+                        style={styles.searchInput}
+                        placeholder="Buscar anime..."
+                        value={searchQuery}
+                        onChangeText={setSearchQuery}
+                        placeholderTextColor="#808080"
+                    />
+                    {searchQuery.length > 0 && (
+                        <TouchableOpacity onPress={() => setSearchQuery('')}>
+                            <Ionicons name="close-circle" size={20} color="#808080" />
                         </TouchableOpacity>
                     )}
                 </View>
-            ) : (
-                <FlatList
-                    data={animeList}
-                    renderItem={renderAnimeItem}
-                    keyExtractor={(item) => item.id.toString()}
-                    contentContainerStyle={styles.listContent}
-                    refreshControl={
-                        <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />
-                    }
-                />
-            )}
-        </SafeAreaView>
+
+                <View style={styles.filtersRow}>
+                    {(
+                        [
+                            { key: 'all', label: 'Todos' },
+                            { key: 'Airing', label: 'Airing' },
+                            { key: 'Finished', label: 'Finished' },
+                            { key: 'Upcoming', label: 'Upcoming' },
+                        ] as const
+                    ).map((f) => (
+                        <TouchableOpacity
+                            key={f.key}
+                            style={[styles.filterChip, statusFilter === f.key && styles.filterChipActive]}
+                            onPress={() => setStatusFilter(f.key)}
+                        >
+                            <Text style={[styles.filterChipText, statusFilter === f.key && styles.filterChipTextActive]}>
+                                {f.label}
+                            </Text>
+                        </TouchableOpacity>
+                    ))}
+                </View>
+
+                {/* List */}
+                {isLoading && page === 1 ? (
+                    <View style={styles.centerContainer}>
+                        <ActivityIndicator size="large" color="#E50914" />
+                    </View>
+                ) : animeList.length === 0 ? (
+                    <View style={styles.centerContainer}>
+                        <Ionicons name="film-outline" size={64} color="#333333" />
+                        <Text style={styles.emptyTitle}>
+                            {searchQuery || statusFilter !== 'all' ? 'No se encontraron resultados' : 'No hay animes registrados todavía'}
+                        </Text>
+                        <Text style={styles.emptyText}>
+                            {searchQuery || statusFilter !== 'all'
+                                ? 'Prueba con otro título o ajusta los filtros.'
+                                : 'Crea tu primer anime para empezar a gestionar episodios.'}
+                        </Text>
+                        {!searchQuery && statusFilter === 'all' && (
+                            <TouchableOpacity
+                                style={styles.emptyButton}
+                                onPress={() => navigation.navigate('AnimeForm', { mode: 'create' })}
+                            >
+                                <Text style={styles.emptyButtonText}>Agregar Anime</Text>
+                            </TouchableOpacity>
+                        )}
+                    </View>
+                ) : (
+                    <FlatList
+                        data={animeList}
+                        renderItem={renderAnimeItem}
+                        keyExtractor={(item) => item.id.toString()}
+                        contentContainerStyle={styles.listContent}
+                        refreshControl={
+                            <RefreshControl
+                                refreshing={refreshing}
+                                onRefresh={handleRefresh}
+                                tintColor="#E50914"
+                                colors={['#E50914']}
+                            />
+                        }
+                        onEndReached={handleLoadMore}
+                        onEndReachedThreshold={0.5}
+                        ListFooterComponent={renderFooter}
+                    />
+                )}
+
+                <Modal visible={detailsVisible} transparent animationType="fade" onRequestClose={() => setDetailsVisible(false)}>
+                    <View style={styles.modalOverlay}>
+                        <View style={styles.modalCard}>
+                            <View style={styles.modalHeader}>
+                                <Text style={styles.modalTitle} numberOfLines={1}>{selectedAnime?.title || 'Detalle'}</Text>
+                                <TouchableOpacity onPress={() => setDetailsVisible(false)} style={styles.modalClose}>
+                                    <Ionicons name="close" size={22} color="#FFFFFF" />
+                                </TouchableOpacity>
+                            </View>
+
+                            {!!selectedAnime?.banner_url && (
+                                <Image source={{ uri: selectedAnime.banner_url }} style={styles.banner} resizeMode="cover" />
+                            )}
+
+                            <View style={styles.modalBody}>
+                                <View style={styles.detailRow}>
+                                    <View style={styles.detailThumbWrap}>
+                                        {selectedAnime?.poster_url ? (
+                                            <Image source={{ uri: selectedAnime.poster_url }} style={styles.detailThumb} resizeMode="cover" />
+                                        ) : (
+                                            <View style={styles.thumbFallback}>
+                                                <Ionicons name="image-outline" size={18} color="#666666" />
+                                            </View>
+                                        )}
+                                    </View>
+                                    <View style={styles.detailMain}>
+                                        <View style={styles.detailBadges}>
+                                            <View style={[styles.badge, getStatusBadgeStyle(selectedAnime?.status)]}>
+                                                <Text style={[styles.badgeText, getStatusTextStyle(selectedAnime?.status)]}>
+                                                    {selectedAnime?.status || 'Unknown'}
+                                                </Text>
+                                            </View>
+                                            <View style={styles.softBadge}>
+                                                <Text style={styles.softBadgeText}>{getEpisodeLabel(selectedAnime || {})}</Text>
+                                            </View>
+                                        </View>
+                                        {!!formatGenres(selectedAnime?.genres) && (
+                                            <Text style={styles.detailMeta} numberOfLines={2}>{formatGenres(selectedAnime?.genres)}</Text>
+                                        )}
+                                        {!!selectedAnime?.created_at && (
+                                            <Text style={styles.detailMetaMuted} numberOfLines={1}>Creado: {formatCreatedAt(selectedAnime.created_at)}</Text>
+                                        )}
+                                    </View>
+                                </View>
+
+                                {!!selectedAnime?.description && (
+                                    <Text style={styles.detailDesc} numberOfLines={6}>{selectedAnime.description}</Text>
+                                )}
+
+                                <View style={styles.modalActions}>
+                                    <TouchableOpacity
+                                        style={[styles.actionPill, styles.actionPrimary, styles.modalActionPrimary]}
+                                        onPress={() => {
+                                            const a = selectedAnime;
+                                            setDetailsVisible(false);
+                                            if (a?.id) navigation.navigate('EpisodeManager', { animeId: a.id, animeTitle: a.title });
+                                        }}
+                                    >
+                                        <Ionicons name="albums-outline" size={16} color="#FFFFFF" />
+                                        <Text style={styles.actionPrimaryText}>Gestionar episodios</Text>
+                                    </TouchableOpacity>
+
+                                    <TouchableOpacity
+                                        style={[styles.actionPill, styles.modalActionSecondary]}
+                                        onPress={() => {
+                                            const a = selectedAnime;
+                                            setDetailsVisible(false);
+                                            if (a?.id) navigation.navigate('AnimeForm', { mode: 'edit', animeId: a.id });
+                                        }}
+                                    >
+                                        <Ionicons name="pencil" size={16} color="#FFFFFF" />
+                                        <Text style={styles.modalActionSecondaryText}>Editar</Text>
+                                    </TouchableOpacity>
+                                </View>
+                            </View>
+                        </View>
+                    </View>
+                </Modal>
+            </SafeAreaView>
+        </AdminShell>
     );
 }
 
 function getStatusBadgeStyle(status: string) {
     switch (status) {
-        case 'Airing':
-            return { backgroundColor: '#d1fae5' };
-        case 'Finished':
-            return { backgroundColor: '#fef3c7' };
-        case 'Upcoming':
-            return { backgroundColor: '#fee2e2' };
-        default:
-            return { backgroundColor: '#f3f4f6' };
+        case 'Airing': return { backgroundColor: 'rgba(46, 204, 113, 0.15)' };
+        case 'Finished': return { backgroundColor: 'rgba(52, 152, 219, 0.15)' };
+        case 'Upcoming': return { backgroundColor: 'rgba(241, 196, 15, 0.15)' };
+        default: return { backgroundColor: '#333333' };
+    }
+}
+
+function getStatusTextStyle(status: string) {
+    switch (status) {
+        case 'Airing': return { color: '#2ecc71' };
+        case 'Finished': return { color: '#3498db' };
+        case 'Upcoming': return { color: '#f1c40f' };
+        default: return { color: '#B3B3B3' };
     }
 }
 
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        backgroundColor: '#F8F9FA',
+        backgroundColor: '#000000',
     },
     header: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        padding: 16,
-        backgroundColor: '#FFFFFF',
-        borderBottomWidth: 1,
-        borderBottomColor: '#e0e0e0',
+        padding: 24,
+        paddingBottom: 16,
+    },
+    headerLeft: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 16,
     },
     backButton: {
         padding: 4,
     },
-    headerTitleContainer: {
-        flex: 1,
-        alignItems: 'center',
-    },
     headerTitle: {
-        fontSize: 20,
-        fontWeight: '600',
-        color: '#0A2342',
+        fontSize: 24,
+        fontWeight: 'bold',
+        color: '#FFFFFF',
+        letterSpacing: -0.5,
     },
     addButton: {
-        padding: 4,
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#E50914',
+        paddingHorizontal: 16,
+        paddingVertical: 10,
+        borderRadius: 4,
+        gap: 6,
+    },
+    addButtonText: {
+        color: '#FFFFFF',
+        fontWeight: '600',
+        fontSize: 14,
     },
     searchContainer: {
         flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: '#FFFFFF',
-        margin: 16,
+        backgroundColor: '#141414',
+        marginHorizontal: 24,
+        marginBottom: 10,
         paddingHorizontal: 16,
-        paddingVertical: 12,
-        borderRadius: 12,
+        paddingVertical: 10,
+        borderRadius: 8,
         borderWidth: 1,
-        borderColor: '#e0e0e0',
+        borderColor: '#333333',
     },
     searchIcon: {
-        marginRight: 8,
+        marginRight: 10,
     },
     searchInput: {
         flex: 1,
-        fontSize: 16,
-        color: '#1a1a1a',
+        fontSize: 15,
+        color: '#FFFFFF',
     },
-    loadingContainer: {
-        flex: 1,
-        justifyContent: 'center',
-        alignItems: 'center',
-    },
-    emptyContainer: {
+    centerContainer: {
         flex: 1,
         justifyContent: 'center',
         alignItems: 'center',
         padding: 32,
     },
     emptyText: {
-        fontSize: 16,
-        color: '#666666',
+        fontSize: 15,
+        color: '#808080',
         marginTop: 16,
         textAlign: 'center',
     },
     emptyButton: {
         marginTop: 24,
-        backgroundColor: '#0A2342',
+        backgroundColor: '#E50914',
         paddingHorizontal: 24,
         paddingVertical: 12,
-        borderRadius: 8,
+        borderRadius: 4,
     },
     emptyButtonText: {
         color: '#FFFFFF',
-        fontSize: 16,
-        fontWeight: '500',
+        fontSize: 15,
+        fontWeight: '600',
     },
     listContent: {
-        padding: 16,
+        paddingHorizontal: 24,
+        paddingBottom: 24,
+        gap: 10,
     },
-    animeCard: {
+    filtersRow: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: 10,
+        paddingHorizontal: 24,
+        paddingBottom: 16,
+    },
+    filterChip: {
+        paddingVertical: 8,
+        paddingHorizontal: 12,
+        borderRadius: 999,
+        backgroundColor: '#141414',
+        borderWidth: 1,
+        borderColor: '#262626',
+    },
+    filterChipActive: {
+        backgroundColor: 'rgba(229, 9, 20, 0.12)',
+        borderColor: '#E50914',
+    },
+    filterChipText: {
+        color: '#B3B3B3',
+        fontSize: 13,
+        fontWeight: '600',
+    },
+    filterChipTextActive: {
+        color: '#E50914',
+    },
+    row: {
         flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: '#FFFFFF',
-        padding: 16,
-        borderRadius: 12,
-        marginBottom: 12,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.05,
-        shadowRadius: 4,
-        elevation: 2,
+        backgroundColor: '#141414',
+        paddingVertical: 12,
+        paddingHorizontal: 12,
+        borderRadius: 8,
+        borderWidth: 1,
+        borderColor: '#262626',
     },
-    animeInfo: {
+    rowHovered: {
+        borderColor: '#404040',
+        backgroundColor: '#1a1a1a',
+        transform: [{ translateY: -2 }],
+    },
+    thumbWrap: {
+        width: 44,
+        height: 64,
+        borderRadius: 6,
+        overflow: 'hidden',
+        backgroundColor: '#0b0b0b',
+        borderWidth: 1,
+        borderColor: '#262626',
+        marginRight: 12,
+    },
+    thumb: {
+        width: '100%',
+        height: '100%',
+    },
+    thumbFallback: {
+        width: '100%',
+        height: '100%',
+        justifyContent: 'center',
+        alignItems: 'center',
+        backgroundColor: '#0b0b0b',
+    },
+    main: {
         flex: 1,
     },
-    animeTitle: {
-        fontSize: 16,
-        fontWeight: '600',
-        color: '#1a1a1a',
-        marginBottom: 4,
-    },
-    animeSubtitle: {
-        fontSize: 13,
-        color: '#666666',
-        marginBottom: 8,
-    },
-    animeMetadata: {
+    titleRow: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 12,
+        gap: 10,
+        marginBottom: 6,
+    },
+    title: {
+        flex: 1,
+        fontSize: 15,
+        fontWeight: '700',
+        color: '#FFFFFF',
+        letterSpacing: -0.2,
     },
     badge: {
-        paddingHorizontal: 10,
-        paddingVertical: 4,
-        borderRadius: 12,
+        paddingHorizontal: 8,
+        paddingVertical: 3,
+        borderRadius: 4,
     },
     badgeText: {
         fontSize: 11,
-        fontWeight: '600',
-        color: '#065f46',
+        fontWeight: '700',
+        textTransform: 'uppercase',
     },
-    episodeCount: {
-        fontSize: 13,
-        color: '#666666',
-    },
-    actions: {
+    metaRow: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 12,
+        flexWrap: 'wrap',
+        gap: 8,
     },
-    actionButton: {
+    metaText: {
+        fontSize: 13,
+        color: '#B3B3B3',
+    },
+    metaMuted: {
+        fontSize: 13,
+        color: '#808080',
+    },
+    metaDot: {
+        color: '#404040',
+        fontSize: 12,
+        marginHorizontal: 2,
+    },
+    actionGroup: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+    },
+    actionPill: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+        paddingVertical: 8,
+        paddingHorizontal: 10,
+        borderRadius: 999,
+        borderWidth: 1,
+        borderColor: '#262626',
+        backgroundColor: '#0b0b0b',
+    },
+    actionPrimary: {
+        backgroundColor: '#E50914',
+        borderColor: '#E50914',
+    },
+    actionPrimaryText: {
+        color: '#FFFFFF',
+        fontSize: 13,
+        fontWeight: '800',
+        letterSpacing: -0.2,
+    },
+    iconButton: {
         padding: 8,
+        borderRadius: 4,
+        backgroundColor: '#262626',
+    },
+    emptyTitle: {
+        fontSize: 16,
+        color: '#FFFFFF',
+        fontWeight: '700',
+        marginTop: 16,
+        textAlign: 'center',
+    },
+    modalOverlay: {
+        flex: 1,
+        backgroundColor: 'rgba(0,0,0,0.82)',
+        justifyContent: 'center',
+        alignItems: 'center',
+        padding: 24,
+    },
+    modalCard: {
+        width: '100%',
+        maxWidth: 820,
+        backgroundColor: '#0b0b0b',
+        borderRadius: 12,
+        borderWidth: 1,
+        borderColor: '#262626',
+        overflow: 'hidden',
+    },
+    modalHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        paddingHorizontal: 16,
+        paddingVertical: 14,
+        borderBottomWidth: 1,
+        borderBottomColor: '#262626',
+    },
+    modalTitle: {
+        flex: 1,
+        color: '#FFFFFF',
+        fontSize: 16,
+        fontWeight: '800',
+        marginRight: 12,
+    },
+    modalClose: {
+        width: 34,
+        height: 34,
+        borderRadius: 8,
+        backgroundColor: '#141414',
+        borderWidth: 1,
+        borderColor: '#262626',
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    banner: {
+        width: '100%',
+        height: 160,
+        backgroundColor: '#141414',
+    },
+    modalBody: {
+        padding: 16,
+    },
+    detailRow: {
+        flexDirection: 'row',
+        gap: 14,
+        marginBottom: 12,
+    },
+    detailThumbWrap: {
+        width: 92,
+        height: 130,
+        borderRadius: 10,
+        overflow: 'hidden',
+        backgroundColor: '#141414',
+        borderWidth: 1,
+        borderColor: '#262626',
+    },
+    detailThumb: {
+        width: '100%',
+        height: '100%',
+    },
+    detailMain: {
+        flex: 1,
+        justifyContent: 'center',
+        gap: 8,
+    },
+    detailBadges: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: 8,
+        alignItems: 'center',
+    },
+    softBadge: {
+        paddingHorizontal: 10,
+        paddingVertical: 4,
+        borderRadius: 999,
+        backgroundColor: '#141414',
+        borderWidth: 1,
+        borderColor: '#262626',
+    },
+    softBadgeText: {
+        color: '#B3B3B3',
+        fontSize: 12,
+        fontWeight: '700',
+    },
+    detailMeta: {
+        color: '#B3B3B3',
+        fontSize: 13,
+        lineHeight: 18,
+    },
+    detailMetaMuted: {
+        color: '#808080',
+        fontSize: 12,
+    },
+    detailDesc: {
+        color: '#B3B3B3',
+        fontSize: 13,
+        lineHeight: 19,
+        marginTop: 6,
+    },
+    modalActions: {
+        flexDirection: 'row',
+        gap: 10,
+        marginTop: 14,
+        flexWrap: 'wrap',
+    },
+    modalActionPrimary: {
+        paddingHorizontal: 14,
+        paddingVertical: 10,
+    },
+    modalActionSecondary: {
+        backgroundColor: '#141414',
+        borderColor: '#262626',
+        paddingHorizontal: 14,
+        paddingVertical: 10,
+    },
+    modalActionSecondaryText: {
+        color: '#FFFFFF',
+        fontSize: 13,
+        fontWeight: '800',
+        letterSpacing: -0.2,
     },
 });

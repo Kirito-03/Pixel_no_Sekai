@@ -20,7 +20,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../theme';
 import { useAuth } from '../contexts/AuthContext';
-import { loginEmail, requestPasswordReset, loginGoogle as loginGoogleProxy } from '../services/auth';
+import { loginEmail, requestPasswordReset, loginGoogle as loginGoogleProxy, getUserDetails } from '../services/auth';
 import * as GoogleAuth from 'expo-auth-session/providers/google';
 import Constants from 'expo-constants';
 import { GoogleAuthProvider, signInWithCredential } from 'firebase/auth';
@@ -66,8 +66,9 @@ export default function LoginScreen({ navigation }: any) {
 
     try {
       const cred = await loginEmail(email.trim().toLowerCase(), password);
-      await login({ uid: cred.user.uid, email: cred.user.email || email.trim().toLowerCase() });
-      navigation.replace('SeleccionPerfil');
+      const userDetails = await getUserDetails();
+      await login({ uid: cred.user.uid, email: cred.user.email || email.trim().toLowerCase(), role: userDetails.role });
+      // navigation.replace('SeleccionPerfil'); // Eliminado: AppNavigator maneja esto automáticamente
       return;
     } catch (error: any) {
       const code = error?.code || '';
@@ -96,20 +97,23 @@ export default function LoginScreen({ navigation }: any) {
     try {
       if (Platform.OS === 'web') {
         const cred = await loginGoogleProxy();
-        await login({ uid: cred.user.uid, email: cred.user.email || '' });
-        navigation.replace('SeleccionPerfil');
+        const userDetails = await getUserDetails();
+        await login({ uid: cred.user.uid, email: cred.user.email || '', role: userDetails.role });
+        // navigation.replace('SeleccionPerfil'); // Eliminado
         return;
       }
       const res = await googlePromptAsync();
       if (res?.type === 'success' && res?.params?.id_token) {
         const credential = GoogleAuthProvider.credential(res.params.id_token as string);
         const cred = await signInWithCredential(auth, credential);
-        await login({ uid: cred.user.uid, email: cred.user.email || '' });
-        navigation.replace('SeleccionPerfil');
+        const userDetails = await getUserDetails();
+        await login({ uid: cred.user.uid, email: cred.user.email || '', role: userDetails.role });
+        // navigation.replace('SeleccionPerfil'); // Eliminado
       } else {
         const cred = await loginGoogleProxy();
-        await login({ uid: cred.user.uid, email: cred.user.email || '' });
-        navigation.replace('SeleccionPerfil');
+        const userDetails = await getUserDetails();
+        await login({ uid: cred.user.uid, email: cred.user.email || '', role: userDetails.role });
+        // navigation.replace('SeleccionPerfil'); // Eliminado
       }
     } catch (error: any) {
       const msg = error?.message || 'No se pudo iniciar sesión con Google';

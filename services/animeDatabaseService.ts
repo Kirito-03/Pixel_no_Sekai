@@ -44,7 +44,7 @@ export interface DatabaseSeason {
 }
 
 /**
- * Servicio para manejar animes en la base de datos MySQL
+ * Servicio para manejar animes en la base de datos PostgreSQL
  */
 export class AnimeDatabaseService {
   private static readonly API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000/api';

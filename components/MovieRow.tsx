@@ -108,7 +108,6 @@ export default function MovieRow({ title, movies, onMoviePress }: Props) {
     list: {
       paddingHorizontal: isSmallScreen ? spacing.sm : spacing.md,
       paddingVertical: isSmallScreen ? 6 : 4,
-      minHeight: isSmallScreen ? 200 : 180,
     },
     arrow: {
       position: 'absolute' as const,

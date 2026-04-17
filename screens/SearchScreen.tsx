@@ -1,13 +1,13 @@
 import React, { useRef, useState, useEffect } from 'react';
 import { View, TextInput, FlatList, StyleSheet, Text, TouchableOpacity, Animated, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { searchAllContent, getMovieDetails } from '../services/api';
 import MovieCard from '../components/MovieCard';
 import MovieModal from '../components/MovieModal';
 import { colors, spacing, shadows, borderRadius } from '../theme';
-import { MovieDetail, ContentItem } from '../types';
+import { ContentItem } from '../types';
 import { useProfile } from '../contexts/ProfileContext';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { catalogService } from '../services/catalogService';
 
 export default function SearchScreen() {
   const { adultContentEnabled, currentProfile } = useProfile();
@@ -91,7 +91,7 @@ export default function SearchScreen() {
       // Buscar y limitar a 8 sugerencias para evitar ruido
       const localQuery = text;
       const normalizedQuery = localQuery.trim().toLowerCase();
-      const all = await searchAllContent(normalizedQuery);
+      const all = (await catalogService.searchAnime(normalizedQuery)).map(mapCatalogAnimeToContentItem);
       // Mantener títulos únicos por tipo para variedad
       const seen = new Set<string>();
       const unique = all.filter((item) => {
@@ -99,8 +99,6 @@ export default function SearchScreen() {
         const key = `${titleKey}-${item.type}`;
         if (seen.has(key)) return false;
         seen.add(key);
-        // Filtrar +18 en anime si está deshabilitado
-        if (item.type === 'anime' && !adultContentEnabled && item.isAdult) return false;
         return true;
       }).slice(0, 8);
       // Evitar sobrescribir resultados si el usuario ya cambió el texto
@@ -126,11 +124,7 @@ export default function SearchScreen() {
       try {
         const localQuery = text;
         const normalizedQuery = localQuery.trim().toLowerCase();
-        const allContent = await searchAllContent(normalizedQuery);
-        const filtered = allContent.filter(item => {
-          if (item.type === 'anime' && !adultContentEnabled && item.isAdult) return false;
-          return true;
-        });
+        const filtered = (await catalogService.searchAnime(normalizedQuery)).map(mapCatalogAnimeToContentItem);
         if (latestQueryRef.current === localQuery) {
           setResults(filtered);
         }
@@ -333,6 +327,21 @@ export default function SearchScreen() {
       />
     </View>
   );
+}
+
+function mapCatalogAnimeToContentItem(anime: any): ContentItem {
+  return {
+    id: Number(anime.id),
+    type: 'anime',
+    title: anime.title || 'Sin título',
+    overview: anime.description || '',
+    poster_path: anime.poster_url || '',
+    backdrop_path: anime.banner_url || anime.poster_url || '',
+    release_date: anime.release_date || '',
+    vote_average: typeof anime.rating === 'number' ? anime.rating : 0,
+    source: 'anilist',
+    genres: Array.isArray(anime.genres) ? anime.genres : [],
+  };
 }
 
 const styles = StyleSheet.create({

@@ -7,7 +7,6 @@
     "orientation": "default",
     "icon": "./assets/icon-arle.png",
     "userInterfaceStyle": "light",
-    "newArchEnabled": true,
     "splash": {
       "image": "./assets/icon-arle.png",
       "resizeMode": "contain",
@@ -21,7 +20,6 @@
         "foregroundImage": "./assets/icon-arle.png",
         "backgroundColor": "#ffffff"
       },
-      "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
       "package": "com.dragonflux.pixelnosekai"
     },

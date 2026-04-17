@@ -189,6 +189,17 @@ export default function FeaturedMovie({ movie, onWatch, onAddList }: Props) {
             
             {/* Info: Puntos, Año, Duración */}
             <View style={dynamicStyles.info}>
+              {isAnime && (
+                <View style={{
+                  backgroundColor: '#e50914',
+                  borderRadius: 3,
+                  paddingHorizontal: 6,
+                  paddingVertical: 2,
+                  marginRight: isSmallScreen ? 10 : 15,
+                }}>
+                  <Text style={{ color: '#fff', fontSize: isSmallScreen ? 11 : 13, fontWeight: 'bold' }}>ANIME</Text>
+                </View>
+              )}
               <Text style={dynamicStyles.points}>{voteAverage} puntos</Text>
               <Text style={dynamicStyles.year}>{releaseYear}</Text>
               {!isAnime && (movie as MovieDetail).runtime && (

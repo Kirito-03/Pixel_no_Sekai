@@ -13,7 +13,6 @@ import {
 import { WebView } from 'react-native-webview';
 import { Ionicons } from '@expo/vector-icons';
 import { AnimeEpisode, VideoSource } from '../types';
-import { getEpisodeSources, isHLSSource } from '../services/animeStreamingService';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 
@@ -77,16 +76,47 @@ const EpisodePlayer: React.FC<EpisodePlayerProps> = ({
     const isM3U8 = /\.m3u8(\?|$)/i.test(url);
     let hls: any = null;
     function initHls() {
-      hls = new (window as any).Hls({ enableWorker: true });
-      hls.loadSource(url);
-      hls.attachMedia(videoEl);
-      hls.on((window as any).Hls?.Events?.ERROR, (_event: any, data: any) => {
+      const HlsCtor = (window as any).Hls;
+      if (!HlsCtor?.isSupported?.()) {
+        setError('HLS no soportado en este navegador');
+        return;
+      }
+
+      hls = new HlsCtor({
+        enableWorker: true,
+        lowLatencyMode: false,
+      });
+
+      hls.on(HlsCtor.Events.MANIFEST_LOADING, () => {
+        console.log('[HLS][web] MANIFEST_LOADING', { url });
+      });
+      hls.on(HlsCtor.Events.MANIFEST_PARSED, (_event: any, data: any) => {
+        console.log('[HLS][web] MANIFEST_PARSED', { levels: data?.levels?.length, url });
+      });
+      hls.on(HlsCtor.Events.FRAG_LOADED, (_event: any, data: any) => {
+        const fragUrl = data?.frag?.url || data?.frag?.relurl;
+        if (fragUrl) console.log('[HLS][web] FRAG_LOADED', fragUrl);
+      });
+      hls.on(HlsCtor.Events.ERROR, (_event: any, data: any) => {
+        const code = data?.response?.code;
+        const errUrl = data?.response?.url || data?.url;
+        console.log('[HLS][web] ERROR', {
+          type: data?.type,
+          details: data?.details,
+          fatal: data?.fatal,
+          code,
+          url: errUrl,
+        });
         if (data?.fatal) {
-          setError('Error al reproducir HLS');
+          setError(`Error HLS: ${data?.details || 'fatal'}${code ? ` (${code})` : ''}`);
         }
       });
+
+      hls.loadSource(url);
+      hls.attachMedia(videoEl);
     }
     if (isM3U8) {
+      console.log('[EpisodePlayer][web] m3u8 url', url);
       if (videoEl.canPlayType && videoEl.canPlayType('application/vnd.apple.mpegurl')) {
         videoEl.src = url;
         videoEl.load();
@@ -97,7 +127,7 @@ const EpisodePlayer: React.FC<EpisodePlayerProps> = ({
         script.src = 'https://cdn.jsdelivr.net/npm/hls.js@latest';
         script.async = true;
         script.onload = initHls;
-        script.onerror = () => setError('HLS no soportado');
+        script.onerror = () => setError('No se pudo cargar hls.js');
         document.head.appendChild(script);
       }
     }
@@ -115,30 +145,15 @@ const EpisodePlayer: React.FC<EpisodePlayerProps> = ({
       
       console.log('Loading sources for episode:', episode.id);
       
-      // Intentar primero con URL directa solo si parece ser un stream de video (excluye mkv para forzar HLS)
-      if (episode.url && /\.(m3u8|mp4|webm|mov)(\?|$)/i.test(episode.url)) {
-        console.log('Using direct episode video URL:', episode.url);
+      if (episode.url) {
+        console.log('Using direct episode URL:', episode.url);
         const directSources: VideoSource[] = [{ url: episode.url }];
         setSources(directSources);
         setSelectedSource(directSources[0]);
         return;
       }
-      
-      try {
-        const episodeSources = await getEpisodeSources(episode.id, animeTitle, seasonNumber, episode.number);
-        console.log('Episode sources received:', episodeSources);
-        
-        if (episodeSources.length > 0) {
-          setSources(episodeSources);
-          setSelectedSource(episodeSources[0]); // Usar directamente la primera fuente
-          console.log('Using episode sources:', episodeSources[0].url);
-          return;
-        }
-      } catch (apiError) {
-        console.log('API error, using fallback sources:', apiError);
-      }
-      
-      setError('No se encontraron fuentes reales para este episodio');
+
+      setError('No hay una fuente disponible para este episodio');
       return;
       
     } catch (err) {
@@ -218,8 +233,10 @@ const EpisodePlayer: React.FC<EpisodePlayerProps> = ({
               }
             }}
             onError={(e) => {
-              console.error('Video error:', e);
-              setError('Error al reproducir el video');
+              const el = webVideoRef.current as any;
+              const mediaError = el?.error;
+              console.error('Video error:', { event: e, mediaError, url: videoUrl });
+              setError(`Error al reproducir el video${mediaError?.code ? ` (code ${mediaError.code})` : ''}`);
             }}
           >
             {!isHls && (mime ? (
@@ -368,11 +385,29 @@ const EpisodePlayer: React.FC<EpisodePlayerProps> = ({
                   video.src = '${safeVideoUrl}';
                   video.load();
                 } else if (window.Hls) {
-                  const hls = new window.Hls({ enableWorker: true });
+                  if (window.Hls.isSupported && !window.Hls.isSupported()) {
+                    loading.innerHTML = 'HLS no soportado';
+                    window.ReactNativeWebView?.postMessage(JSON.stringify({ action: 'hls_error', error: 'HLS no soportado' }));
+                    return;
+                  }
+                  const hls = new window.Hls({ enableWorker: true, lowLatencyMode: false });
+                  hls.on(window.Hls.Events.ERROR, function (_event, data) {
+                    var code = data && data.response && data.response.code;
+                    var errUrl = (data && data.response && data.response.url) || data.url;
+                    console.log('[HLS][mobile-webview] ERROR', data);
+                    window.ReactNativeWebView?.postMessage(JSON.stringify({
+                      action: 'hls_error',
+                      error: 'Error HLS: ' + (data.details || 'unknown') + (code ? (' (' + code + ')') : ''),
+                      details: data.details,
+                      code: code,
+                      url: errUrl
+                    }));
+                  });
                   hls.loadSource('${safeVideoUrl}');
                   hls.attachMedia(video);
                 } else {
                   loading.innerHTML = 'HLS no soportado';
+                  window.ReactNativeWebView?.postMessage(JSON.stringify({ action: 'hls_error', error: 'HLS no soportado' }));
                 }
               } else {
                 video.load();
@@ -422,6 +457,10 @@ const EpisodePlayer: React.FC<EpisodePlayerProps> = ({
                 break;
               case 'error':
                 setError(data.error || 'Error al reproducir el video');
+                break;
+              case 'hls_error':
+                console.log('[EpisodePlayer][WebView] hls_error', data);
+                setError(data.error || 'Error HLS');
                 break;
             }
           } catch (err) {

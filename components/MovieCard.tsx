@@ -66,7 +66,7 @@ export default function MovieCard({ movie, onPress }: Props) {
     Animated.parallel([
       Animated.spring(scaleAnim, {
         toValue: 1.05,
-        useNativeDriver: true,
+        useNativeDriver: false, // Changed to false to avoid native/JS driver conflict on Android
         friction: 3,
       }),
       Animated.spring(shadowAnim, {
@@ -81,7 +81,7 @@ export default function MovieCard({ movie, onPress }: Props) {
     Animated.parallel([
       Animated.spring(scaleAnim, {
         toValue: 1,
-        useNativeDriver: true,
+        useNativeDriver: false, // Changed to false to avoid native/JS driver conflict on Android
         friction: 3,
       }),
       Animated.spring(shadowAnim, {

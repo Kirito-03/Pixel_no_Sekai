@@ -5,6 +5,7 @@ import { subscribeAuth, logout as firebaseLogout } from '../services/auth';
 interface User {
   uid: string;
   email: string | null;
+  role: 'user' | 'admin';
 }
 
 interface AuthContextType {
@@ -35,7 +36,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       }
       subscribeAuth(async (firebaseUser) => {
         if (firebaseUser) {
-          const u: User = { uid: firebaseUser.uid, email: firebaseUser.email };
+          const u: User = { uid: firebaseUser.uid, email: firebaseUser.email, role: 'user' }; // Default role
           setUser(u);
           await AsyncStorage.setItem('userSession', JSON.stringify(u));
         } else {

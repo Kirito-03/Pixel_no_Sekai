@@ -2,10 +2,10 @@ import express from 'express';
 import passport from 'passport';
 import { Strategy as GoogleStrategy } from 'passport-google-oauth20';
 import jwt from 'jsonwebtoken';
-import pg from 'pg';
 
 const router = express.Router();
-const { Pool } = pg;
+
+import pool from '../db.js';
 
 // Configurar Google OAuth Strategy
 passport.use(new GoogleStrategy({
@@ -15,36 +15,23 @@ passport.use(new GoogleStrategy({
 },
     async (accessToken, refreshToken, profile, done) => {
         try {
-            // Verificar que el email esté en la whitelist
-            const allowedEmails = (process.env.ADMIN_EMAILS || '').split(',').map(e => e.trim());
-            const email = profile.emails[0].value;
-
-            if (!allowedEmails.includes(email)) {
-                return done(null, false, { message: 'Email no autorizado' });
-            }
-
-            // Guardar/actualizar admin en la base de datos
-            const pool = new Pool({
-                host: process.env.DB_HOST || 'localhost',
-                port: Number(process.env.DB_PORT || 5432),
-                user: process.env.DB_USER || 'root',
-                password: process.env.DB_PASSWORD || '',
-                database: process.env.DB_NAME || 'bd_netflix',
-            });
+            const email = String(profile.emails?.[0]?.value || '').trim().toLowerCase();
+            const adminEmails = (process.env.ADMIN_EMAILS || '')
+                .split(',')
+                .map(e => e.trim().toLowerCase())
+                .filter(Boolean);
+            const role = adminEmails.includes(email) ? 'admin' : 'user';
 
             const result = await pool.query(
-                `INSERT INTO admin_users (google_id, email, name, picture, last_login)
-         VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
-         ON CONFLICT (google_id) 
-         DO UPDATE SET 
-           name = EXCLUDED.name,
-           picture = EXCLUDED.picture,
-           last_login = CURRENT_TIMESTAMP
-         RETURNING id, email, name, picture`,
-                [profile.id, email, profile.displayName, profile.photos[0]?.value]
+                `INSERT INTO usuarios (email, password_hash, role)
+                 VALUES ($1, $2, $3)
+                 ON CONFLICT (email) 
+                 DO UPDATE SET 
+                   email = EXCLUDED.email,
+                   role = CASE WHEN EXCLUDED.role = 'admin' THEN 'admin' ELSE usuarios.role END
+                 RETURNING id, email, role`,
+                [email, 'google_auth', role]
             );
-
-            await pool.end();
 
             return done(null, result.rows[0]);
         } catch (error) {
@@ -88,13 +75,24 @@ router.get('/google/callback',
     }),
     (req, res) => {
         try {
+            if (req.user?.role !== 'admin') {
+                const platform = req.query.platform;
+                const redirectUri = req.query.redirect_uri;
+                if (platform === 'mobile' && redirectUri) {
+                    const separator = redirectUri.includes('?') ? '&' : '?';
+                    res.redirect(`${redirectUri}${separator}error=unauthorized`);
+                } else {
+                    res.redirect('/admin?error=unauthorized');
+                }
+                return;
+            }
+
             // Generar JWT
             const token = jwt.sign(
                 {
                     id: req.user.id,
                     email: req.user.email,
-                    name: req.user.name,
-                    picture: req.user.picture
+                    role: req.user.role
                 },
                 process.env.JWT_SECRET,
                 { expiresIn: '24h' }
@@ -138,6 +136,43 @@ router.get('/google/callback',
 
 import axios from 'axios';
 
+let firebaseCertsCache = { certs: null, expiresAt: 0 };
+
+async function getFirebaseCerts() {
+    const now = Date.now();
+    if (firebaseCertsCache.certs && firebaseCertsCache.expiresAt > now) {
+        return firebaseCertsCache.certs;
+    }
+    const response = await axios.get('https://www.googleapis.com/robot/v1/metadata/x509/securetoken@system.gserviceaccount.com');
+    const cacheControl = response.headers['cache-control'] || '';
+    const match = cacheControl.match(/max-age=(\d+)/);
+    const maxAge = match ? Number(match[1]) * 1000 : 3600 * 1000;
+    firebaseCertsCache = { certs: response.data, expiresAt: now + maxAge };
+    return firebaseCertsCache.certs;
+}
+
+async function verifyFirebaseIdToken(idToken) {
+    const decoded = jwt.decode(idToken, { complete: true });
+    if (!decoded || !decoded.header?.kid) {
+        throw new Error('Token inválido');
+    }
+    const certs = await getFirebaseCerts();
+    const cert = certs[decoded.header.kid];
+    if (!cert) {
+        throw new Error('Certificado no encontrado');
+    }
+    const payload = jwt.verify(idToken, cert, { algorithms: ['RS256'] });
+    const projectId = process.env.FIREBASE_PROJECT_ID || process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID;
+    if (projectId) {
+        if (payload.aud !== projectId) throw new Error('Audiencia inválida');
+        if (payload.iss !== `https://securetoken.google.com/${projectId}`) throw new Error('Emisor inválido');
+    } else {
+        if (!payload.aud) throw new Error('Audiencia inválida');
+        if (!String(payload.iss || '').startsWith('https://securetoken.google.com/')) throw new Error('Emisor inválido');
+    }
+    return payload;
+}
+
 /**
  * POST /auth/admin/firebase-login
  * Inicia sesión admin usando un token de Firebase (Client SDK)
@@ -149,46 +184,30 @@ router.post('/admin/firebase-login', async (req, res) => {
             return res.status(400).json({ message: 'Token requerido' });
         }
 
-        // Validar token contra Google
-        // Esto verifica firma y expiración sin necesitar service-account (para simplicidad)
-        const verifyUrl = `https://oauth2.googleapis.com/tokeninfo?id_token=${idToken}`;
-        const response = await axios.get(verifyUrl);
-        const payload = response.data;
-
-        // Verificar email en whitelist
-        const allowedEmails = (process.env.ADMIN_EMAILS || '').split(',').map(e => e.trim());
-        const email = payload.email;
-
-        if (!allowedEmails.includes(email)) {
-            return res.status(403).json({ message: 'Email no autorizado' });
+        const payload = await verifyFirebaseIdToken(idToken);
+        const email = String(payload.email || '').trim().toLowerCase();
+        if (!email) {
+            return res.status(401).json({ message: 'Token inválido o expirado' });
+        }
+        const adminEmails = (process.env.ADMIN_EMAILS || '')
+            .split(',')
+            .map(e => e.trim().toLowerCase())
+            .filter(Boolean);
+        const role = adminEmails.includes(email) ? 'admin' : 'user';
+        if (role !== 'admin') {
+            return res.status(403).json({ message: 'Email no autorizado para acceso de administrador', code: 'UNAUTHORIZED' });
         }
 
-        // Guardar/Actualizar en BD
-        const pool = new (require('pg').Pool)({
-            host: process.env.DB_HOST || 'localhost',
-            port: Number(process.env.DB_PORT || 5432),
-            user: process.env.DB_USER || 'root',
-            password: process.env.DB_PASSWORD || '',
-            database: process.env.DB_NAME || 'bd_netflix',
-        });
-
-        // Usamos el 'sub' de firebase como google_id o similar
-        const googleId = payload.sub;
-        const name = payload.name || email.split('@')[0];
-        const picture = payload.picture || '';
-
         const result = await pool.query(
-            `INSERT INTO admin_users (google_id, email, name, picture, last_login)
-             VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
-             ON CONFLICT (google_id) 
+            `INSERT INTO usuarios (email, password_hash, role)
+             VALUES ($1, $2, $3)
+             ON CONFLICT (email) 
              DO UPDATE SET 
-               name = EXCLUDED.name,
-               picture = EXCLUDED.picture,
-               last_login = CURRENT_TIMESTAMP
-             RETURNING id, email, name, picture`,
-            [googleId, email, name, picture]
+               email = EXCLUDED.email,
+               role = CASE WHEN EXCLUDED.role = 'admin' THEN 'admin' ELSE usuarios.role END
+             RETURNING id, email, role`,
+            [email, 'firebase_auth', role]
         );
-        await pool.end();
 
         const user = result.rows[0];
 
@@ -197,8 +216,7 @@ router.post('/admin/firebase-login', async (req, res) => {
             {
                 id: user.id,
                 email: user.email,
-                name: user.name,
-                picture: user.picture
+                role: user.role
             },
             process.env.JWT_SECRET,
             { expiresIn: '24h' }
@@ -237,7 +255,8 @@ router.get('/admin/me', (req, res) => {
             id: decoded.id,
             email: decoded.email,
             name: decoded.name,
-            picture: decoded.picture
+            picture: decoded.picture,
+            role: decoded.role
         });
     } catch (error) {
         return res.status(401).json({ message: 'Token inválido o expirado' });

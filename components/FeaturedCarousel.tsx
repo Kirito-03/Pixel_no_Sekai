@@ -1,5 +1,5 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { View, FlatList, StyleSheet, useWindowDimensions, Animated } from 'react-native';
+  import React, { useEffect, useRef, useState } from 'react';
+import { View, FlatList, StyleSheet, useWindowDimensions, Animated, Platform, PanResponder } from 'react-native';
 import FeaturedMovie from './FeaturedMovie';
 import { MovieDetail, AnimeDetail } from '../types';
 import { colors } from '../theme';
@@ -20,6 +20,39 @@ export default function FeaturedCarousel({ movies, onWatch }: Props) {
   const listRef = useRef<FlatList<MovieDetail | AnimeDetail>>(null);
   const [currentIndex, setCurrentIndex] = useState(0);
   const progressAnim = useRef(new Animated.Value(0)).current;
+  const fadeAnim = useRef(new Animated.Value(1)).current; // Opacidad para Android fade
+
+  // Gestor de gestos para Android (Swipe)
+  const panResponder = useRef(
+    PanResponder.create({
+      onMoveShouldSetPanResponder: (_, gestureState) => {
+        // Solo capturar si el movimiento horizontal es significativo
+        return Math.abs(gestureState.dx) > 20;
+      },
+      onPanResponderRelease: (_, gestureState) => {
+        if (gestureState.dx > 50) {
+          // Swipe Right -> Anterior
+          setCurrentIndex((prev) => (prev - 1 + movies.length) % movies.length);
+        } else if (gestureState.dx < -50) {
+          // Swipe Left -> Siguiente
+          setCurrentIndex((prev) => (prev + 1) % movies.length);
+        }
+      },
+    })
+  ).current;
+
+  // Efecto de Fade al cambiar índice (Solo Android)
+  useEffect(() => {
+    if (Platform.OS === 'android') {
+      fadeAnim.setValue(0);
+      Animated.timing(fadeAnim, {
+        toValue: 1,
+        duration: 500, // Duración del fade
+        useNativeDriver: true,
+      }).start();
+    }
+  }, [currentIndex, fadeAnim]);
+
 
   // Autoplay: avanza cada 6s si hay más de 1 película
   useEffect(() => {
@@ -28,7 +61,8 @@ export default function FeaturedCarousel({ movies, onWatch }: Props) {
     // Reset progress
     progressAnim.setValue(0);
 
-    // Animate progress bar
+    // Animate progress bar (Solo si no es Android o si el usuario quiere mantener lógica interna)
+    // Aunque ocultamos la barra en Android, el timer sigue contando para cambiar la imagen
     Animated.timing(progressAnim, {
       toValue: 1,
       duration: 6000,
@@ -38,7 +72,9 @@ export default function FeaturedCarousel({ movies, onWatch }: Props) {
     const interval = setInterval(() => {
       setCurrentIndex((prev) => {
         const next = (prev + 1) % movies.length;
-        listRef.current?.scrollToIndex({ index: next, animated: true });
+        if (Platform.OS !== 'android') {
+          listRef.current?.scrollToIndex({ index: next, animated: true });
+        }
         return next;
       });
     }, 6000);
@@ -71,21 +107,34 @@ export default function FeaturedCarousel({ movies, onWatch }: Props) {
 
   return (
     <View style={[styles.container, { width }]}>
-      <FlatList
-        ref={listRef}
-        data={movies}
-        keyExtractor={(item) => String(item.id)}
-        renderItem={({ item }) => (
-          <FeaturedMovie movie={item} onWatch={() => onWatch(item)} />
-        )}
-        horizontal
-        pagingEnabled
-        showsHorizontalScrollIndicator={false}
-        getItemLayout={(_, index) => ({ length: width, offset: width * index, index })}
-        onViewableItemsChanged={onViewableItemsChanged}
-        viewabilityConfig={viewabilityConfig}
-        initialScrollIndex={0}
-      />
+      {Platform.OS === 'android' ? (
+        // --- VISTA ANDROID (FADE) ---
+        <View {...panResponder.panHandlers} style={{ flex: 1 }}>
+          <Animated.View style={{ flex: 1, opacity: fadeAnim }}>
+            <FeaturedMovie
+              movie={movies[currentIndex]}
+              onWatch={() => onWatch(movies[currentIndex])}
+            />
+          </Animated.View>
+        </View>
+      ) : (
+        // --- VISTA WEB/iOS (SLIDE ORIGINAL) ---
+        <FlatList
+          ref={listRef}
+          data={movies}
+          keyExtractor={(item) => String(item.id)}
+          renderItem={({ item }) => (
+            <FeaturedMovie movie={item} onWatch={() => onWatch(item)} />
+          )}
+          horizontal
+          pagingEnabled
+          showsHorizontalScrollIndicator={false}
+          getItemLayout={(_, index) => ({ length: width, offset: width * index, index })}
+          onViewableItemsChanged={onViewableItemsChanged}
+          viewabilityConfig={viewabilityConfig}
+          initialScrollIndex={0}
+        />
+      )}
 
       {/* Indicadores tipo dots con animación */}
       <View style={styles.dotsContainer}>
@@ -108,8 +157,8 @@ export default function FeaturedCarousel({ movies, onWatch }: Props) {
         })}
       </View>
 
-      {/* Progress bar del autoplay */}
-      {movies.length > 1 && (
+      {/* Progress bar del autoplay (Oculto en Android) */}
+      {movies.length > 1 && Platform.OS !== 'android' && (
         <View style={styles.progressBarContainer}>
           <Animated.View
             style={[

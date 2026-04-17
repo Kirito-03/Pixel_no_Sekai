@@ -27,6 +27,7 @@ import { getAnimeDetails, getSimilarAnime, getAnimeImageUrl, getAnimeTitle, getA
 import { createMockStreamingInfo, getAnimeStreamingInfo } from '../services/animeStreamingService';
 import { debugM3U, resetM3UCache } from '../services/m3uParser';
 import databaseService from '../services/databaseService';
+import { catalogService } from '../services/catalogService';
 import { useProfile } from '../contexts/ProfileContext';
 import { useMyList } from '../contexts/MyListContext';
 import EpisodePlayer from './EpisodePlayer';
@@ -194,9 +195,31 @@ export default function AnimeSeriesModal({
       } else if (currentContent.type === 'tv') {
         details = await getTVShowDetails(currentContent.id);
       } else if (currentContent.type === 'anime') {
-        console.log('Loading anime details for ID:', currentContent.id);
-        details = await getAnimeDetails(currentContent.id);
-        console.log('Anime details loaded:', details);
+        const anime = await catalogService.getAnimeById(currentContent.id);
+        details = {
+          id: anime.id,
+          title: {
+            romaji: anime.title,
+            english: anime.title_english || undefined,
+            native: anime.title_japanese || anime.title,
+          },
+          description: anime.description || '',
+          coverImage: {
+            large: anime.poster_url || '',
+            medium: anime.poster_url || '',
+          },
+          bannerImage: anime.banner_url || undefined,
+          startDate: { year: 0 },
+          averageScore: typeof anime.rating === 'number' ? anime.rating : 0,
+          episodes: typeof anime.total_episodes === 'number' ? anime.total_episodes : undefined,
+          status: anime.status || 'UNKNOWN',
+          genres: Array.isArray(anime.genres) ? anime.genres : [],
+          format: 'TV',
+          source: 'anilist',
+          studios: { nodes: [] },
+          characters: { nodes: [] },
+          recommendations: { nodes: [] },
+        } as any;
       } else {
         details = await getMovieDetails(currentContent.id);
       }
@@ -243,75 +266,67 @@ export default function AnimeSeriesModal({
 
   const loadStreamingInfo = async () => {
     if (!currentContent || currentContent.type !== 'anime') return;
-    
-    console.log('Starting to load streaming info for:', currentContent.title);
-    
-    // DEBUG: Verificar funcionamiento del M3U
-    await debugM3U();
-    
+
     setLoadingStreaming(true);
     try {
-      const info = await getAnimeStreamingInfo(String(currentContent.id), currentContent.title);
-      if (info && info.seasons && info.seasons.length > 0) {
-        let desc = '';
-        const baseDesc = (detailData && 'description' in detailData
-          ? (detailData as AnimeDetail).description || ''
-          : currentContent.overview || '');
-        const isSpanish = (text: string) => {
-          const t = (text || '').toLowerCase();
-          if (!t) return false;
-          const marks = ['á','é','í','ó','ú','ñ'];
-          const words = [' el ',' la ',' los ',' las ',' de ',' del ',' y ',' que ',' para ',' con '];
-          const mCount = marks.reduce((c, m) => c + (t.includes(m) ? 1 : 0), 0);
-          const wCount = words.reduce((c, w) => c + (t.includes(w) ? 1 : 0), 0);
-          return mCount + wCount >= 3;
+      const [anime, episodes] = await Promise.all([
+        catalogService.getAnimeById(currentContent.id),
+        catalogService.getAnimeEpisodes(currentContent.id),
+      ]);
+
+      const grouped = new Map<number, AnimeEpisode[]>();
+      for (const ep of episodes) {
+        const season = typeof ep.season === 'number' ? ep.season : 1;
+        const url = ep.stream_url || ep.video_url || undefined;
+        const episodeItem: AnimeEpisode = {
+          id: String(ep.id),
+          number: ep.episode_number,
+          title: ep.title || `Episodio ${ep.episode_number}`,
+          url,
         };
-        if (isSpanish(baseDesc)) {
-          desc = baseDesc;
-        } else {
-          const q = currentContent.title || '';
-          let alt: any = null;
-          if (isAnimeMovie()) {
-            const res = await searchMovies(q).catch(() => []);
-            alt = Array.isArray(res) && res.length ? res[0] : null;
-          } else {
-            const res = await searchTVShows(q).catch(() => []);
-            alt = Array.isArray(res) && res.length ? res[0] : null;
-          }
-          desc = (alt?.overview || baseDesc || '').toString();
-        }
-        const streamingInfo: StreamingInfo = {
-          animeId: info.animeId,
-          title: info.title,
-          description: desc || info.description || currentContent.overview || '',
-          image: info.image || currentContent.poster_path || '',
-          genres: detailData?.genres?.map((g: any) => typeof g === 'string' ? g : g.name) || info.genres || [],
-          status: detailData && 'status' in detailData ? (detailData as any).status : info.status || 'UNKNOWN',
-          totalEpisodes: info.totalEpisodes,
-          seasons: info.seasons
-        };
-        setStreamingInfo(streamingInfo);
-        setSelectedSeason(streamingInfo.seasons[0]);
-        console.log('Streaming info loaded via unified service');
-        return;
+        const list = grouped.get(season) || [];
+        list.push(episodeItem);
+        grouped.set(season, list);
       }
-      const realEpisodeCount = detailData && 'episodes' in detailData ? (detailData as any).episodes : 12;
-      const mockData = createMockStreamingInfo(currentContent.title, realEpisodeCount);
-      setStreamingInfo(mockData);
-      if (mockData.seasons.length > 0) {
-        setSelectedSeason(mockData.seasons[0]);
-      }
-      
+
+      const seasons: AnimeSeason[] = Array.from(grouped.entries())
+        .sort((a, b) => a[0] - b[0])
+        .map(([season, eps]) => ({
+          id: `season-${season}`,
+          season,
+          title: season === 1 ? 'Temporada 1' : `Temporada ${season}`,
+          episodes: eps.sort((a, b) => a.number - b.number),
+        }));
+
+      const info: StreamingInfo = {
+        animeId: String(anime.id),
+        title: anime.title,
+        description: anime.description || '',
+        image: anime.poster_url || '',
+        genres: Array.isArray(anime.genres) ? anime.genres : [],
+        status: anime.status || 'UNKNOWN',
+        totalEpisodes:
+          typeof anime.total_episodes === 'number'
+            ? anime.total_episodes
+            : seasons.reduce((c, s) => c + s.episodes.length, 0),
+        seasons,
+      };
+
+      setStreamingInfo(info);
+      setSelectedSeason(info.seasons[0] || null);
     } catch (error) {
-    console.error('Error loading streaming data:', error);
-      
-      // Crear datos mock básicos para mostrar la interfaz
-      const realEpisodeCount = detailData && 'episodes' in detailData ? (detailData as any).episodes : 12;
-      const mockData = createMockStreamingInfo(currentContent.title, realEpisodeCount);
-      setStreamingInfo(mockData);
-      if (mockData.seasons.length > 0) {
-        setSelectedSeason(mockData.seasons[0]);
-      }
+      console.error('Error loading streaming data:', error);
+      setStreamingInfo({
+        animeId: String(currentContent.id),
+        title: currentContent.title,
+        description: '',
+        image: '',
+        genres: [],
+        status: 'UNKNOWN',
+        totalEpisodes: 0,
+        seasons: [],
+      });
+      setSelectedSeason(null);
     } finally {
       setLoadingStreaming(false);
     }
@@ -321,7 +336,6 @@ export default function AnimeSeriesModal({
     if (!currentContent) return;
     setRefreshing(true);
     try {
-      resetM3UCache();
       await Promise.all([
         // recargar detalles básicos y similares si aplica
         loadContentDetails(),
@@ -337,6 +351,11 @@ export default function AnimeSeriesModal({
   const loadRelatedContent = async () => {
     if (!currentContent) return;
     
+    if (currentContent.type === 'anime') {
+      setRelatedContent([]);
+      return;
+    }
+
     setLoadingRelated(true);
     try {
       let similar: any[] = [];
@@ -359,39 +378,6 @@ export default function AnimeSeriesModal({
           recommended = [];
         } catch (error) {
           console.log('Error loading TV related content, using fallback');
-          similar = [];
-          recommended = [];
-        }
-      } else if (currentContent.type === 'anime') {
-        try {
-          console.log('Loading similar anime for ID:', currentContent.id);
-          similar = await getSimilarAnime(currentContent.id);
-          console.log('Similar anime loaded:', similar);
-          
-          if (isRealAnime()) {
-            if (detailData && 'genres' in detailData && detailData.genres.length > 0) {
-              const firstGenre = detailData.genres[0];
-              const genreName = typeof firstGenre === 'string' ? firstGenre : firstGenre.name;
-              const genreAnime = await getAnimeByGenre(genreName, 1, 5);
-              recommended = genreAnime.filter(anime => anime.id !== currentContent.id);
-            } else {
-              recommended = [];
-            }
-          } else {
-            if (detailData && 'genres' in detailData && detailData.genres.length > 0) {
-              const firstGenre = detailData.genres[0];
-              const genreName = typeof firstGenre === 'string' ? firstGenre : firstGenre.name;
-              const genreAnime = await getAnimeByGenre(genreName, 1, 5);
-              recommended = genreAnime.filter(anime => 
-                anime.id !== currentContent.id && 
-                anime.format === 'MOVIE'
-              );
-            } else {
-              recommended = [];
-            }
-          }
-        } catch (error) {
-          console.log('Error loading anime related content:', error);
           similar = [];
           recommended = [];
         }
@@ -1160,7 +1146,7 @@ export default function AnimeSeriesModal({
                   </View>
                   <View style={{ paddingHorizontal: 20, paddingVertical: 12 }}>
                     <Text style={{ color: '#b3b3b3', marginBottom: 12 }}>
-                      No se pudieron cargar los episodios. Verifica tu conexión o la URL del M3U.
+                      No hay episodios disponibles para este anime en el catálogo interno.
                     </Text>
                     <View style={styles.actionButtons}>
                       <TouchableOpacity style={styles.myListButton} onPress={handleRefresh}>

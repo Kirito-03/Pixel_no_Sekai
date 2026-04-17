@@ -13,13 +13,18 @@ import { spawn } from 'child_process';
 import session from 'express-session';
 import passport from 'passport';
 import cookieParser from 'cookie-parser';
-import authRoutes from './routes/auth.js';
-import adminRoutes from './routes/admin.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-dotenv.config({ path: new URL('../.env', import.meta.url).pathname });
+dotenv.config({ path: join(__dirname, '..', '.env') });
+
+const { default: authRoutes } = await import('./routes/auth.js');
+const { default: adminRoutes } = await import('./routes/admin.js');
+const { default: userRoutes } = await import('./routes/user.js');
+const { default: transcodeRoutes } = await import('./routes/transcode.js');
+const { default: catalogRoutes } = await import('./routes/catalog.js');
+const { default: pool } = await import('./db.js');
 
 // Crear carpeta de uploads si no existe
 const uploadsDir = join(__dirname, 'uploads', 'avatars');
@@ -95,21 +100,10 @@ app.use(passport.session());
 
 // SERVIR ESTÁTICAMENTE LA CARPETA videos
 app.use('/videos', express.static(join(__dirname, 'videos')));
-app.use('/hls', express.static(join(__dirname, 'hls'), {
-  setHeaders: (res, filePath) => {
-    if (filePath.endsWith('.m3u8')) {
-      res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
-      res.setHeader('Cache-Control', 'no-store');
-    } else if (filePath.endsWith('.ts')) {
-      res.setHeader('Content-Type', 'video/mp2t');
-      res.setHeader('Cache-Control', 'public, max-age=86400');
-    } else if (filePath.endsWith('.m4s')) {
-      res.setHeader('Cache-Control', 'public, max-age=86400');
-    }
-  }
-}));
+// HLS files now served from Cloudflare R2 — local static route removed.
 // SERVIR ESTÁTICAMENTE LA CARPETA uploads
 app.use('/uploads', express.static(join(__dirname, 'uploads')));
+app.use('/hls', express.static(join(__dirname, 'hls')));
 
 // SERVIR ADMIN PANEL (debe ir antes de las rutas API)
 const adminDir = join(__dirname, 'admin');
@@ -128,18 +122,6 @@ if (process.env.NODE_ENV !== 'production') {
     next();
   });
 }
-
-// DB pool - PostgreSQL
-const pool = new Pool({
-  host: process.env.DB_HOST || 'localhost',
-  port: Number(process.env.DB_PORT || 5432),
-  user: process.env.DB_USER || 'root',
-  password: process.env.DB_PASSWORD || '',
-  database: process.env.DB_NAME || 'bd_netflix',
-  max: 10,
-  idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 2000,
-});
 
 // Ensure auxiliary tables exist
 // NOTA: Las tablas ahora se crean automáticamente desde bd_netflix_postgres.sql
@@ -168,44 +150,7 @@ async function ensurePasswordResetsTable() {
 // ensurePasswordResetsTable();  // Deshabilitado - tablas creadas por init.sql
 */
 
-// Ensure downloads tables exist
-async function ensureDownloadsTables() {
-  try {
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS descargas (
-        id INT(11) NOT NULL AUTO_INCREMENT,
-        perfil_id INT(11) NOT NULL,
-        name VARCHAR(100) NOT NULL DEFAULT 'Descargas',
-        created_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP(),
-        PRIMARY KEY (id),
-        UNIQUE KEY uniq_descargas_perfil (perfil_id),
-        KEY idx_descargas_perfil_id (perfil_id),
-        CONSTRAINT fk_descargas_perfil_id FOREIGN KEY (perfil_id) REFERENCES perfiles (id) ON DELETE CASCADE
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
-    `);
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS descarga_items (
-        id INT(11) NOT NULL AUTO_INCREMENT,
-        descarga_id INT(11) NOT NULL,
-        content_id INT(11) NOT NULL,
-        content_type ENUM('movie','tv','anime') NOT NULL,
-        status ENUM('PENDING','DOWNLOADING','COMPLETED','FAILED') NOT NULL DEFAULT 'PENDING',
-        progress TINYINT UNSIGNED NOT NULL DEFAULT 0,
-        file_path VARCHAR(255) DEFAULT NULL,
-        added_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP(),
-        updated_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP() ON UPDATE CURRENT_TIMESTAMP(),
-        PRIMARY KEY (id),
-        UNIQUE KEY uniq_descarga_item (descarga_id, content_id, content_type),
-        KEY idx_descarga_items_descarga_id (descarga_id),
-        CONSTRAINT fk_descarga_items_descarga_id FOREIGN KEY (descarga_id) REFERENCES descargas (id) ON DELETE CASCADE
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
-    `);
-    console.log('Tablas de descargas verificadas/creadas');
-  } catch (e) {
-    console.error('Error creando/verificando tablas de descargas:', e.message);
-  }
-}
-ensureDownloadsTables();
+// Tablas de descargas ya se crean desde bd_netflix_postgres.sql
 
 // Health: no depender de la base de datos
 // Devuelve 200 siempre que el servidor esté vivo, y reporta estado opcional de la DB
@@ -241,6 +186,9 @@ app.get('/health/db', async (req, res) => {
 // ========================================
 app.use('/auth', authRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/catalog', catalogRoutes);
+app.use('/api/user', userRoutes);
+app.use('/transcode', transcodeRoutes);
 
 // CORS Proxy para servicios externos de anime
 app.get('/api/cors-proxy', async (req, res) => {
@@ -330,7 +278,7 @@ app.post('/auth/register', async (req, res) => {
   const { email, password } = req.body || {};
   if (!email || !password) return res.status(400).json({ message: 'email y password requeridos' });
   try {
-    const existsResult = await pool.query('SELECT id FROM usuarios WHERE email = ?', [email]);
+    const existsResult = await pool.query('SELECT id FROM usuarios WHERE email = $1', [email]);
     if (existsResult.rows.length) return res.status(409).json({ message: 'Email ya registrado' });
 
     const result = await pool.query(
@@ -349,7 +297,7 @@ app.post('/auth/login', async (req, res) => {
   const { email, password } = req.body || {};
   if (!email || !password) return res.status(400).json({ message: 'email y password requeridos' });
   try {
-    const result = await pool.query('SELECT id, password_hash FROM usuarios WHERE email = ?', [email]);
+    const result = await pool.query('SELECT id, password_hash FROM usuarios WHERE email = $1', [email]);
     if (!result.rows.length) return res.status(401).json({ message: 'Credenciales inválidas' });
     const user = result.rows[0];
     const ok = password === user.password_hash;
@@ -365,13 +313,15 @@ app.post('/auth/forgot-password', async (req, res) => {
   const { email } = req.body || {};
   if (!email) return res.status(400).json({ message: 'email requerido' });
   try {
-    const result = await pool.query('SELECT id FROM usuarios WHERE email = ?', [email]);
+    const result = await pool.query('SELECT id FROM usuarios WHERE email = $1', [email]);
     if (!result.rows.length) return res.status(404).json({ message: 'Usuario no encontrado' });
     const userId = result.rows[0].id;
     const token = crypto.randomBytes(24).toString('hex');
-    // 30 minutos de vigencia
-    await pool.query('INSERT INTO password_resets (usuario_id, token, expires_at) VALUES (?, ?, NOW() + INTERVAL 30 MINUTE)', [userId, token]);
-    // En entorno dev, devolvemos el token para usarlo manualmente
+    const expiresAt = new Date(Date.now() + 30 * 60 * 1000);
+    await pool.query(
+      'INSERT INTO password_resets (usuario_id, token, expires_at) VALUES ($1, $2, $3)',
+      [userId, token, expiresAt]
+    );
     res.json({ ok: true, token, expires_in_minutes: 30 });
   } catch (e) {
     res.status(500).json({ message: 'Error al generar token de recuperación', error: e.message });
@@ -382,33 +332,21 @@ app.post('/auth/forgot-password', async (req, res) => {
 app.post('/auth/reset-password', async (req, res) => {
   const { email, token, new_password } = req.body || {};
   if (!email || !token || !new_password) return res.status(400).json({ message: 'email, token y new_password requeridos' });
-  const conn = await pool.getConnection();
   try {
-    await conn.beginTransaction();
-    const [users] = await conn.query('SELECT id FROM usuarios WHERE email = ?', [email]);
-    if (!users.length) {
-      await conn.rollback();
-      return res.status(404).json({ message: 'Usuario no encontrado' });
-    }
-    const userId = users[0].id;
-    const [tokens] = await conn.query(
-      'SELECT id FROM password_resets WHERE usuario_id = ? AND token = ? AND used = 0 AND expires_at > NOW() ORDER BY id DESC LIMIT 1',
+    const usersResult = await pool.query('SELECT id FROM usuarios WHERE email = $1', [email]);
+    if (!usersResult.rows.length) return res.status(404).json({ message: 'Usuario no encontrado' });
+    const userId = usersResult.rows[0].id;
+    const tokensResult = await pool.query(
+      'SELECT id FROM password_resets WHERE usuario_id = $1 AND token = $2 AND used = false AND expires_at > NOW() ORDER BY id DESC LIMIT 1',
       [userId, token]
     );
-    if (!tokens.length) {
-      await conn.rollback();
-      return res.status(400).json({ message: 'Token inválido o expirado' });
-    }
-    const resetId = tokens[0].id;
-    await conn.query('UPDATE usuarios SET password_hash = ? WHERE id = ?', [new_password, userId]);
-    await conn.query('UPDATE password_resets SET used = 1 WHERE id = ?', [resetId]);
-    await conn.commit();
+    if (!tokensResult.rows.length) return res.status(400).json({ message: 'Token inválido o expirado' });
+    const resetId = tokensResult.rows[0].id;
+    await pool.query('UPDATE usuarios SET password_hash = $1 WHERE id = $2', [new_password, userId]);
+    await pool.query('UPDATE password_resets SET used = true WHERE id = $1', [resetId]);
     res.json({ ok: true });
   } catch (e) {
-    await conn.rollback();
     res.status(500).json({ message: 'Error al restablecer contraseña', error: e.message });
-  } finally {
-    conn.release();
   }
 });
 
@@ -417,7 +355,7 @@ app.get('/profiles', async (req, res) => {
   const userId = Number(req.query.userId);
   if (!userId) return res.status(400).json({ message: 'userId requerido' });
   try {
-    const result = await pool.query('SELECT id, usuario_id, name, avatar_url FROM perfiles WHERE usuario_id = ?', [userId]);
+    const result = await pool.query('SELECT id, usuario_id, name, avatar_url FROM perfiles WHERE usuario_id = $1', [userId]);
     res.json(result.rows);
   } catch (e) {
     res.status(500).json({ message: 'Error al obtener perfiles', error: e.message });
@@ -428,43 +366,21 @@ app.get('/profiles', async (req, res) => {
 app.post('/profiles', async (req, res) => {
   const { usuario_id, name, avatar_url } = req.body || {};
   if (!usuario_id || !name || !avatar_url) return res.status(400).json({ message: 'Datos de perfil incompletos' });
-  const conn = await pool.getConnection();
   try {
-    // Validar que el usuario existe para evitar errores de FK en cascada
-    const [u] = await conn.query('SELECT id FROM usuarios WHERE id = ?', [usuario_id]);
-    if (!u.length) {
-      return res.status(404).json({ message: 'Usuario no encontrado para crear perfil' });
-    }
+    const uCheck = await pool.query('SELECT id FROM usuarios WHERE id = $1', [usuario_id]);
+    if (!uCheck.rows.length) return res.status(404).json({ message: 'Usuario no encontrado para crear perfil' });
 
-    await conn.beginTransaction();
-    const [result] = await conn.query(
-      'INSERT INTO perfiles (usuario_id, name, avatar_url) VALUES (?, ?, ?)',
+    const perfilResult = await pool.query(
+      'INSERT INTO perfiles (usuario_id, name, avatar_url) VALUES ($1, $2, $3) RETURNING id',
       [usuario_id, name, avatar_url]
     );
-    const perfilId = result.rows[0].id;
-    await conn.query('INSERT INTO listas (perfil_id, name, type) VALUES (?, ?, ?)', [perfilId, 'Mi lista', 'MY_LIST']);
-    // Crear registro único de descargas para el perfil
-    await conn.query('INSERT INTO descargas (perfil_id, name) VALUES (?, ?)', [perfilId, 'Descargas']);
-    await conn.commit();
+    const perfilId = perfilResult.rows[0].id;
+    await pool.query('INSERT INTO listas (perfil_id, name, type) VALUES ($1, $2, $3)', [perfilId, 'Mi lista', 'MY_LIST']);
+    await pool.query('INSERT INTO descargas (perfil_id, name) VALUES ($1, $2)', [perfilId, 'Descargas']);
     res.status(201).json({ id: perfilId });
   } catch (e) {
-    await conn.rollback();
-    // Respuestas más claras por errores comunes de esquema/enum
-    const code = e.code || 'UNKNOWN';
-    const sqlMessage = e.sqlMessage || e.message;
-    if (code === 'ER_NO_REFERENCED_ROW_2') {
-      return res.status(400).json({ message: 'Error de referencia: usuario_id no existe', error: sqlMessage });
-    }
-    if (code === 'ER_NO_SUCH_TABLE') {
-      return res.status(500).json({ message: 'Tabla faltante (listas/perfiles). Importa bd_netflix_full.sql', error: sqlMessage });
-    }
-    if (code === 'ER_WRONG_VALUE_FOR_FIELD' || sqlMessage?.includes('Incorrect enum value')) {
-      return res.status(400).json({ message: 'Valor ENUM inválido para listas.type. Asegura ENUM("MY_LIST")', error: sqlMessage });
-    }
-    console.error('Error al crear perfil:', { code, sqlMessage });
-    res.status(500).json({ message: 'Error al crear perfil', error: sqlMessage });
-  } finally {
-    conn.release();
+    console.error('Error al crear perfil:', e.message);
+    res.status(500).json({ message: 'Error al crear perfil', error: e.message });
   }
 });
 
@@ -474,16 +390,16 @@ app.put('/profiles/:id', async (req, res) => {
   const { name, avatar_url } = req.body || {};
   if (!id) return res.status(400).json({ message: 'id requerido' });
 
-  // Construir query dinámicamente según los campos proporcionados
   const updates = [];
   const values = [];
+  let idx = 1;
 
   if (name !== undefined) {
-    updates.push('name = ?');
+    updates.push(`name = $${idx++}`);
     values.push(name);
   }
   if (avatar_url !== undefined) {
-    updates.push('avatar_url = ?');
+    updates.push(`avatar_url = $${idx++}`);
     values.push(avatar_url);
   }
 
@@ -495,7 +411,7 @@ app.put('/profiles/:id', async (req, res) => {
 
   try {
     await pool.query(
-      `UPDATE perfiles SET ${updates.join(', ')} WHERE id = ?`,
+      `UPDATE perfiles SET ${updates.join(', ')} WHERE id = $${idx}`,
       values
     );
     res.json({ ok: true });
@@ -509,7 +425,7 @@ app.delete('/profiles/:id', async (req, res) => {
   const id = Number(req.params.id);
   if (!id) return res.status(400).json({ message: 'id requerido' });
   try {
-    await pool.query('DELETE FROM perfiles WHERE id = ?', [id]);
+    await pool.query('DELETE FROM perfiles WHERE id = $1', [id]);
     res.json({ ok: true });
   } catch (e) {
     res.status(500).json({ message: 'Error al eliminar perfil', error: e.message });
@@ -521,14 +437,14 @@ app.get('/my-list/:perfilId', async (req, res) => {
   const perfilId = Number(req.params.perfilId);
   if (!perfilId) return res.status(400).json({ message: 'perfilId requerido' });
   try {
-    const listasResult = await pool.query('SELECT id FROM listas WHERE perfil_id = ? AND type = "MY_LIST"', [perfilId]);
+    const listasResult = await pool.query("SELECT id FROM listas WHERE perfil_id = $1 AND type = 'MY_LIST'", [perfilId]);
     if (!listasResult.rows.length) return res.json([]);
     const listaId = listasResult.rows[0].id;
     const itemsResult = await pool.query(
-      'SELECT content_id, content_type, added_at FROM lista_items WHERE lista_id = ? ORDER BY added_at DESC',
+      'SELECT content_id, content_type, added_at FROM lista_items WHERE lista_id = $1 ORDER BY added_at DESC',
       [listaId]
     );
-    res.json(items);
+    res.json(itemsResult.rows);
   } catch (e) {
     res.status(500).json({ message: 'Error al obtener Mi lista', error: e.message });
   }
@@ -544,11 +460,11 @@ app.post('/my-list/:perfilId/items', async (req, res) => {
     return res.status(400).json({ message: 'Tipo de contenido inválido', allowed: allowedTypes });
   }
   try {
-    const listasResult = await pool.query('SELECT id FROM listas WHERE perfil_id = ? AND type = "MY_LIST"', [perfilId]);
+    const listasResult = await pool.query("SELECT id FROM listas WHERE perfil_id = $1 AND type = 'MY_LIST'", [perfilId]);
     if (!listasResult.rows.length) return res.status(404).json({ message: 'Mi lista no encontrada' });
     const listaId = listasResult.rows[0].id;
     await pool.query(
-      'INSERT INTO lista_items (lista_id, content_id, content_type) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE added_at = CURRENT_TIMESTAMP',
+      'INSERT INTO lista_items (lista_id, content_id, content_type) VALUES ($1, $2, $3) ON CONFLICT (lista_id, content_id, content_type) DO UPDATE SET added_at = CURRENT_TIMESTAMP',
       [listaId, content_id, content_type]
     );
     res.status(201).json({ ok: true });
@@ -568,10 +484,10 @@ app.delete('/my-list/:perfilId/items/:contentId/:type', async (req, res) => {
     return res.status(400).json({ message: 'Tipo de contenido inválido', allowed: allowedTypes });
   }
   try {
-    const listasResult = await pool.query('SELECT id FROM listas WHERE perfil_id = ? AND type = "MY_LIST"', [perfilId]);
+    const listasResult = await pool.query("SELECT id FROM listas WHERE perfil_id = $1 AND type = 'MY_LIST'", [perfilId]);
     if (!listasResult.rows.length) return res.status(404).json({ message: 'Mi lista no encontrada' });
     const listaId = listasResult.rows[0].id;
-    await pool.query('DELETE FROM lista_items WHERE lista_id = ? AND content_id = ? AND content_type = ?', [listaId, contentId, type]);
+    await pool.query('DELETE FROM lista_items WHERE lista_id = $1 AND content_id = $2 AND content_type = $3', [listaId, contentId, type]);
     res.json({ ok: true });
   } catch (e) {
     res.status(500).json({ message: 'Error al quitar de Mi lista', error: e.message });
@@ -580,19 +496,15 @@ app.delete('/my-list/:perfilId/items/:contentId/:type', async (req, res) => {
 
 // Utilidad: asegura que exista el registro de descargas para un perfil y devuelve su id
 async function ensureDescargasForPerfil(perfilId) {
-  // Verificar que el perfil existe
-  const perfilResult = await pool.query('SELECT id FROM perfiles WHERE id = ? LIMIT 1', [perfilId]);
-  if (!perfilResult.rows.length) {
-    throw new Error('Perfil no encontrado');
-  }
-  // Intentar obtener descargas
-  const result = await pool.query('SELECT id FROM descargas WHERE perfil_id = ? LIMIT 1', [perfilId]);
+  const perfilResult = await pool.query('SELECT id FROM perfiles WHERE id = $1 LIMIT 1', [perfilId]);
+  if (!perfilResult.rows.length) throw new Error('Perfil no encontrado');
+  const result = await pool.query('SELECT id FROM descargas WHERE perfil_id = $1 LIMIT 1', [perfilId]);
   if (result.rows.length) return result.rows[0].id;
-  // Crear registro de descargas si no existe
-  await pool.query('INSERT INTO descargas (perfil_id, name) VALUES (?, ?)', [perfilId, 'Descargas']);
-  // Recuperar id creado
-  const createdResult = await pool.query('SELECT id FROM descargas WHERE perfil_id = ? LIMIT 1', [perfilId]);
-  return createdResult.rows[0]?.id;
+  const inserted = await pool.query(
+    'INSERT INTO descargas (perfil_id, name) VALUES ($1, $2) RETURNING id',
+    [perfilId, 'Descargas']
+  );
+  return inserted.rows[0].id;
 }
 
 // Downloads: get (auto-crea registro de descargas si falta)
@@ -604,11 +516,11 @@ app.get('/downloads/:perfilId', async (req, res) => {
     const descargaId = await ensureDescargasForPerfil(perfilId);
     console.log(`[Downloads][GET] ensureDescargasForPerfil -> descargaId=${descargaId}`);
     const itemsResult = await pool.query(
-      'SELECT content_id, content_type, status, progress, file_path, added_at, updated_at FROM descarga_items WHERE descarga_id = ? ORDER BY added_at DESC',
+      'SELECT content_id, content_type, status, progress, file_path, added_at, updated_at FROM descarga_items WHERE descarga_id = $1 ORDER BY added_at DESC',
       [descargaId]
     );
-    console.log(`[Downloads][GET] returned ${items?.length || 0} items`);
-    res.json(items);
+    console.log(`[Downloads][GET] returned ${itemsResult.rows.length} items`);
+    res.json(itemsResult.rows);
   } catch (e) {
     if (e.message === 'Perfil no encontrado') {
       return res.status(404).json({ message: 'Perfil no encontrado' });
@@ -632,8 +544,9 @@ app.post('/downloads/:perfilId/items', async (req, res) => {
     console.log(`[Downloads][POST] ensureDescargasForPerfil -> descargaId=${descargaId}`);
     await pool.query(
       `INSERT INTO descarga_items (descarga_id, content_id, content_type, status, progress, file_path)
-       VALUES (?, ?, ?, ?, ?, ?)
-       ON DUPLICATE KEY UPDATE status = VALUES(status), progress = VALUES(progress), file_path = VALUES(file_path), updated_at = CURRENT_TIMESTAMP`,
+       VALUES ($1, $2, $3, $4, $5, $6)
+       ON CONFLICT (descarga_id, content_id, content_type)
+       DO UPDATE SET status = EXCLUDED.status, progress = EXCLUDED.progress, file_path = EXCLUDED.file_path, updated_at = CURRENT_TIMESTAMP`,
       [descargaId, content_id, content_type, status || 'PENDING', progress ?? 0, file_path || null]
     );
     console.log(`[Downloads][POST] upsert OK -> descarga_id=${descargaId}, content_id=${content_id}, type=${content_type}`);
@@ -658,7 +571,7 @@ app.put('/downloads/:perfilId/items/:contentId/:type', async (req, res) => {
   try {
     const descargaId = await ensureDescargasForPerfil(perfilId);
     await pool.query(
-      'UPDATE descarga_items SET status = ?, progress = ?, file_path = ?, updated_at = CURRENT_TIMESTAMP WHERE descarga_id = ? AND content_id = ? AND content_type = ?',
+      'UPDATE descarga_items SET status = $1, progress = $2, file_path = $3, updated_at = CURRENT_TIMESTAMP WHERE descarga_id = $4 AND content_id = $5 AND content_type = $6',
       [status || 'PENDING', progress ?? 0, file_path || null, descargaId, contentId, type]
     );
     res.json({ ok: true });
@@ -679,7 +592,7 @@ app.delete('/downloads/:perfilId/items/:contentId/:type', async (req, res) => {
   }
   try {
     const descargaId = await ensureDescargasForPerfil(perfilId);
-    await pool.query('DELETE FROM descarga_items WHERE descarga_id = ? AND content_id = ? AND content_type = ?', [descargaId, contentId, type]);
+    await pool.query('DELETE FROM descarga_items WHERE descarga_id = $1 AND content_id = $2 AND content_type = $3', [descargaId, contentId, type]);
     res.json({ ok: true });
   } catch (e) {
     res.status(500).json({ message: 'Error al quitar descarga', error: e.message });
@@ -701,7 +614,7 @@ app.get('/content/:type', async (req, res) => {
   const type = req.params.type;
   if (!['movie', 'tv', 'anime'].includes(type)) return res.status(400).json({ message: 'Tipo de contenido inválido' });
   try {
-    const result = await pool.query('SELECT * FROM contenido WHERE type = ? ORDER by created_at DESC', [type]);
+    const result = await pool.query('SELECT * FROM contenido WHERE type = $1 ORDER BY created_at DESC', [type]);
     res.json(result.rows);
   } catch (e) {
     res.status(500).json({ message: 'Error al obtener contenido', error: e.message });
@@ -716,7 +629,7 @@ app.post('/content', async (req, res) => {
   }
   try {
     const result = await pool.query(
-      'INSERT INTO contenido (title, type, overview, poster_url, backdrop_url) VALUES (?, ?, ?, ?, ?)',
+      'INSERT INTO contenido (title, type, overview, poster_url, backdrop_url) VALUES ($1, $2, $3, $4, $5) RETURNING id',
       [title, type, overview, poster_url, backdrop_url]
     );
     res.status(201).json({ id: result.rows[0].id });
@@ -733,7 +646,7 @@ app.post('/images', async (req, res) => {
   }
   try {
     const result = await pool.query(
-      'INSERT INTO imagenes (filename, original_name, mime_type, size, width, height, url, type, entity_id, entity_type) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      'INSERT INTO imagenes (filename, original_name, mime_type, size, width, height, url, type, entity_id, entity_type) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id',
       [filename, original_name, mime_type, size, width, height, url, type, entity_id, entity_type]
     );
     res.status(201).json({ id: result.rows[0].id });
@@ -750,7 +663,7 @@ app.get('/images/:entity_type/:entity_id', async (req, res) => {
   }
   try {
     const result = await pool.query(
-      'SELECT * FROM imagenes WHERE entity_type = ? AND entity_id = ? ORDER BY created_at DESC',
+      'SELECT * FROM imagenes WHERE entity_type = $1 AND entity_id = $2 ORDER BY created_at DESC',
       [entity_type, entity_id]
     );
     res.json(result.rows);
@@ -897,55 +810,7 @@ app.get('/users/:id', async (req, res) => {
   }
 });
 
-app.post('/transcode/hls', async (req, res) => {
-  try {
-    const src = (req.body && req.body.src) || (req.query && req.query.src) || '';
-    if (!src) return res.status(400).json({ message: 'src requerido' });
-    const id = crypto.createHash('md5').update(src).digest('hex');
-    const outDir = join(__dirname, 'hls', id);
-    try { mkdirSync(outDir, { recursive: true }); } catch { }
-    const playlistPath = join(outDir, 'index.m3u8');
-    if (existsSync(playlistPath)) {
-      const base = `${req.protocol}://${req.get('host')}`;
-      const playlistUrl = `${base}/hls/${id}/index.m3u8`;
-      return res.json({ ok: true, id, playlist_url: playlistUrl });
-    }
-    const segmentPattern = join(outDir, 'segment%03d.ts');
-    const isMp4 = /\.mp4(\?|$)/i.test(src);
-    const ffArgs = [
-      '-loglevel', 'error',
-      '-y',
-      '-i', src,
-      ...(isMp4 ? ['-c:v', 'copy', '-c:a', 'copy'] : ['-c:v', 'libx264', '-preset', 'veryfast', '-c:a', 'aac', '-b:a', '128k']),
-      '-f', 'hls',
-      '-hls_time', '6',
-      '-hls_list_size', '0',
-      '-hls_playlist_type', 'vod',
-      '-hls_segment_filename', segmentPattern,
-      playlistPath,
-    ];
-    const ff = spawn(process.env.FFMPEG_PATH || 'ffmpeg', ffArgs, { stdio: ['ignore', 'ignore', 'pipe'] });
-    let errBuf = '';
-    ff.stderr.on('data', (d) => { try { errBuf += d.toString(); } catch { } });
-    let exitCode = null;
-    ff.on('close', (code) => { exitCode = code; });
-    let attempts = 0;
-    const maxAttempts = 100;
-    const wait = () => new Promise(r => setTimeout(r, 300));
-    while (!existsSync(playlistPath) && attempts < maxAttempts) {
-      await wait();
-      attempts++;
-    }
-    if (!existsSync(playlistPath)) {
-      return res.status(500).json({ message: 'No se pudo crear playlist HLS', error: errBuf.slice(-4000), code: exitCode });
-    }
-    const base = `${req.protocol}://${req.get('host')}`;
-    const playlistUrl = `${base}/hls/${id}/index.m3u8`;
-    return res.json({ ok: true, id, playlist_url: playlistUrl });
-  } catch (e) {
-    return res.status(500).json({ message: 'Error transcodificando', error: e.message });
-  }
-});
+// POST /transcode/hls → movido a server/routes/transcode.js
 
 app.post('/proxy/anilist', async (req, res) => {
   try {

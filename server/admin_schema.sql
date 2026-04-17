@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS anime_content (
     id SERIAL PRIMARY KEY,
     tmdb_id INTEGER,
     title VARCHAR(255) NOT NULL,
+    franchise_key VARCHAR(80),
     title_english VARCHAR(255),
     title_japanese VARCHAR(255),
     description TEXT,
@@ -46,6 +47,7 @@ CREATE TABLE IF NOT EXISTS anime_content (
 
 -- Índices para performance
 CREATE INDEX idx_anime_content_tmdb ON anime_content(tmdb_id);
+CREATE INDEX idx_anime_content_franchise ON anime_content(franchise_key);
 CREATE INDEX idx_anime_content_active ON anime_content(is_active);
 CREATE INDEX idx_anime_content_title ON anime_content(title);
 CREATE INDEX idx_anime_content_created ON anime_content(created_at DESC);
@@ -60,7 +62,8 @@ CREATE TABLE IF NOT EXISTS anime_episodes (
     season INTEGER DEFAULT 1,
     episode_number INTEGER NOT NULL,
     title VARCHAR(255),
-    video_url VARCHAR(1000) NOT NULL, -- Google Drive direct link o local path
+    video_url VARCHAR(1000), -- Google Drive direct link o local path (puede faltar en fase inicial)
+    status VARCHAR(20) NOT NULL DEFAULT 'missing', -- missing | queued | processing | ready | error
     storage_type VARCHAR(20) DEFAULT 'gdrive', -- 'gdrive' | 'local'
     duration INTEGER, -- Duración en minutos
     thumbnail_url VARCHAR(500),

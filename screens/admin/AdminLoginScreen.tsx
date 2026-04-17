@@ -24,7 +24,7 @@ export default function AdminLoginScreen() {
             if (isAdmin) {
                 navigation.reset({
                     index: 0,
-                    routes: [{ name: 'Admin', params: { screen: 'AdminDashboard' } } as any]
+                    routes: [{ name: 'AdminDashboard' } as any]
                 });
                 return;
             }
@@ -34,7 +34,7 @@ export default function AdminLoginScreen() {
             if (success) {
                 navigation.reset({
                     index: 0,
-                    routes: [{ name: 'Admin', params: { screen: 'AdminDashboard' } } as any]
+                    routes: [{ name: 'AdminDashboard' } as any]
                 });
             } else {
                 setIsLoading(false); // Solo mostrar UI si falló el auto-login

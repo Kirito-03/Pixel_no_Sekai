@@ -1,6 +1,7 @@
 import axios, { AxiosInstance, AxiosRequestConfig } from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
+import { getCurrentBaseURL } from './databaseService';
 
 // Base URL del backend
 const API_BASE_URL = Platform.select({
@@ -12,6 +13,7 @@ const API_BASE_URL = Platform.select({
 interface AnimeData {
     tmdb_id?: number;
     title: string;
+    franchise_key?: string;
     title_english?: string;
     title_japanese?: string;
     description?: string;
@@ -29,7 +31,8 @@ interface EpisodeData {
     season?: number;
     episode_number: number;
     title?: string;
-    video_url: string;
+    video_url?: string | null;
+    status?: 'missing' | 'queued' | 'processing' | 'ready' | 'error';
     storage_type?: 'gdrive' | 'local';
     duration?: number;
     thumbnail_url?: string;
@@ -52,13 +55,14 @@ class AdminApiService {
 
     constructor() {
         this.axiosInstance = axios.create({
-            baseURL: API_BASE_URL,
+            baseURL: getCurrentBaseURL() || API_BASE_URL,
             timeout: 30000,
         });
 
         // Add request interceptor to include auth token
         this.axiosInstance.interceptors.request.use(
             async (config) => {
+                config.baseURL = getCurrentBaseURL() || API_BASE_URL;
                 const token = await AsyncStorage.getItem('admin_token');
                 if (token) {
                     config.headers.Authorization = `Bearer ${token}`;
@@ -163,6 +167,32 @@ class AdminApiService {
      */
     async deleteEpisode(id: number) {
         const response = await this.axiosInstance.delete(`/api/admin/episodes/${id}`);
+        return response.data;
+    }
+
+    async uploadEpisodeVideo(episodeId: number, file: any) {
+        const baseURL = getCurrentBaseURL() || API_BASE_URL;
+        const formData = new FormData();
+        formData.append('video', file);
+
+        const response = await this.axiosInstance.post(
+            `/api/admin/episodes/${episodeId}/upload-video`,
+            formData,
+            {
+                headers: {
+                    ...(Platform.OS === 'web' ? { 'X-Client-BaseURL': baseURL } : {}),
+                },
+            }
+        );
+        return response.data;
+    }
+
+    async processEpisodeVideo(episodeId: number, options?: { cleanup?: boolean }) {
+        const response = await this.axiosInstance.post(
+            `/api/admin/episodes/${episodeId}/process-video`,
+            undefined,
+            { params: options?.cleanup ? { cleanup: 1 } : undefined }
+        );
         return response.data;
     }
 

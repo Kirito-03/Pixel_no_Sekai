@@ -3,6 +3,7 @@ import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
+import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import LoginScreen from '../screens/LoginScreen';
@@ -14,6 +15,8 @@ import ProfileScreen from '../screens/ProfileScreen';
 import CategoryScreen from '../screens/CategoryScreen';
 import MyListScreen from '../screens/MyListScreen';
 import DownloadsScreen from '../screens/DownloadsScreen';
+import NewsScreen from '../screens/NewsScreen';
+import MangaScreen from '../screens/MangaScreen';
 import AdminLoginScreen from '../screens/admin/AdminLoginScreen';
 import AdminDashboardScreen from '../screens/admin/AdminDashboardScreen';
 import AnimeListScreen from '../screens/admin/AnimeListScreen';
@@ -32,7 +35,7 @@ const AdminStack = createNativeStackNavigator();
 
 function HomeNavigator() {
   return (
-    <HomeStack.Navigator screenOptions={{ headerShown: false }}>
+    <HomeStack.Navigator screenOptions={{ headerShown: false, animation: Platform.OS === 'android' ? 'fade' : 'default' }}>
       <HomeStack.Screen name="Inicio" component={HomeScreen as any} />
       <HomeStack.Screen name="Categoria" component={CategoryScreen as any} />
       <HomeStack.Screen name="MiLista" component={MyListScreen as any} />
@@ -42,7 +45,7 @@ function HomeNavigator() {
 
 function AdminNavigator() {
   return (
-    <AdminStack.Navigator screenOptions={{ headerShown: false }}>
+    <AdminStack.Navigator screenOptions={{ headerShown: false, animation: Platform.OS === 'android' ? 'fade' : 'default' }}>
       <AdminStack.Screen name="AdminLogin" component={AdminLoginScreen as any} />
       <AdminStack.Screen name="AdminDashboard" component={AdminDashboardScreen as any} />
       <AdminStack.Screen name="AnimeList" component={AnimeListScreen as any} />
@@ -122,6 +125,22 @@ function MainTabs({ route }: { route: any }) {
         }}
       />
       <Tab.Screen
+        name="Noticias"
+        component={NewsScreen}
+        options={{
+          tabBarIcon: ({ color }) => <Ionicons name="newspaper-outline" size={24} color={color} />,
+          tabBarLabel: 'Noticias',
+        }}
+      />
+      <Tab.Screen
+        name="Manga"
+        component={MangaScreen}
+        options={{
+          tabBarIcon: ({ color }) => <Ionicons name="book-outline" size={24} color={color} />,
+          tabBarLabel: 'Manga',
+        }}
+      />
+      <Tab.Screen
         name="MiLista"
         component={MyListScreen as any}
         options={{
@@ -146,6 +165,7 @@ export default function AppNavigator() {
   const { colors } = useTheme();
   const { user, isLoading } = useAuth();
   const { currentProfile, loadCurrentProfile } = useProfile();
+  const { isAdmin } = useAdmin();
   const [initialRoute, setInitialRoute] = React.useState<string | null>(null);
   const [isReady, setIsReady] = React.useState(false);
   const [initialState, setInitialState] = React.useState();
@@ -201,16 +221,14 @@ export default function AppNavigator() {
       // Si hay usuario, verificar si hay perfil guardado
       await loadCurrentProfile();
 
-      // Esperar + delay mínimo de 2s para ver la animación
-      setTimeout(() => {
-        if (currentProfile) {
-          // Si hay perfil guardado, ir directamente a Principal
-          setInitialRoute('Principal');
-        } else {
-          // Si no hay perfil, ir a selección de perfil
-          setInitialRoute('SeleccionPerfil');
-        }
-      }, 2100);
+      // OPTIMIZACIÓN: Si ya tenemos usuario, no necesitamos un delay largo
+      if (currentProfile) {
+        // Si hay perfil guardado, ir directamente a Principal
+        setInitialRoute('Principal');
+      } else {
+        // Si no hay perfil, ir a selección de perfil
+        setInitialRoute('SeleccionPerfil');
+      }
     };
 
     determineInitialRoute();
@@ -229,7 +247,11 @@ export default function AppNavigator() {
       }}
     >
       <RootStack.Navigator
-        screenOptions={{ headerShown: false }}
+        screenOptions={{
+          headerShown: false,
+          animation: Platform.OS === 'android' ? 'fade' : 'default', // Fade solo en Android para evitar la línea/sombra
+          presentation: 'card',
+        }}
         initialRouteName={initialRoute === 'RESTORED_STATE' ? undefined : initialRoute}
       >
         {!user ? (
@@ -246,9 +268,7 @@ export default function AppNavigator() {
             <RootStack.Screen name="Principal" component={MainTabs} />
             <RootStack.Screen name="Apariencia" component={require('../screens/AppearanceScreen').default} />
             <RootStack.Screen name="Descargas" component={DownloadsScreen as any} />
-            {/* AdminPortal y Admin ocultos/deshabilitados por ahora */}
-            {/* <RootStack.Screen name="AdminPortal" component={AdminLoginScreen} /> */}
-            <RootStack.Screen name="Admin" component={AdminNavigator} />
+            {isAdmin && <RootStack.Screen name="Admin" component={AdminNavigator} />}
           </>
         )}
       </RootStack.Navigator>
