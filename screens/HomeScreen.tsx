@@ -9,36 +9,30 @@ import MovieRow from '../components/MovieRow';
 import MovieModal from '../components/MovieModal';
 import { useProfile } from '../contexts/ProfileContext';
 import { useMyList } from '../contexts/MyListContext';
-import { catalogService } from '../services/catalogService';
+import { catalogService, CatalogAnime } from '../services/catalogService';
+import { useTabNavigation } from '../hooks/useTabNavigation';
 
 type Props = NativeStackScreenProps<HomeStackParamList, 'Inicio'>;
 
 export default function HomeScreen({ navigation }: Props) {
     const { currentProfile, adultContentEnabled } = useProfile();
     const { addToMyList: addToMyListContext } = useMyList();
+    const { navigateByLabel } = useTabNavigation();
 
-    // Estado unificado para contenido (TMDB + AniList)
     const [contentSections, setContentSections] = useState<{ [key: string]: ContentItem[] }>({});
-
-    // Estados de la UI
     const [featuredMovies, setFeaturedMovies] = useState<(MovieDetail | AnimeDetail)[]>([]);
+    const [featuredItems, setFeaturedItems] = useState<ContentItem[]>([]); // Sección "Destacados"
     const [selectedContent, setSelectedContent] = useState<ContentItem | null>(null);
     const [modalVisible, setModalVisible] = useState(false);
     const [loading, setLoading] = useState(true);
     const [blackHeader, setBlackHeader] = useState(false);
     const [contentFilter, setContentFilter] = useState<'all' | 'movies' | 'series' | 'anime'>('anime');
-
-    // NOTA: 'selectedCategory' parecía no usarse correctamente.
-    // La lógica actual se basa en el filtro principal (todo, películas, series).
-    // Si la idea era filtrar por género (ej. solo 'Acción'), se necesitaría un cambio mayor.
     const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
 
     const scrollViewRef = useRef<ScrollView>(null);
     const { height: screenHeight } = Dimensions.get('window');
     const [isLoadingMore, setIsLoadingMore] = useState(false);
-    // Mutex para evitar condiciones de carrera al cargar más filas
     const loadingMoreRef = useRef<boolean>(false);
-    // Set global de keys ya añadidas para evitar duplicados incluso con llamadas concurrentes
     const loadedRowKeysRef = useRef<Set<string>>(new Set());
     const [extraRows, setExtraRows] = useState<{ key: string; title: string; items: ContentItem[] }[]>([]);
     const [categorySequenceIndex, setCategorySequenceIndex] = useState(0);
@@ -48,11 +42,10 @@ export default function HomeScreen({ navigation }: Props) {
         upcoming: 1,
     });
 
-    // Pools de categorías por filtro para lograr variedad en cada carga
     const CATEGORY_LABELS: Record<string, string> = {
         airing: 'En emisión',
         finished: 'Finalizados',
-        upcoming: 'Próximos',
+        upcoming: 'Todo el catálogo',
     };
 
     const CATEGORY_POOLS: Record<'all' | 'movies' | 'series' | 'anime', string[]> = {
@@ -62,7 +55,15 @@ export default function HomeScreen({ navigation }: Props) {
         anime: ['airing', 'finished', 'upcoming'],
     };
 
-    const mapCatalogAnimeToContentItem = (anime: any): ContentItem => ({
+    // Accent colors por sección para variedad visual
+    const SECTION_ACCENTS: Record<string, string> = {
+        airing: colors.primary,          // rojo
+        featured: '#FFD700',             // dorado
+        finished: '#00C853',             // verde
+        upcoming: '#448AFF',             // azul
+    };
+
+    const mapCatalogAnimeToContentItem = (anime: CatalogAnime): ContentItem => ({
         id: Number(anime.id),
         type: 'anime',
         title: anime.title || 'Sin título',
@@ -73,9 +74,11 @@ export default function HomeScreen({ navigation }: Props) {
         vote_average: typeof anime.rating === 'number' ? anime.rating : 0,
         source: 'anilist',
         genres: Array.isArray(anime.genres) ? anime.genres : [],
+        // Pasar status para badges en MovieCard
+        status: anime.status || '',
     });
 
-    const mapCatalogAnimeToAnimeDetail = (anime: any): AnimeDetail => {
+    const mapCatalogAnimeToAnimeDetail = (anime: CatalogAnime): AnimeDetail => {
         const releaseYear = anime.release_date ? new Date(anime.release_date).getFullYear() : 0;
         return {
             id: Number(anime.id),
@@ -103,6 +106,55 @@ export default function HomeScreen({ navigation }: Props) {
         } as any;
     };
 
+    /**
+     * Lógica de Destacados:
+     * 1. Prioriza animes con mejor rating
+     * 2. Si empatan en rating, prioriza los que tienen episodios disponibles
+     * 3. Si no, los más recientes o más completos
+     */
+    const buildFeaturedItems = (
+        airing: ContentItem[],
+        finished: ContentItem[],
+        upcoming: ContentItem[]
+    ): ContentItem[] => {
+        const allItems = [...airing, ...finished, ...upcoming];
+
+        // Eliminar duplicados por id
+        const seen = new Set<number>();
+        const unique = allItems.filter(item => {
+            if (seen.has(item.id)) return false;
+            seen.add(item.id);
+            return true;
+        });
+
+        // Score compuesto para ordenar
+        const scoreItem = (item: ContentItem & { status?: string; total_episodes?: number }) => {
+            let score = 0;
+            // Rating principal (0–10 range, ya mapeado)
+            const rating = typeof item.vote_average === 'number' ? item.vote_average : 0;
+            score += rating * 10; // peso mayor al rating
+
+            // Bonus por tener episodios disponibles (dato de la BD)
+            if (typeof (item as any).total_episodes === 'number' && (item as any).total_episodes > 0) {
+                score += 15;
+            }
+
+            // Bonus por reciente
+            if (item.release_date) {
+                const year = new Date(item.release_date).getFullYear();
+                const currentYear = new Date().getFullYear();
+                if (year >= currentYear - 1) score += 8;
+                if (year >= currentYear) score += 5;
+            }
+
+            return score;
+        };
+
+        return unique
+            .sort((a, b) => scoreItem(b as any) - scoreItem(a as any))
+            .slice(0, 12); // Top 12 para el carrusel de Destacados
+    };
+
     useEffect(() => {
         loadContent();
     }, []);
@@ -123,6 +175,15 @@ export default function HomeScreen({ navigation }: Props) {
                 : (sections.finished.length ? sections.finished : sections.upcoming);
 
             setFeaturedMovies(featuredBase.slice(0, 5).map(mapCatalogAnimeToAnimeDetail));
+
+            // Construir sección Destacados
+            const featured = buildFeaturedItems(
+                newContentSections.airing,
+                newContentSections.finished,
+                newContentSections.upcoming
+            );
+            setFeaturedItems(featured);
+
             setContentSections(newContentSections);
         } catch (error) {
             console.error('Critical error loading content:', error);
@@ -138,12 +199,10 @@ export default function HomeScreen({ navigation }: Props) {
             return;
         }
         try {
-            // Usar el contexto para mantener el estado UI sincronizado
             await addToMyListContext(contentId, 'movie');
             Alert.alert('Éxito', 'Agregado a "Mi Lista".');
         } catch (error: any) {
             console.error('Error adding to my list:', error);
-            // Verificar si es un error de duplicado
             if (error?.response?.status === 409 || error?.message?.includes('duplicate')) {
                 Alert.alert('Información', 'Este título ya está en tu lista.');
             } else {
@@ -157,7 +216,6 @@ export default function HomeScreen({ navigation }: Props) {
         const scrollY = contentOffset.y;
         setBlackHeader(scrollY > 10);
 
-        // Detectar si estamos cerca del final del scroll para cargar más
         const paddingToBottom = 80;
         const isAtBottom = layoutMeasurement.height + contentOffset.y >= contentSize.height - paddingToBottom;
         if (isAtBottom && !isLoadingMore) {
@@ -175,35 +233,24 @@ export default function HomeScreen({ navigation }: Props) {
 
     const handleFilterChange = (filter: 'series' | 'movies' | 'all' | 'anime') => {
         setContentFilter(filter);
-        setSelectedCategory(null); // Resetear categoría al cambiar el filtro principal
-        // Reiniciar paginación y filas extra para evitar duplicados/mezclas al cambiar filtro
+        setSelectedCategory(null);
         setExtraRows([]);
         setCategorySequenceIndex(0);
-        // Limpiar keys cargadas
         loadedRowKeysRef.current = new Set();
-        setPagesByCategory({
-            airing: 1,
-            finished: 1,
-            upcoming: 1,
-        });
+        setPagesByCategory({ airing: 1, finished: 1, upcoming: 1 });
     };
 
     const loadMoreContent = async () => {
         try {
-            // Evitar llamadas paralelas que generan claves duplicadas
-            if (loadingMoreRef.current) {
-                return;
-            }
+            if (loadingMoreRef.current) return;
             loadingMoreRef.current = true;
             setIsLoadingMore(true);
 
             const pool = CATEGORY_POOLS[contentFilter];
-            if (!pool || pool.length === 0) {
-                return;
-            }
-            const batchSize = 3; // número de filas nuevas por carga para variedad
+            if (!pool || pool.length === 0) return;
+
+            const batchSize = 3;
             const newExtraRows: { key: string; title: string; items: ContentItem[] }[] = [];
-            // Usar un mapa local para evitar condiciones de carrera al actualizar páginas
             const updatedPages: Record<string, number> = { ...pagesByCategory };
 
             for (let i = 0; i < batchSize; i++) {
@@ -216,7 +263,6 @@ export default function HomeScreen({ navigation }: Props) {
                 const items = (response?.data || []).map(mapCatalogAnimeToContentItem);
 
                 if (items.length > 0) {
-                    // Deduplicar por id+source dentro de la fila cargada
                     const seen = new Set<string>();
                     const uniqueItems = items.filter(item => {
                         const key = `${item.source}_${item.id}`;
@@ -235,25 +281,18 @@ export default function HomeScreen({ navigation }: Props) {
                     }
                 }
 
-                // Actualizar el contador de página por categoría
                 updatedPages[categoryId] = nextPage;
             }
 
-            // Avanzar el índice de la secuencia para la próxima carga
             setCategorySequenceIndex(prev => (prev + batchSize) % pool.length);
-
-            // Aplicar actualización de páginas de manera atómica
             setPagesByCategory(updatedPages);
 
             if (newExtraRows.length > 0) {
-                // Evitar duplicados de keys al anexar nuevas filas (segunda barrera)
                 setExtraRows(prev => {
                     const all = [...prev, ...newExtraRows];
                     const map = new Map<string, { key: string; title: string; items: ContentItem[] }>();
                     for (const r of all) {
-                        if (!map.has(r.key)) {
-                            map.set(r.key, r);
-                        }
+                        if (!map.has(r.key)) map.set(r.key, r);
                     }
                     return Array.from(map.values());
                 });
@@ -270,25 +309,16 @@ export default function HomeScreen({ navigation }: Props) {
         navigation.navigate('Categoria', { categoryId, categoryName });
     };
 
-    // Lógica de renderizado actualizada para incluir anime
     const shouldShowCategory = (categoryId: string) => {
         if (contentFilter === 'all') return true;
-
-        // Filtros específicos por tipo de contenido
-        if (contentFilter === 'movies') {
-            return false;
-        }
-        if (contentFilter === 'series') {
-            return false;
-        }
+        if (contentFilter === 'movies') return false;
+        if (contentFilter === 'series') return false;
         if (contentFilter === 'anime') {
             return categoryId === 'airing' || categoryId === 'finished' || categoryId === 'upcoming';
         }
-
         return false;
     };
 
-    // Función para filtrar contenido basado en el filtro actual
     const filterContent = (content: ContentItem[]): ContentItem[] => {
         const byType = content.filter(item => {
             if (contentFilter === 'all') return true;
@@ -297,7 +327,6 @@ export default function HomeScreen({ navigation }: Props) {
             if (contentFilter === 'anime') return item.type === 'anime';
             return true;
         });
-        // Aplicar filtro de +18 sobre anime si está deshabilitado
         return byType.filter(item => {
             if (item.type === 'anime' && !adultContentEnabled) {
                 return !item.isAdult;
@@ -314,24 +343,24 @@ export default function HomeScreen({ navigation }: Props) {
         );
     }
 
-    // Función simplificada para manejar la selección de contenido
-    const handleContentSelection = (contentItem: ContentItem) => {
-        handleContentPress(contentItem);
-    };
-
-    // Función para navegar a detalles de contenido
     const handleContentNavigation = (contentItem: ContentItem) => {
         handleContentPress(contentItem);
     };
+
+    const hasAnyContent = contentSections.airing?.length ||
+        contentSections.finished?.length ||
+        contentSections.upcoming?.length;
 
     return (
         <View style={styles.container}>
             <Header
                 black={blackHeader}
-                onProfilePress={handleProfilePress}
-                onSearchPress={handleSearchPress}
+                activeSection="Inicio"
+                onProfilePress={() => navigateByLabel('Perfil')}
+                onSearchPress={() => navigateByLabel('Buscar')}
                 onFilterChange={handleFilterChange}
                 onCategorySelect={handleCategorySelect}
+                onNavPress={navigateByLabel}
             />
             <ScrollView
                 ref={scrollViewRef}
@@ -341,10 +370,12 @@ export default function HomeScreen({ navigation }: Props) {
                 scrollEventThrottle={16}
                 showsVerticalScrollIndicator={false}
             >
+                {/* Hero Carousel */}
                 {featuredMovies.length > 0 && (
                     <FeaturedCarousel
                         movies={featuredMovies}
                         onWatch={(movie) => {
+                            // "Reproducir" — abre el modal del anime que tiene el player de episodios
                             if ('release_date' in movie) {
                                 handleContentNavigation({
                                     id: movie.id,
@@ -367,67 +398,134 @@ export default function HomeScreen({ navigation }: Props) {
                                     rating: (movie as any).averageScore ? (movie as any).averageScore / 10 : 0,
                                     release_date: '',
                                     genres: (movie as any).genres || [],
-                                }));
+                                    status: (movie as any).status || '',
+                                } as any));
+                            }
+                        }}
+                        onMoreInfo={(movie) => {
+                            // "Más información" — mismo modal, que ya muestra los detalles del anime
+                            if ('release_date' in movie) {
+                                handleContentPress({
+                                    id: movie.id,
+                                    type: 'movie',
+                                    title: movie.title,
+                                    overview: movie.overview,
+                                    poster_path: movie.poster_path,
+                                    backdrop_path: movie.backdrop_path,
+                                    release_date: movie.release_date,
+                                    vote_average: movie.vote_average,
+                                    source: 'tmdb'
+                                });
+                            } else {
+                                handleContentPress(mapCatalogAnimeToContentItem({
+                                    id: movie.id,
+                                    title: (movie as any).title?.romaji || (movie as any).title?.native || '',
+                                    description: (movie as any).description || '',
+                                    poster_url: (movie as any).coverImage?.large || '',
+                                    banner_url: (movie as any).bannerImage || '',
+                                    rating: (movie as any).averageScore ? (movie as any).averageScore / 10 : 0,
+                                    release_date: '',
+                                    genres: (movie as any).genres || [],
+                                    status: (movie as any).status || '',
+                                } as any));
                             }
                         }}
                     />
                 )}
 
-                {([
-                    { id: 'airing', name: 'En emisión' },
-                    { id: 'finished', name: 'Finalizados' },
-                    { id: 'upcoming', name: 'Próximos' },
-                ] as const).map((category) => {
-                    if (!shouldShowCategory(category.id)) return null;
+                {/* Espaciado entre hero y secciones */}
+                <View style={styles.sectionsWrapper}>
 
-                    const categoryContent = contentSections[category.id];
-                    if (!categoryContent || categoryContent.length === 0) return null;
+                    {/* Sección: En emisión */}
+                    {shouldShowCategory('airing') &&
+                        contentSections.airing?.length > 0 &&
+                        filterContent(contentSections.airing).length > 0 && (
+                            <MovieRow
+                                key="airing"
+                                title="En emisión"
+                                accentColor={SECTION_ACCENTS.airing}
+                                movies={filterContent(contentSections.airing)}
+                                onMoviePress={(id) => {
+                                    const item = contentSections.airing.find(i => i.id === id);
+                                    if (item) handleContentNavigation(item);
+                                }}
+                            />
+                        )}
 
-                    const filteredContent = filterContent(categoryContent);
-                    if (filteredContent.length === 0) return null;
-
-                    return (
+                    {/* Sección: Destacados (Top del catálogo) */}
+                    {featuredItems.length > 0 && filterContent(featuredItems).length > 0 && (
                         <MovieRow
-                            key={category.id}
-                            title={category.name}
-                            movies={filteredContent}
+                            key="featured"
+                            title="Destacados"
+                            accentColor={SECTION_ACCENTS.featured}
+                            movies={filterContent(featuredItems)}
                             onMoviePress={(id) => {
-                                const contentItem = filteredContent.find(item => item.id === id);
-                                if (contentItem) {
-                                    handleContentNavigation(contentItem);
-                                }
+                                const item = featuredItems.find(i => i.id === id);
+                                if (item) handleContentNavigation(item);
                             }}
                         />
-                    );
-                })}
+                    )}
 
-                {(!contentSections.airing?.length && !contentSections.finished?.length && !contentSections.upcoming?.length) && (
-                    <View style={styles.emptyState}>
-                        <Text style={styles.emptyTitle}>Aún no hay anime disponible</Text>
-                        <Text style={styles.emptySubtitle}>Agrega contenido desde el panel de administrador.</Text>
-                    </View>
-                )}
+                    {/* Sección: Finalizados */}
+                    {shouldShowCategory('finished') &&
+                        contentSections.finished?.length > 0 &&
+                        filterContent(contentSections.finished).length > 0 && (
+                            <MovieRow
+                                key="finished"
+                                title="Finalizados"
+                                accentColor={SECTION_ACCENTS.finished}
+                                movies={filterContent(contentSections.finished)}
+                                onMoviePress={(id) => {
+                                    const item = contentSections.finished.find(i => i.id === id);
+                                    if (item) handleContentNavigation(item);
+                                }}
+                            />
+                        )}
 
-                {/* Filas adicionales cargadas dinámicamente al llegar al final */}
-                {extraRows.map((row) => (
-                    <MovieRow
-                        key={row.key}
-                        title={row.title}
-                        movies={filterContent(row.items)}
-                        onMoviePress={(id) => {
-                            const contentItem = row.items.find(item => item.id === id);
-                            if (contentItem) {
-                                handleContentNavigation(contentItem);
-                            }
-                        }}
-                    />
-                ))}
+                    {/* Sección: Todo el catálogo (upcoming) */}
+                    {shouldShowCategory('upcoming') &&
+                        contentSections.upcoming?.length > 0 &&
+                        filterContent(contentSections.upcoming).length > 0 && (
+                            <MovieRow
+                                key="upcoming"
+                                title="Todo el catálogo"
+                                accentColor={SECTION_ACCENTS.upcoming}
+                                movies={filterContent(contentSections.upcoming)}
+                                onMoviePress={(id) => {
+                                    const item = contentSections.upcoming.find(i => i.id === id);
+                                    if (item) handleContentNavigation(item);
+                                }}
+                            />
+                        )}
 
-                {isLoadingMore && (
-                    <View style={styles.loadingMore}>
-                        <ActivityIndicator size="small" color={colors.primary} />
-                    </View>
-                )}
+                    {/* Empty state */}
+                    {!hasAnyContent && (
+                        <View style={styles.emptyState}>
+                            <Text style={styles.emptyTitle}>Aún no hay anime disponible</Text>
+                            <Text style={styles.emptySubtitle}>Agrega contenido desde el panel de administrador.</Text>
+                        </View>
+                    )}
+
+                    {/* Filas adicionales cargadas dinámicamente al llegar al final */}
+                    {extraRows.map((row) => (
+                        <MovieRow
+                            key={row.key}
+                            title={row.title}
+                            accentColor={SECTION_ACCENTS[row.key.split('_')[0]] || colors.primary}
+                            movies={filterContent(row.items)}
+                            onMoviePress={(id) => {
+                                const item = row.items.find(i => i.id === id);
+                                if (item) handleContentNavigation(item);
+                            }}
+                        />
+                    ))}
+
+                    {isLoadingMore && (
+                        <View style={styles.loadingMore}>
+                            <ActivityIndicator size="small" color={colors.primary} />
+                        </View>
+                    )}
+                </View>
             </ScrollView>
 
             <MovieModal
@@ -448,11 +546,13 @@ const styles = StyleSheet.create({
         flex: 1,
     },
     scrollContent: {
-        paddingTop: 100,
-        paddingBottom: 80,
+        paddingBottom: 60,
+    },
+    sectionsWrapper: {
+        paddingTop: 28,
     },
     loadingMore: {
-        paddingVertical: 16,
+        paddingVertical: 20,
         alignItems: 'center',
         justifyContent: 'center',
     },
@@ -463,8 +563,8 @@ const styles = StyleSheet.create({
         backgroundColor: colors.background,
     },
     emptyState: {
-        paddingHorizontal: 20,
-        paddingTop: 24,
+        paddingHorizontal: 24,
+        paddingTop: 40,
     },
     emptyTitle: {
         color: '#FFFFFF',
@@ -473,7 +573,7 @@ const styles = StyleSheet.create({
         marginBottom: 6,
     },
     emptySubtitle: {
-        color: 'rgba(255,255,255,0.75)',
+        color: 'rgba(255,255,255,0.5)',
         fontSize: 14,
     },
 });

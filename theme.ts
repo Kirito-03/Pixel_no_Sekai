@@ -9,6 +9,16 @@ export const darkColors = {
   textGray: '#808080',     // Gris
   textLight: '#b3b3b3',    // Gris claro
   overlay: 'rgba(0, 0, 0, 0.7)', // Overlay oscuro
+  // Nuevos colores premium
+  surfaceElevated: '#1c1c1e',
+  glassBg: 'rgba(20, 20, 20, 0.75)',
+  glassBorder: 'rgba(255, 255, 255, 0.08)',
+  accentGold: '#FFD700',
+  accentGreen: '#00E676',
+  accentBlue: '#448AFF',
+  textMuted: 'rgba(255, 255, 255, 0.5)',
+  textSecondary: 'rgba(255, 255, 255, 0.7)',
+  divider: 'rgba(255, 255, 255, 0.06)',
 };
 
 export const lightColors = {
@@ -21,6 +31,15 @@ export const lightColors = {
   textGray: '#666666',
   textLight: '#999999',
   overlay: 'rgba(255, 255, 255, 0.7)',
+  surfaceElevated: '#F0F0F0',
+  glassBg: 'rgba(255, 255, 255, 0.75)',
+  glassBorder: 'rgba(0, 0, 0, 0.08)',
+  accentGold: '#FFD700',
+  accentGreen: '#00C853',
+  accentBlue: '#2962FF',
+  textMuted: 'rgba(0, 0, 0, 0.5)',
+  textSecondary: 'rgba(0, 0, 0, 0.7)',
+  divider: 'rgba(0, 0, 0, 0.06)',
 };
 
 // Compatibilidad: exportar 'colors' por defecto usando paleta oscura.
@@ -36,6 +55,67 @@ export const gradients = {
   shimmer: ['#1a1a1a', '#2a2a2a', '#1a1a1a'],
   overlay: ['transparent', 'rgba(0,0,0,0.8)'],
   overlayTop: ['rgba(0,0,0,0.6)', 'transparent'],
+  // Gradientes premium para hero
+  heroBottom: ['transparent', 'rgba(0,0,0,0.4)', 'rgba(0,0,0,0.85)', '#000'],
+  heroLeft: ['rgba(0,0,0,0.95)', 'rgba(0,0,0,0.6)', 'transparent'],
+  heroTop: ['rgba(0,0,0,0.5)', 'transparent'],
+  // Gradientes para cards
+  cardOverlay: ['transparent', 'rgba(0,0,0,0.85)'],
+};
+
+// Tipografía premium
+export const typography = {
+  heroTitle: {
+    fontSize: 48,
+    fontWeight: '800' as const,
+    letterSpacing: -0.5,
+  },
+  heroTitleMobile: {
+    fontSize: 30,
+    fontWeight: '800' as const,
+    letterSpacing: -0.3,
+  },
+  sectionTitle: {
+    fontSize: 22,
+    fontWeight: '700' as const,
+    letterSpacing: 0.3,
+  },
+  sectionTitleMobile: {
+    fontSize: 18,
+    fontWeight: '700' as const,
+    letterSpacing: 0.2,
+  },
+  body: {
+    fontSize: 15,
+    fontWeight: '400' as const,
+    lineHeight: 22,
+  },
+  caption: {
+    fontSize: 12,
+    fontWeight: '600' as const,
+    letterSpacing: 0.5,
+  },
+  navLink: {
+    fontSize: 14,
+    fontWeight: '500' as const,
+    letterSpacing: 0.3,
+  },
+};
+
+// Badge styles por status
+export const badgeStyles = {
+  airing: {
+    backgroundColor: '#E50914',
+    label: 'EN EMISIÓN',
+  },
+  finished: {
+    backgroundColor: '#00C853',
+    label: 'FINALIZADO',
+  },
+  upcoming: {
+    backgroundColor: '#448AFF',
+    label: 'PRÓXIMO',
+  },
 };
 
 // Sombras predefinidas para consistencia
@@ -110,4 +190,3 @@ export const spacing = {
   xl: 32,
   xxl: 48,
 };
-

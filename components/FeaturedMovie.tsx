@@ -1,11 +1,11 @@
 import React, { useState } from 'react';
-import { View, Image, Text, TouchableOpacity, StyleSheet, useWindowDimensions, Alert } from 'react-native';
+import { View, Image, Text, TouchableOpacity, StyleSheet, useWindowDimensions, Alert, Platform } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { MovieDetail, AnimeDetail } from '../types';
 import { getImageUrl } from '../services/api';
 import { getAnimeImageUrl, getAnimeTitle, getAnimeYear, getAnimeScore } from '../services/anilistService';
-import { colors, spacing } from '../theme';
+import { colors, spacing, typography, gradients, badgeStyles } from '../theme';
 import { useProfile } from '../contexts/ProfileContext';
 import { useMyList } from '../contexts/MyListContext';
 
@@ -14,21 +14,41 @@ const stripHtml = (html?: string) => html ? html.replace(/<[^>]*>/g, '') : '';
 interface Props {
   movie: MovieDetail | AnimeDetail;
   onWatch: () => void;
+  onMoreInfo?: () => void;
   onAddList?: () => void;
 }
 
-export default function FeaturedMovie({ movie, onWatch, onAddList }: Props) {
+export default function FeaturedMovie({ movie, onWatch, onMoreInfo, onAddList }: Props) {
   const { width, height } = useWindowDimensions();
   const isSmallScreen = width < 768;
+  const isWeb = Platform.OS === 'web';
   const { currentProfile } = useProfile();
   const { isInMyList, toggleMyList, addToMyList } = useMyList();
   const [isToggling, setIsToggling] = useState(false);
 
   const isAnime = !('release_date' in movie);
   const releaseYear = isAnime ? getAnimeYear((movie as AnimeDetail).startDate) : (movie.release_date ? new Date(movie.release_date).getFullYear() : '');
-  const genres = isAnime ? ((movie as AnimeDetail).genres?.join(', ') || '') : (movie.genres ? movie.genres.map(g => g.name).join(', ') : '');
+  const genres = isAnime ? ((movie as AnimeDetail).genres || []) : (movie.genres ? movie.genres.map(g => g.name) : []);
   const voteAverage = isAnime ? getAnimeScore((movie as AnimeDetail).averageScore).toFixed(1) : (movie.vote_average ? movie.vote_average.toFixed(1) : '0');
   const inMyList = isInMyList(movie.id, isAnime ? 'anime' : 'movie');
+
+  // Determinar status del anime para badge
+  const animeStatus = isAnime ? (movie as any).status : '';
+  const getStatusBadge = () => {
+    if (!animeStatus) return null;
+    const statusLower = animeStatus.toLowerCase();
+    if (statusLower.includes('releasing') || statusLower.includes('airing') || statusLower === 'emisión') {
+      return badgeStyles.airing;
+    }
+    if (statusLower.includes('finished') || statusLower.includes('completed') || statusLower === 'finalizado') {
+      return badgeStyles.finished;
+    }
+    if (statusLower.includes('upcoming') || statusLower.includes('not_yet') || statusLower === 'próximo') {
+      return badgeStyles.upcoming;
+    }
+    return null;
+  };
+  const statusBadge = getStatusBadge();
 
   const handleMyListPress = async () => {
     // Si el padre provee un handler específico, usarlo (para compatibilidad)
@@ -51,193 +71,244 @@ export default function FeaturedMovie({ movie, onWatch, onAddList }: Props) {
     }
   };
 
-  const dynamicStyles = {
-    container: {
-      width,
-      height: isSmallScreen ? height * 0.75 : height * 0.95,
-      marginTop: 0,
-    },
-    image: {
-      width: '100%' as const,
-      height: '100%' as const,
-      position: 'absolute' as const,
-    },
-    gradientVertical: {
-      width: '100%' as const,
-      height: '100%' as const,
-    },
-    gradientHorizontal: {
-      width: '100%' as const,
-      height: '100%' as const,
-      justifyContent: isSmallScreen ? ('flex-end' as const) : ('center' as const),
-    },
-    content: {
-      paddingLeft: isSmallScreen ? 16 : 30,
-      paddingRight: isSmallScreen ? 16 : 30,
-      paddingBottom: isSmallScreen ? 60 : 100,
-      paddingTop: isSmallScreen ? 40 : 70,
-    },
-    title: {
-      fontSize: isSmallScreen ? 28 : 40,
-      fontWeight: 'bold' as const,
-      color: colors.text,
-      marginBottom: isSmallScreen ? 8 : spacing.md,
-    },
-    info: {
-      flexDirection: 'row' as const,
-      alignItems: 'center' as const,
-      marginTop: isSmallScreen ? 10 : 15,
-      flexWrap: 'wrap' as const,
-    },
-    points: {
-      fontSize: isSmallScreen ? 14 : 18,
-      fontWeight: 'bold' as const,
-      color: '#46d369',
-      marginRight: isSmallScreen ? 10 : 15,
-    },
-    year: {
-      fontSize: isSmallScreen ? 14 : 18,
-      fontWeight: 'bold' as const,
-      color: colors.text,
-      marginRight: isSmallScreen ? 10 : 15,
-    },
-    seasons: {
-      fontSize: isSmallScreen ? 14 : 18,
-      fontWeight: 'bold' as const,
-      color: colors.text,
-      marginRight: isSmallScreen ? 10 : 15,
-    },
-    description: {
-      marginTop: isSmallScreen ? 10 : 15,
-      fontSize: isSmallScreen ? 13 : 17,
-      color: '#999',
-      lineHeight: isSmallScreen ? 20 : 24,
-      maxWidth: '100%' as any,
-    },
-    buttons: {
-      flexDirection: 'row' as const,
-      alignItems: 'center' as const,
-      justifyContent: 'flex-start' as const,
-      marginTop: isSmallScreen ? 12 : 15,
-      flexWrap: 'nowrap' as const,
-    },
-    watchButton: {
-      backgroundColor: '#fff',
-      flexDirection: 'row' as const,
-      alignItems: 'center' as const,
-      paddingVertical: isSmallScreen ? 10 : 15,
-      paddingHorizontal: isSmallScreen ? 20 : 25,
-      borderRadius: 5,
-      marginRight: 10,
-      marginBottom: isSmallScreen ? 8 : 0,
-    },
-    watchButtonText: {
-      color: '#000',
-      fontSize: isSmallScreen ? 16 : 20,
-      fontWeight: 'bold' as const,
-      marginLeft: 8,
-    },
-    myListButton: {
-      backgroundColor: '#333',
-      flexDirection: 'row' as const,
-      alignItems: 'center' as const,
-      paddingVertical: isSmallScreen ? 10 : 15,
-      paddingHorizontal: isSmallScreen ? 20 : 25,
-      borderRadius: 5,
-      marginLeft: 10,
-    },
-    myListButtonText: {
-      color: '#fff',
-      fontSize: isSmallScreen ? 16 : 20,
-      fontWeight: 'bold' as const,
-      marginLeft: 8,
-    },
-    genres: {
-      marginTop: isSmallScreen ? 10 : 15,
-      fontSize: isSmallScreen ? 14 : 18,
-      color: '#999',
-    },
-    genresBold: {
-      fontWeight: 'bold' as const,
-    },
-  };
+  const title = isAnime ? getAnimeTitle((movie as AnimeDetail).title) : movie.title;
+  const description = isAnime ? stripHtml((movie as any).description) : stripHtml((movie as any).overview);
+  const imageUri = isAnime
+    ? getAnimeImageUrl((movie as AnimeDetail).bannerImage || (movie as AnimeDetail).coverImage?.large)
+    : getImageUrl(movie.backdrop_path, 'original');
 
   return (
-    <View style={dynamicStyles.container}>
+    <View style={[styles.container, { width, height: isSmallScreen ? height * 0.72 : height * 0.9 }]}>
       <Image
-        source={{ uri: isAnime ? getAnimeImageUrl((movie as AnimeDetail).bannerImage || (movie as AnimeDetail).coverImage?.large) : getImageUrl(movie.backdrop_path, 'original') }}
-        style={dynamicStyles.image}
+        source={{ uri: imageUri }}
+        style={StyleSheet.absoluteFillObject}
+        resizeMode="cover"
       />
-      
-      {/* Gradiente vertical (de arriba hacia abajo) */}
+
+      {/* Top vignette para navbar */}
       <LinearGradient
-        colors={['transparent', 'rgba(17, 17, 17, 0.9)', '#111']}
-        locations={[0, 0.7, 1]}
-        style={dynamicStyles.gradientVertical}
-      >
-        {/* Gradiente horizontal (de izquierda a derecha) */}
+        colors={gradients.heroTop as any}
+        style={[StyleSheet.absoluteFillObject, { height: '30%' }]}
+        pointerEvents="none"
+      />
+
+      {/* Bottom gradient — cinematográfico */}
+      <LinearGradient
+        colors={gradients.heroBottom as any}
+        locations={[0, 0.3, 0.7, 1]}
+        style={StyleSheet.absoluteFillObject}
+        pointerEvents="none"
+      />
+
+      {/* Left gradient — para texto legible */}
+      {!isSmallScreen && (
         <LinearGradient
-          colors={['rgba(17, 17, 17, 0.9)', 'transparent']}
+          colors={gradients.heroLeft as any}
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 0 }}
-          locations={[0.3, 0.7]}
-          style={dynamicStyles.gradientHorizontal}
-        >
-          <View style={dynamicStyles.content}>
-            {/* Título */}
-            <Text style={dynamicStyles.title}>{isAnime ? getAnimeTitle((movie as AnimeDetail).title) : movie.title}</Text>
-            
-            {/* Info: Puntos, Año, Duración */}
-            <View style={dynamicStyles.info}>
-              {isAnime && (
-                <View style={{
-                  backgroundColor: '#e50914',
-                  borderRadius: 3,
-                  paddingHorizontal: 6,
-                  paddingVertical: 2,
-                  marginRight: isSmallScreen ? 10 : 15,
-                }}>
-                  <Text style={{ color: '#fff', fontSize: isSmallScreen ? 11 : 13, fontWeight: 'bold' }}>ANIME</Text>
-                </View>
-              )}
-              <Text style={dynamicStyles.points}>{voteAverage} puntos</Text>
-              <Text style={dynamicStyles.year}>{releaseYear}</Text>
-              {!isAnime && (movie as MovieDetail).runtime && (
-                <Text style={dynamicStyles.seasons}>{(movie as MovieDetail).runtime} min</Text>
-              )}
-            </View>
-            
-            {/* Descripción */}
-            <Text style={dynamicStyles.description} numberOfLines={5}>
-              {isAnime ? stripHtml((movie as any).description) : stripHtml((movie as any).overview)}
-            </Text>
-            
-            {/* Botones */}
-            <View style={dynamicStyles.buttons}>
-              <TouchableOpacity style={dynamicStyles.watchButton} onPress={onWatch}>
-                <Ionicons name="play" size={16} color="#000" />
-                <Text style={dynamicStyles.watchButtonText}>Ver ahora</Text>
-              </TouchableOpacity>
-              
-              <TouchableOpacity style={[dynamicStyles.myListButton, isToggling && { opacity: 0.6 }]} onPress={handleMyListPress}>
-                <Ionicons name={inMyList ? 'checkmark' : 'add'} size={16} color="#fff" />
-                <Text style={dynamicStyles.myListButtonText}>
-                  {isToggling ? 'Procesando...' : (inMyList ? 'En mi lista' : 'Mi lista')}
-                </Text>
-              </TouchableOpacity>
-            </View>
-            
-            {/* Géneros */}
-            {genres && (
-              <Text style={dynamicStyles.genres}>
-                <Text style={dynamicStyles.genresBold}>Gêneros: </Text>
-                {genres}
-              </Text>
-            )}
+          locations={[0, 0.4, 0.8]}
+          style={StyleSheet.absoluteFillObject}
+          pointerEvents="none"
+        />
+      )}
+
+      {/* Contenido del Hero */}
+      <View style={[styles.content, {
+        paddingLeft: isSmallScreen ? 20 : 50,
+        paddingRight: isSmallScreen ? 20 : 50,
+        paddingBottom: isSmallScreen ? 50 : 80,
+        maxWidth: isSmallScreen ? '100%' : '55%',
+      } as any]}>
+
+        {/* Badge de estado */}
+        {statusBadge && (
+          <View style={[styles.statusBadge, { backgroundColor: statusBadge.backgroundColor }]}>
+            <Text style={styles.statusBadgeText}>{statusBadge.label}</Text>
           </View>
-        </LinearGradient>
-      </LinearGradient>
+        )}
+
+        {/* Título */}
+        <Text
+          style={[
+            isSmallScreen ? styles.titleMobile : styles.title,
+            isWeb ? { textShadow: '0px 4px 20px rgba(0,0,0,0.8)' } as any : null,
+          ]}
+          numberOfLines={2}
+        >
+          {title}
+        </Text>
+
+        {/* Meta info: rating, año, géneros */}
+        <View style={styles.metaRow}>
+          <View style={styles.ratingBadge}>
+            <Ionicons name="star" size={12} color="#FFD700" />
+            <Text style={styles.ratingText}>{voteAverage}</Text>
+          </View>
+          <Text style={styles.metaDot}>•</Text>
+          <Text style={styles.metaText}>{releaseYear}</Text>
+          {!isAnime && (movie as MovieDetail).runtime && (
+            <>
+              <Text style={styles.metaDot}>•</Text>
+              <Text style={styles.metaText}>{(movie as MovieDetail).runtime} min</Text>
+            </>
+          )}
+        </View>
+
+        {/* Géneros como pills */}
+        {genres.length > 0 && (
+          <View style={styles.genreRow}>
+            {genres.slice(0, 4).map((genre, idx) => (
+              <View key={idx} style={styles.genrePill}>
+                <Text style={styles.genrePillText}>{genre}</Text>
+              </View>
+            ))}
+          </View>
+        )}
+
+        {/* Descripción */}
+        <Text style={styles.description} numberOfLines={3}>
+          {description}
+        </Text>
+
+        {/* Botones */}
+        <View style={styles.buttonsRow}>
+          <TouchableOpacity style={styles.playButton} onPress={onWatch} activeOpacity={0.85}>
+            <Ionicons name="play" size={18} color="#000" />
+            <Text style={styles.playButtonText}>Reproducir</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.infoButton}
+            onPress={onMoreInfo}
+            activeOpacity={0.75}
+          >
+            <Ionicons name="information-circle-outline" size={18} color="#fff" />
+            <Text style={styles.infoButtonText}>Más información</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
     </View>
   );
 }
 
+const styles = StyleSheet.create({
+  container: {
+    position: 'relative',
+    justifyContent: 'flex-end',
+  },
+  content: {
+    zIndex: 2,
+  },
+  statusBadge: {
+    alignSelf: 'flex-start',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 4,
+    marginBottom: 12,
+  },
+  statusBadgeText: {
+    color: '#fff',
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 1,
+  },
+  title: {
+    ...typography.heroTitle,
+    color: colors.text,
+    marginBottom: 12,
+  },
+  titleMobile: {
+    ...typography.heroTitleMobile,
+    color: colors.text,
+    marginBottom: 10,
+  },
+  metaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 10,
+    gap: 8,
+  },
+  ratingBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(255, 215, 0, 0.15)',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  ratingText: {
+    color: '#FFD700',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  metaDot: {
+    color: 'rgba(255,255,255,0.3)',
+    fontSize: 14,
+  },
+  metaText: {
+    color: 'rgba(255,255,255,0.8)',
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  genreRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginBottom: 12,
+  },
+  genrePill: {
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  genrePillText: {
+    color: 'rgba(255, 255, 255, 0.75)',
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  description: {
+    color: 'rgba(255, 255, 255, 0.65)',
+    fontSize: 14,
+    lineHeight: 20,
+    marginBottom: 18,
+  },
+  buttonsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  playButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    paddingVertical: 10,
+    paddingHorizontal: 22,
+    borderRadius: 8,
+    gap: 6,
+  },
+  playButtonText: {
+    color: '#000',
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  infoButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.15)',
+    paddingVertical: 10,
+    paddingHorizontal: 18,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+    gap: 6,
+  },
+  infoButtonText: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '600',
+  },
+});

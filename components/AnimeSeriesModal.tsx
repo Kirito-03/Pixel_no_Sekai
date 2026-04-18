@@ -18,6 +18,7 @@ import {
   Pressable,
   Linking,
 } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 import { WebView } from 'react-native-webview';
@@ -26,11 +27,12 @@ import { getImageUrl, getMovieDetails, getTVShowDetails, animeToContentItem, tmd
 import { getAnimeDetails, getSimilarAnime, getAnimeImageUrl, getAnimeTitle, getAnimeYear, getAnimeScore, getAnimeByGenre } from '../services/anilistService';
 import { createMockStreamingInfo, getAnimeStreamingInfo } from '../services/animeStreamingService';
 import { debugM3U, resetM3UCache } from '../services/m3uParser';
-import databaseService from '../services/databaseService';
 import { catalogService } from '../services/catalogService';
 import { useProfile } from '../contexts/ProfileContext';
 import { useMyList } from '../contexts/MyListContext';
 import EpisodePlayer from './EpisodePlayer';
+import { canReachUrl } from '../services/connectivity';
+import { offlineDownloads } from '../services/offlineDownloads';
 
 interface AnimeSeriesModalProps {
   content: ContentItem | null;
@@ -67,9 +69,7 @@ export default function AnimeSeriesModal({
   const [isTogglingMyList, setIsTogglingMyList] = useState(false);
   const [isTogglingDownloads, setIsTogglingDownloads] = useState(false);
   const [currentInDownloads, setCurrentInDownloads] = useState(false);
-  
-  // Logs de depuración eliminados para mantener el código limpio y sin emojis
-  
+
   const { currentProfile } = useProfile();
   const { isInMyList, toggleMyList } = useMyList();
   
@@ -131,17 +131,13 @@ export default function AnimeSeriesModal({
       loadContentDetails();
       loadRelatedContent();
       
-      if (currentContent.type === 'anime') {
+      if ((currentContent.type as string) === 'anime') {
         console.log('Loading streaming info for anime');
         loadStreamingInfo();
       }
 
       // Verificar estado de Descargas al abrir
-      if (currentProfile && currentContent) {
-        databaseService.isInDownloads(currentProfile.id, currentContent.id, 'anime')
-          .then(setCurrentInDownloads)
-          .catch(() => setCurrentInDownloads(false));
-      }
+      setCurrentInDownloads(false);
       
       return () => {
         if (!visible) {
@@ -158,6 +154,28 @@ export default function AnimeSeriesModal({
       setTrailerFinished(false);
     }
   }, [visible, currentContent, trailerKey]);
+
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+    if (!visible) return;
+    const profileId = currentProfile?.id;
+    const season = selectedSeason;
+    if (!profileId || !season) {
+      setCurrentInDownloads(false);
+      return;
+    }
+    const episodeIds = season.episodes
+      .map((e) => Number(e.id))
+      .filter((n) => Number.isFinite(n) && n > 0);
+    if (episodeIds.length === 0) {
+      setCurrentInDownloads(false);
+      return;
+    }
+    offlineDownloads
+      .getSeasonSummary(profileId, episodeIds)
+      .then((s) => setCurrentInDownloads(s.total > 0 && s.downloaded === s.total))
+      .catch(() => setCurrentInDownloads(false));
+  }, [visible, currentProfile?.id, selectedSeason?.id]);
 
   useEffect(() => {
     if (!visible) return;
@@ -194,7 +212,7 @@ export default function AnimeSeriesModal({
         details = await getMovieDetails(currentContent.id);
       } else if (currentContent.type === 'tv') {
         details = await getTVShowDetails(currentContent.id);
-      } else if (currentContent.type === 'anime') {
+      } else if ((currentContent.type as string) === 'anime') {
         const anime = await catalogService.getAnimeById(currentContent.id);
         details = {
           id: anime.id,
@@ -283,6 +301,7 @@ export default function AnimeSeriesModal({
           number: ep.episode_number,
           title: ep.title || `Episodio ${ep.episode_number}`,
           url,
+          downloadUrl: ep.video_url || undefined,
         };
         const list = grouped.get(season) || [];
         list.push(episodeItem);
@@ -351,7 +370,7 @@ export default function AnimeSeriesModal({
   const loadRelatedContent = async () => {
     if (!currentContent) return;
     
-    if (currentContent.type === 'anime') {
+    if ((currentContent.type as string) === 'anime') {
       setRelatedContent([]);
       return;
     }
@@ -391,7 +410,7 @@ export default function AnimeSeriesModal({
 
       // Mapear a ContentItem unificado según el tipo
       let mapped: ContentItem[] = [];
-      if (currentContent.type === 'anime') {
+      if ((currentContent.type as string) === 'anime') {
         mapped = unique.map((anime: Anime) => animeToContentItem(anime));
       } else if (currentContent.type === 'movie') {
         mapped = unique.map((movie: any) => tmdbToContentItem(movie as any, 'movie'));
@@ -530,10 +549,19 @@ export default function AnimeSeriesModal({
       Alert.alert('Perfil requerido', 'Selecciona un perfil para gestionar Descargas.');
       return;
     }
+    if (Platform.OS !== 'android') return;
     if (isTogglingDownloads) return;
     setIsTogglingDownloads(true);
     try {
-      await databaseService.removeFromDownloads(currentProfile.id, currentContent.id, 'anime');
+      if (!selectedSeason) {
+        Alert.alert('Temporada requerida', 'Selecciona una temporada para gestionar descargas.');
+        return;
+      }
+      const profileId = currentProfile.id;
+      const episodeIds = selectedSeason.episodes
+        .map((e) => Number(e.id))
+        .filter((n) => Number.isFinite(n) && n > 0);
+      await Promise.all(episodeIds.map((id) => offlineDownloads.removeEpisode(profileId, id)));
       setCurrentInDownloads(false);
     } catch (error) {
       Alert.alert('Error', 'No se pudo quitar de Descargas.');
@@ -548,29 +576,52 @@ export default function AnimeSeriesModal({
       Alert.alert('Perfil requerido', 'Selecciona un perfil para gestionar Descargas.');
       return;
     }
+    if (Platform.OS !== 'android') return;
     if (isTogglingDownloads) return;
     setIsTogglingDownloads(true);
     try {
-      // Preferir temporada seleccionada; si no, agregar anime completo
-      if (selectedSeason) {
-        const episodes = selectedSeason.episodes.map(ep => ({ episode_number: ep.number, name: ep.title }));
-        await databaseService.addAnimeSeasonToDownloads(
-          currentProfile.id,
-          currentContent.id,
-          selectedSeason.season,
-          episodes
-        );
-      } else if (streamingInfo && streamingInfo.seasons.length > 0) {
-        const seasonsPayload = streamingInfo.seasons.map(s => ({
-          season_number: s.season,
-          episodes: s.episodes.map(ep => ({ episode_number: ep.number, name: ep.title }))
-        }));
-        await databaseService.addAnimeToDownloads(currentProfile.id, currentContent.id, seasonsPayload as any);
-      } else {
-        Alert.alert('Sin episodios', 'No hay información de temporadas/episodios para descargar.');
+      if (!selectedSeason) {
+        Alert.alert('Temporada requerida', 'Selecciona una temporada para descargar.');
         return;
       }
-      setCurrentInDownloads(true);
+      const profileId = currentProfile.id;
+      const animeId = currentContent.id;
+      const toDownload = selectedSeason.episodes
+        .map((ep) => {
+          const episodeId = Number(ep.id);
+          const url = ep.downloadUrl;
+          if (!Number.isFinite(episodeId) || episodeId <= 0) return null;
+          if (!url) return null;
+          return { episodeId, episodeNumber: ep.number, title: ep.title, url };
+        })
+        .filter((x): x is { episodeId: number; episodeNumber: number; title: string; url: string } => !!x);
+      if (!toDownload.length) {
+        Alert.alert('No disponible', 'No hay archivos descargables para esta temporada.');
+        return;
+      }
+      const online = await canReachUrl(toDownload[0].url);
+      if (!online) {
+        Alert.alert('Sin conexión', 'Conéctate a internet para descargar.');
+        return;
+      }
+      for (const ep of toDownload) {
+        await offlineDownloads.downloadEpisode(
+          profileId,
+          {
+            animeId,
+            season: selectedSeason.season,
+            episodeId: ep.episodeId,
+            episodeNumber: ep.episodeNumber,
+            title: ep.title,
+            url: ep.url,
+          }
+        );
+      }
+      const summary = await offlineDownloads.getSeasonSummary(
+        profileId,
+        selectedSeason.episodes.map((e) => Number(e.id)).filter((n) => Number.isFinite(n) && n > 0)
+      );
+      setCurrentInDownloads(summary.total > 0 && summary.downloaded === summary.total);
     } catch (error) {
       Alert.alert('Error', 'No se pudo agregar a Descargas.');
     } finally {
@@ -768,9 +819,9 @@ export default function AnimeSeriesModal({
               />
             }
           >
-            {/* Hero Section con backdrop */}
-            <View style={styles.heroSection}>
-              {/* Imagen de fondo o trailer */}
+            {/* HERO SECTION */}
+            <View style={heroStyles.heroSection}>
+              {/* Backdrop + gradiente cinematográfico */}
               {trailerDelay && trailerKey && !trailerFinished ? (
                 <View style={styles.trailerBackground}>
                   <TouchableOpacity style={styles.trailerCloseButton} onPress={handleCloseTrailer}>
@@ -829,157 +880,255 @@ export default function AnimeSeriesModal({
                 </View>
               ) : (
                 <>
-                  {currentContent?.backdrop_path && (
-                    <Image
-                      source={{ 
-                        uri: currentContent.type === 'anime' 
-                          ? getAnimeImageUrl(currentContent.backdrop_path) 
-                          : getImageUrl(currentContent.backdrop_path, 'original') 
-                      }}
-                      style={styles.backdropImage}
-                      resizeMode="cover"
-                    />
-                  )}
-                  <View style={styles.backdropOverlay} />
+                  {/* Imagen backdrop — posición dinámica por contenido */}
+                  <Image
+                    source={{
+                      uri: currentContent?.backdrop_path
+                        ? (currentContent.type === 'anime'
+                            ? getAnimeImageUrl(currentContent.backdrop_path)
+                            : getImageUrl(currentContent.backdrop_path, 'original'))
+                        : (currentContent?.poster_path
+                            ? (currentContent.type === 'anime'
+                                ? getAnimeImageUrl(currentContent.poster_path)
+                                : getImageUrl(currentContent.poster_path, 'w500'))
+                            : '')
+                    }}
+                    style={[
+                      heroStyles.backdropImage,
+                      Platform.OS === 'web' && {
+                        // @ts-ignore
+                        objectPosition: (currentContent as any)?.banner_position ?? '50% 8%',
+                        transform: [{ scale: 1.06 }],
+                      },
+                      Platform.OS !== 'web' && {
+                        transform: [{ scale: 1.06 }, { translateY: 14 }],
+                      },
+                    ]}
+                    resizeMode="cover"
+                  />
+                  {/* Gradiente multi-stop — más agresivo en la mitad inferior para legibilidad */}
+                  <LinearGradient
+                    colors={[
+                      'rgba(0,0,0,0.0)',
+                      'rgba(0,0,0,0.0)',
+                      'rgba(0,0,0,0.45)',
+                      'rgba(0,0,0,0.82)',
+                      'rgba(0,0,0,0.97)',
+                      'rgba(0,0,0,1.0)',
+                    ]}
+                    locations={[0, 0.25, 0.48, 0.68, 0.88, 1]}
+                    style={StyleSheet.absoluteFill}
+                  />
                 </>
               )}
-              
-              {/* Contenido sobre el backdrop - se oculta durante el trailer */}
-              {!trailerDelay && (
-                <View style={styles.heroContent}>
-                  <View style={[styles.heroInfo, { maxWidth: isSmallScreen ? '90%' : '85%' }]}>
-                    <Text style={[styles.heroTitle, { fontSize: isSmallScreen ? 20 : 24 }]}>{String(getTitle())}</Text>
-                    
-                    {/* Metadata en línea horizontal */}
-                    <View style={styles.heroMetadata}>
-                      {getReleaseDate() && (
-                        <Text style={styles.heroYear}>
-                          {new Date(getReleaseDate()).getFullYear()}
-                        </Text>
-                      )}
-                      {getReleaseDate() && getRuntime() !== 0 && (
-                        <Text style={styles.heroSeparator}>•</Text>
-                      )}
-                      {getRuntime() !== 0 && (
-                        <Text style={styles.heroRuntime}>
-                          {formatRuntime(getRuntime())}
-                        </Text>
-                      )}
-                      {(getReleaseDate() || getRuntime() !== 0) && getAgeRating() && (
-                        <Text style={styles.heroSeparator}>•</Text>
-                      )}
-                      {getAgeRating() && (
-                        <Text style={styles.heroAgeRating}>{getAgeRating()}</Text>
-                      )}
-                      {(getReleaseDate() || getRuntime() !== 0 || getAgeRating()) && (
-                        <Text style={styles.heroSeparator}>•</Text>
-                      )}
-                      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                        <Ionicons name="star" size={16} color="#FFD700" />
-                        <Text style={[styles.heroRating, { marginLeft: 4 }]}> {currentContent?.vote_average.toFixed(1)}</Text>
-                      </View>
-                    </View>
 
-                    {/* Botón Ver ahora arriba (series y películas de anime) */}
-                    {currentContent?.type === 'anime' && (isRealAnime() || isAnimeMovie()) && (
-                      <View style={styles.actionButtons}>
-                        <TouchableOpacity style={styles.playButton} onPress={handleWatchNow}>
-                          <Ionicons name="play" size={20} color="#000" />
-                          <Text style={styles.playButtonText}>Ver ahora</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity style={styles.trailerButton} onPress={handlePlayTrailer} disabled={!trailerKey}>
-                          <Ionicons name="play-circle" size={20} color="#FFFFFF" />
-                          <Text style={styles.trailerButtonText}>Ver trailer</Text>
-                        </TouchableOpacity>
+              {/* Contenido sobre el backdrop */}
+              {!trailerDelay && (
+                <View style={heroStyles.heroContent}>
+                  {/* Rating + año + estado */}
+                  <View style={heroStyles.metaRow}>
+                    {currentContent?.vote_average != null && currentContent.vote_average > 0 && (
+                      <View style={heroStyles.ratingPill}>
+                        <Ionicons name="star" size={11} color="#FFD700" />
+                        <Text style={heroStyles.ratingText}>{currentContent.vote_average.toFixed(1)}</Text>
                       </View>
                     )}
-
-                    {/* Descripción después de los botones */}
-                    <Animated.View style={{ transform: [{ translateY: descSlideAnim }] }}>
-                      {currentContent?.type === 'anime' && (loading || !detailData) ? (
-                        <View style={styles.skeletonContainer}>
-                          <View style={styles.skeletonLine} />
-                          <View style={styles.skeletonLine} />
-                          <View style={[styles.skeletonLine, { width: '60%' }]} />
-                        </View>
-                      ) : (
-                        <Text style={styles.heroOverview} numberOfLines={6}>
-                          {cleanDescription(
-                            currentContent?.type === 'anime' && detailData && 'description' in detailData
-                              ? (detailData as AnimeDetail).description || currentContent?.overview || 'Sin descripción disponible'
-                              : currentContent?.overview || 'Sin descripción disponible'
-                          )}
+                    {getReleaseDate() && (
+                      <Text style={heroStyles.metaText}>{new Date(getReleaseDate()).getFullYear()}</Text>
+                    )}
+                    {detailData && 'status' in detailData && (
+                      <View style={[
+                        heroStyles.statusPill,
+                        (detailData as any).status === 'RELEASING' && { backgroundColor: 'rgba(229,9,20,0.8)' },
+                        (detailData as any).status === 'FINISHED' && { backgroundColor: 'rgba(0,200,83,0.7)' },
+                      ]}>
+                        <Text style={heroStyles.statusPillText}>
+                          {(detailData as any).status === 'RELEASING' ? 'En emisión' :
+                           (detailData as any).status === 'FINISHED' ? 'Completado' :
+                           (detailData as any).status === 'NOT_YET_RELEASED' ? 'Próximamente' :
+                           (detailData as any).status || ''}
                         </Text>
-                      )}
-                    </Animated.View>
+                      </View>
+                    )}
+                    {detailData && 'episodes' in detailData && isRealAnime() && (
+                      <Text style={heroStyles.metaText}>{(detailData as any).episodes} ep.</Text>
+                    )}
                   </View>
+
+                  {/* Título */}
+                  <Text style={[heroStyles.title, { fontSize: isSmallScreen ? 24 : 34 }]} numberOfLines={2}>
+                    {String(getTitle())}
+                  </Text>
+
+                  {/* Géneros en chips */}
+                  {detailData?.genres && detailData.genres.length > 0 && (
+                    <View style={heroStyles.genreRow}>
+                      {detailData.genres.slice(0, 4).map((g: any, i: number) => (
+                        <View key={i} style={heroStyles.genreChip}>
+                          <Text style={heroStyles.genreChipText}>{typeof g === 'string' ? g : g.name}</Text>
+                        </View>
+                      ))}
+                    </View>
+                  )}
+
+                  {/* Descripción */}
+                  <Animated.View style={{ transform: [{ translateY: descSlideAnim }] }}>
+                    {currentContent?.type === 'anime' && (loading || !detailData) ? (
+                      <View style={styles.skeletonContainer}>
+                        <View style={styles.skeletonLine} />
+                        <View style={styles.skeletonLine} />
+                        <View style={[styles.skeletonLine, { width: '60%' }]} />
+                      </View>
+                    ) : (
+                      <Text style={heroStyles.overview} numberOfLines={3}>
+                        {cleanDescription(
+                          currentContent?.type === 'anime' && detailData && 'description' in detailData
+                            ? (detailData as any).description || currentContent?.overview || ''
+                            : currentContent?.overview || ''
+                        )}
+                      </Text>
+                    )}
+                  </Animated.View>
+
+                  {/* Botones de acción */}
+                  {currentContent?.type === 'anime' && (isRealAnime() || isAnimeMovie()) && (
+                    <View style={heroStyles.actionRow}>
+                      <TouchableOpacity style={heroStyles.btnPlay} onPress={handleWatchNow}>
+                        <Ionicons name="play" size={18} color="#000" />
+                        <Text style={heroStyles.btnPlayText}>Reproducir</Text>
+                      </TouchableOpacity>
+
+                      <TouchableOpacity
+                        style={[heroStyles.btnSecondary, isTogglingMyList && { opacity: 0.6 }]}
+                        onPress={handleToggleList}
+                        disabled={isTogglingMyList}
+                      >
+                        {isTogglingMyList
+                          ? <ActivityIndicator size="small" color="#fff" />
+                          : <Ionicons name={currentInMyList ? 'checkmark' : 'add'} size={18} color="#fff" />}
+                        <Text style={heroStyles.btnSecondaryText}>
+                          {currentInMyList ? 'En mi lista' : 'Mi lista'}
+                        </Text>
+                      </TouchableOpacity>
+
+                      {trailerKey && (
+                        <TouchableOpacity style={heroStyles.btnIcon} onPress={handlePlayTrailer}>
+                          <Ionicons name="play-circle-outline" size={22} color="#fff" />
+                          <Text style={heroStyles.btnIconText}>Trailer</Text>
+                        </TouchableOpacity>
+                      )}
+                    </View>
+                  )}
                 </View>
               )}
             </View>
 
-            {/* Información detallada - Solo lo esencial como Netflix */}
-            <View style={styles.detailsSection}>
-              {/* Estado del anime mejorado */}
-              {currentContent?.type === 'anime' && detailData && 'status' in detailData && (
-                <View style={styles.animeStatusContainer}>
-                  <View style={styles.statusHeader}>
-                    <Text style={styles.statusLabel}>Estado:</Text>
+            {/* ── TARJETA CONTINUAR VIENDO ── */}
+            {currentContent?.type === 'anime' && streamingInfo && streamingInfo.seasons.length > 0 && !loadingStreaming && (() => {
+              const firstSeason = streamingInfo.seasons[0];
+              const nextEp = firstSeason?.episodes?.[0];
+              if (!nextEp) return null;
+              return (
+                <TouchableOpacity
+                  style={continueStyles.card}
+                  onPress={() => handlePlayEpisode(nextEp, firstSeason)}
+                  activeOpacity={0.92}
+                >
+                  {/* Miniatura */}
+                  <View style={continueStyles.thumb}>
+                    {currentContent.poster_path ? (
+                      <Image
+                        source={{ uri: currentContent.type === 'anime' ? getAnimeImageUrl(currentContent.poster_path) : getImageUrl(currentContent.poster_path, 'w500') }}
+                        style={{ width: '100%', height: '100%' }}
+                        resizeMode="cover"
+                      />
+                    ) : (
+                      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+                        <Ionicons name="film-outline" size={28} color="rgba(255,255,255,0.3)" />
+                      </View>
+                    )}
+                    <View style={continueStyles.thumbOverlay}>
+                      <Ionicons name="play-circle" size={36} color="rgba(255,255,255,0.95)" />
+                    </View>
+                  </View>
+
+                  {/* Info */}
+                  <View style={continueStyles.info}>
+                    <Text style={continueStyles.label}>▶ PRÓXIMO EPISODIO</Text>
+                    <Text style={continueStyles.epTitle} numberOfLines={1}>
+                      Ep. {nextEp.number} — {nextEp.title}
+                    </Text>
+                    <Text style={continueStyles.duration}>~24 min</Text>
+                  </View>
+
+                  {/* CTA horizontal premium */}
+                  <View style={continueStyles.playBtn}>
+                    <Ionicons name="play" size={16} color="#fff" />
+                    <Text style={continueStyles.playBtnText}>Ver ahora</Text>
+                  </View>
+                </TouchableOpacity>
+              );
+            })()}
+
+            {/* ── INFO RÁPIDA ── */}
+            <View style={infoStyles.section}>
+              {/* Fila: estado + episodios + formato */}
+              <View style={infoStyles.grid}>
+                {detailData && 'status' in detailData && (
+                  <View style={infoStyles.cell}>
+                    <Text style={infoStyles.cellLabel}>Estado</Text>
                     <View style={[
-                      styles.statusBadge,
-                      (detailData as AnimeDetail).status === 'RELEASING' && styles.statusBadgeAiring,
-                      (detailData as AnimeDetail).status === 'FINISHED' && styles.statusBadgeFinished
+                      infoStyles.statusPill,
+                      (detailData as any).status === 'RELEASING' && { backgroundColor: 'rgba(229,9,20,0.15)', borderColor: 'rgba(229,9,20,0.4)' },
+                      (detailData as any).status === 'FINISHED' && { backgroundColor: 'rgba(0,200,83,0.12)', borderColor: 'rgba(0,200,83,0.35)' },
                     ]}>
                       <Text style={[
-                        styles.statusText,
-                        (detailData as AnimeDetail).status === 'RELEASING' && styles.statusTextAiring,
-                        (detailData as AnimeDetail).status === 'FINISHED' && styles.statusTextFinished
+                        infoStyles.statusPillText,
+                        (detailData as any).status === 'RELEASING' && { color: '#E50914' },
+                        (detailData as any).status === 'FINISHED' && { color: '#00C853' },
                       ]}>
-                        {(detailData as AnimeDetail).status === 'RELEASING' ? 'En Emisión' :
-                         (detailData as AnimeDetail).status === 'FINISHED' ? 'Completado' :
-                         (detailData as AnimeDetail).status === 'NOT_YET_RELEASED' ? 'Próximamente' :
-                         (detailData as AnimeDetail).status || 'Desconocido'}
+                        {(detailData as any).status === 'RELEASING' ? 'En emisión' :
+                         (detailData as any).status === 'FINISHED' ? 'Completado' :
+                         (detailData as any).status === 'NOT_YET_RELEASED' ? 'Próximamente' :
+                         (detailData as any).status || '—'}
                       </Text>
                     </View>
                   </View>
-                </View>
-              )}
-
-              {/* Información compacta en una sola fila */}
-              <View style={styles.compactInfoRow}>
-                {/* Géneros */}
-                {detailData?.genres && detailData.genres.length > 0 && (
-                  <View style={styles.compactInfoItem}>
-                    <Text style={styles.compactInfoLabel}>Géneros</Text>
-                    <Text style={styles.compactInfoValue} numberOfLines={2}>
-                      {detailData.genres.map(g => 
-                        typeof g === 'string' ? g : g.name
-                      ).slice(0, 3).join(', ')}
-                    </Text>
-                  </View>
                 )}
 
-                {/* Episodios para anime */}
                 {currentContent?.type === 'anime' && detailData && 'episodes' in detailData && isRealAnime() && (
-                  <View style={styles.compactInfoItem}>
-                    <Text style={styles.compactInfoLabel}>Episodios</Text>
-                    <Text style={styles.compactInfoValue}>
-                      {(detailData as AnimeDetail).episodes || 'En emisión'}
-                    </Text>
+                  <View style={infoStyles.cell}>
+                    <Text style={infoStyles.cellLabel}>Episodios</Text>
+                    <Text style={infoStyles.cellValue}>{(detailData as any).episodes || '—'}</Text>
                   </View>
                 )}
 
-                {/* Formato del anime */}
                 {currentContent?.type === 'anime' && detailData && 'format' in detailData && (
-                  <View style={styles.compactInfoItem}>
-                    <Text style={styles.compactInfoLabel}>Formato</Text>
-                    <Text style={styles.compactInfoValue}>
-                      {(detailData as AnimeDetail).format || 'Desconocido'}
-                    </Text>
+                  <View style={infoStyles.cell}>
+                    <Text style={infoStyles.cellLabel}>Formato</Text>
+                    <Text style={infoStyles.cellValue}>{(detailData as any).format || '—'}</Text>
+                  </View>
+                )}
+
+                {getReleaseDate() && (
+                  <View style={infoStyles.cell}>
+                    <Text style={infoStyles.cellLabel}>Estreno</Text>
+                    <Text style={infoStyles.cellValue}>{formatDate(getReleaseDate())}</Text>
                   </View>
                 )}
               </View>
 
-              {/* Botones de acción específicos para películas eliminados para evitar duplicados */}
+              {/* Géneros */}
+              {detailData?.genres && detailData.genres.length > 0 && (
+                <View style={infoStyles.genreRow}>
+                  {detailData.genres.map((g: any, i: number) => (
+                    <View key={i} style={infoStyles.genreChip}>
+                      <Text style={infoStyles.genreChipText}>{typeof g === 'string' ? g : g.name}</Text>
+                    </View>
+                  ))}
+                </View>
+              )}
+            </View>
 
               {/* Streaming Episodes for Anime - mostrar si hay datos del M3U */}
               {currentContent?.type === 'anime' && streamingInfo && Array.isArray(streamingInfo.seasons) && streamingInfo.seasons.length > 0 && (
@@ -990,7 +1139,8 @@ export default function AnimeSeriesModal({
                       <Text style={styles.streamingSubtitle}>
                         {(detailData as AnimeDetail).status === 'RELEASING' ? 'Nuevos episodios cada semana' :
                          (detailData as AnimeDetail).status === 'FINISHED' ? 'Serie completada' :
-                         'Próximamente'}
+                         (detailData as AnimeDetail).status === 'NOT_YET_RELEASED' ? 'Próximamente' :
+                         ''}
                       </Text>
                     )}
                   </View>
@@ -1016,29 +1166,28 @@ export default function AnimeSeriesModal({
                       </Text>
                     </TouchableOpacity>
 
-                    {/* Botón de Descargas */}
-                    <TouchableOpacity 
-                      style={[styles.downloadButton, (isTogglingDownloads || isAnimeMovie()) && { opacity: 0.6 }]}
-                      onPress={() => currentInDownloads ? handleRemoveFromDownloads() : handleDownloadOptions()}
-                      disabled={isTogglingDownloads || isAnimeMovie()}
-                    >
-                      {isTogglingDownloads ? (
-                        <ActivityIndicator size="small" color="#FFFFFF" />
-                      ) : (
-                        <Ionicons 
-                          name={currentInDownloads ? "cloud-download" : "download-outline"}
-                          size={20} 
-                          color="#FFFFFF" 
-                        />
-                      )}
-                      <Text style={styles.downloadButtonText}>
-                        {isTogglingDownloads 
-                          ? "Procesando..." 
-                          : isAnimeMovie() 
-                            ? "No disponible" 
-                            : (currentInDownloads ? "En descargas" : "Descargar")}
-                      </Text>
-                    </TouchableOpacity>
+                    {Platform.OS === 'android' && (
+                      <TouchableOpacity
+                        style={[styles.downloadButton, (isTogglingDownloads || isAnimeMovie() || !selectedSeason) && { opacity: 0.6 }]}
+                        onPress={() => currentInDownloads ? handleRemoveFromDownloads() : handleDownloadOptions()}
+                        disabled={isTogglingDownloads || isAnimeMovie() || !selectedSeason}
+                      >
+                        {isTogglingDownloads ? (
+                          <ActivityIndicator size="small" color="#FFFFFF" />
+                        ) : (
+                          <Ionicons
+                            name={currentInDownloads ? 'checkmark-circle' : 'download-outline'}
+                            size={20}
+                            color="#FFFFFF"
+                          />
+                        )}
+                        <Text style={styles.downloadButtonText}>
+                          {isTogglingDownloads
+                            ? 'Descargando...'
+                            : (currentInDownloads ? 'Descargado' : 'Descargar')}
+                        </Text>
+                      </TouchableOpacity>
+                    )}
                   </View>
                   
                   {loadingStreaming ? (
@@ -1093,32 +1242,41 @@ export default function AnimeSeriesModal({
                               return episodesToShow.map((episode) => (
                                 <TouchableOpacity
                                   key={episode.id}
-                                  style={styles.episodeCard}
+                                  style={epStyles.card}
                                   onPress={() => handlePlayEpisode(episode, selectedSeason)}
+                                  {...(Platform.OS === 'web' ? {
+                                    // @ts-ignore
+                                    onMouseEnter: (e: any) => { e.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.1)'; },
+                                    onMouseLeave: (e: any) => { e.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.04)'; },
+                                  } : {})}
                                 >
+                                  {/* Número o thumb */}
                                   {episode.image ? (
                                     <Image
                                       source={{ uri: episode.image }}
-                                      style={styles.episodeThumb}
+                                      style={epStyles.thumb}
                                       resizeMode="cover"
                                     />
                                   ) : (
-                                    <View style={styles.episodeNumber}>
-                                      <Text style={styles.episodeNumberText}>{episode.number}</Text>
+                                    <View style={epStyles.numBadge}>
+                                      <Text style={epStyles.numText}>{episode.number}</Text>
                                     </View>
                                   )}
-                                  <View style={styles.episodeInfo}>
-                                    <Text style={styles.episodeTitle} numberOfLines={2}>
-                                      {episode.title}
-                                    </Text>
+
+                                  {/* Info */}
+                                  <View style={epStyles.info}>
+                                    <Text style={epStyles.num}>Ep. {episode.number}</Text>
+                                    <Text style={epStyles.title} numberOfLines={1}>{episode.title}</Text>
                                     {episode.description && (
-                                      <Text style={styles.episodeDescription} numberOfLines={2}>
+                                      <Text style={epStyles.desc} numberOfLines={1}>
                                         {cleanDescription(episode.description)}
                                       </Text>
                                     )}
                                   </View>
-                                  <View style={styles.episodePlayButton}>
-                                    <Ionicons name="play-circle" size={24} color="#E50914" />
+
+                                  {/* Play icon */}
+                                  <View style={epStyles.playWrap}>
+                                    <Ionicons name="play" size={14} color="#fff" />
                                   </View>
                                 </TouchableOpacity>
                               ));
@@ -1190,28 +1348,18 @@ export default function AnimeSeriesModal({
                 </Modal>
               )}
 
-              {/* Fecha de estreno */}
-              {getReleaseDate() && (
-                <View style={styles.detailRow}>
-                  <Text style={styles.detailLabel}>
-                    {currentContent?.type === 'movie' ? 'Estreno:' : 
-                     currentContent?.type === 'tv' ? 'Primera emisión:' : 
-                     currentContent?.type === 'anime' ? 'Estreno:' : 'Estreno:'}
-                  </Text>
-                  <Text style={styles.detailValue}>{formatDate(getReleaseDate())}</Text>
-                </View>
-              )}
-            </View>
 
-            {/* Contenido relacionado */}
-            <View style={styles.relatedSection}>
-                  <Text style={styles.relatedTitle}>
-                    {currentContent?.type === 'movie' ? 'Más películas similares' :
-                     currentContent?.type === 'tv' ? 'Más series similares' :
-                     currentContent?.type === 'anime' && isRealAnime() ? 'Más anime similar' :
-                     currentContent?.type === 'anime' ? 'Más películas de anime similares' :
-                     'Más títulos similares'}
-                  </Text>
+            {/* ── MÁS ANIME SIMILAR ── */}
+            <View style={simStyles.section}>
+              <View style={simStyles.header}>
+                <View style={simStyles.accentBar} />
+                <Text style={simStyles.title}>
+                  {currentContent?.type === 'movie' ? 'Más películas similares' :
+                   currentContent?.type === 'tv' ? 'Más series similares' :
+                   currentContent?.type === 'anime' && isRealAnime() ? 'Más anime similar' :
+                   'Más títulos similares'}
+                </Text>
+              </View>
                   
                   {loadingRelated ? (
                     <View style={styles.relatedLoading}>
@@ -1231,7 +1379,7 @@ export default function AnimeSeriesModal({
                       keyExtractor={(item) => `${item.source}-${item.type}-${item.id}`}
                       renderItem={({ item }) => (
                         <TouchableOpacity
-                          style={styles.relatedCard}
+                          style={simStyles.card}
                           onPress={() => {
                             setCurrentContent(item);
                             setTrailerDelay(false);
@@ -1242,18 +1390,17 @@ export default function AnimeSeriesModal({
                         >
                           <Image
                             source={{ uri: item.source === 'anilist' ? getAnimeImageUrl(item.poster_path) : getImageUrl(item.poster_path, 'w500') }}
-                            style={styles.relatedPoster}
+                            style={simStyles.poster}
                             resizeMode="cover"
                           />
                         </TouchableOpacity>
                       )}
-                      contentContainerStyle={{ paddingHorizontal: 20 }}
+                      contentContainerStyle={{ paddingHorizontal: 20, gap: 10 }}
                     />
                   ) : (
-                    <View style={styles.noRelatedContainer}>
-                      <Text style={styles.noRelatedText}>
-                        No hay contenido relacionado disponible
-                      </Text>
+                    <View style={simStyles.emptyWrap}>
+                      <Ionicons name="film-outline" size={18} color="rgba(255,255,255,0.25)" />
+                      <Text style={simStyles.emptyText}>Sin títulos similares disponibles</Text>
                     </View>
                   )}
             </View>
@@ -1804,5 +1951,369 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#FFFFFF',
     fontWeight: '500',
+  },
+});
+
+// ── HERO STYLES ─────────────────────────────────────────────────
+const heroStyles = StyleSheet.create({
+  heroSection: {
+    height: 500,
+    position: 'relative',
+    overflow: 'hidden',
+    justifyContent: 'flex-end',
+    backgroundColor: '#0a0a0a',
+  },
+  backdropImage: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    width: '100%',
+    height: '100%',
+    // objectPosition se aplica inline de forma dinámica (ver JSX)
+  },
+  gradient: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
+  heroContent: {
+    position: 'absolute',
+    top: 14,
+    bottom: 0,
+    left: 0,
+    right: 0,
+    paddingHorizontal: 24,
+    paddingBottom: 30,
+    paddingTop: 138,      // baja el bloque de información dentro del hero
+    maxWidth: 740,        // evita que el texto flote en pantallas ultrawides
+  },
+  metaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flexWrap: 'wrap',
+    marginBottom: 12,
+  },
+  ratingPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(255,215,0,0.15)',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 4,
+    borderWidth: 1,
+    borderColor: 'rgba(255,215,0,0.3)',
+  },
+  ratingText: { color: '#FFD700', fontSize: 11, fontWeight: '800' },
+  metaText: { color: 'rgba(255,255,255,0.6)', fontSize: 12, fontWeight: '500' },
+  dot: { color: 'rgba(255,255,255,0.3)', fontSize: 12 },
+  statusPill: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 4,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+  },
+  statusPillText: { color: '#fff', fontSize: 11, fontWeight: '700', letterSpacing: 0.3 },
+  title: {
+    color: '#FFFFFF',
+    fontWeight: '900',
+    letterSpacing: -0.7,
+    marginBottom: 10,
+    lineHeight: 40,
+    textShadowColor: 'rgba(0,0,0,0.95)',
+    textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 12,
+  },
+  genreRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginBottom: 12,
+  },
+  genreChip: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.09)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.2)',
+  },
+  genreChipText: { color: 'rgba(255,255,255,0.78)', fontSize: 11, fontWeight: '600' },
+  overview: {
+    color: 'rgba(255,255,255,0.7)',
+    fontSize: 13,
+    lineHeight: 22,
+    marginBottom: 20,
+    maxWidth: 500,        // limita el ancho del texto en desktop
+  },
+  actionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    flexWrap: 'wrap',
+  },
+  btnPlay: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 22,
+    paddingVertical: 11,
+    borderRadius: 6,
+  },
+  btnPlayText: { color: '#000', fontSize: 15, fontWeight: '800', letterSpacing: -0.2 },
+  btnSecondary: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+    backgroundColor: 'rgba(60,60,60,0.85)',
+    paddingHorizontal: 18,
+    paddingVertical: 11,
+    borderRadius: 6,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.18)',
+  },
+  btnSecondaryText: { color: '#fff', fontSize: 14, fontWeight: '600' },
+  btnIcon: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 14,
+    paddingVertical: 11,
+    borderRadius: 6,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.14)',
+  },
+  btnIconText: { color: 'rgba(255,255,255,0.8)', fontSize: 13, fontWeight: '600' },
+});
+
+// ── CONTINUE WATCHING CARD ──────────────────────────────────────
+const continueStyles = StyleSheet.create({
+  card: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#181818',
+    marginHorizontal: 16,
+    marginTop: 0,
+    marginBottom: 4,
+    borderRadius: 10,
+    overflow: 'hidden',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.09)',
+    minHeight: 84,
+  },
+  thumb: {
+    width: 116,
+    backgroundColor: '#111',
+    position: 'relative',
+    overflow: 'hidden',
+    alignSelf: 'stretch',
+  },
+  thumbOverlay: {
+    position: 'absolute',
+    top: 0, left: 0, right: 0, bottom: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.45)',
+  },
+  info: {
+    flex: 1,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    justifyContent: 'center',
+    gap: 3,
+  },
+  label: {
+    color: '#E50914',
+    fontSize: 9,
+    fontWeight: '800',
+    letterSpacing: 1.5,
+    textTransform: 'uppercase',
+  },
+  epTitle: { color: '#FFFFFF', fontSize: 13, fontWeight: '700', lineHeight: 18 },
+  duration: { color: 'rgba(255,255,255,0.35)', fontSize: 11, marginTop: 2 },
+  // Botón horizontal premium
+  playBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#E50914',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    marginRight: 14,
+    borderRadius: 7,
+  },
+  playBtnText: { color: '#fff', fontSize: 12, fontWeight: '800', letterSpacing: 0.2 },
+});
+
+// ── INFO RÁPIDA ─────────────────────────────────────────────────
+const infoStyles = StyleSheet.create({
+  section: {
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+    backgroundColor: '#141414',
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.05)',
+  },
+  grid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: 12,
+  },
+  cell: {
+    flex: 1,
+    minWidth: 80,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderRadius: 8,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.07)',
+  },
+  cellLabel: {
+    color: 'rgba(255,255,255,0.3)',
+    fontSize: 9,
+    fontWeight: '700',
+    letterSpacing: 1.2,
+    textTransform: 'uppercase',
+    marginBottom: 6,
+  },
+  cellValue: { color: '#fff', fontSize: 14, fontWeight: '700', lineHeight: 18 },
+  statusPill: {
+    alignSelf: 'flex-start',
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderRadius: 4,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.14)',
+  },
+  statusPillText: { color: '#fff', fontSize: 11, fontWeight: '700' },
+  genreRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+  },
+  genreChip: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.14)',
+  },
+  genreChipText: { color: 'rgba(255,255,255,0.65)', fontSize: 12, fontWeight: '500' },
+});
+
+// ── EPISODE STYLES ──────────────────────────────────────────────
+const epStyles = StyleSheet.create({
+  card: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.03)',
+    borderRadius: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    marginBottom: 5,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.06)',
+    gap: 12,
+  },
+  thumb: {
+    width: 92,
+    height: 56,
+    borderRadius: 6,
+    backgroundColor: '#1a1a1a',
+  },
+  numBadge: {
+    width: 40,
+    height: 40,
+    borderRadius: 8,
+    backgroundColor: 'rgba(229,9,20,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(229,9,20,0.3)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  numText: { color: '#E50914', fontSize: 15, fontWeight: '800' },
+  info: { flex: 1, gap: 2 },
+  num: {
+    color: 'rgba(255,255,255,0.32)',
+    fontSize: 9,
+    fontWeight: '700',
+    letterSpacing: 0.8,
+    textTransform: 'uppercase',
+  },
+  title: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '700',
+    lineHeight: 18,
+  },
+  desc: { color: 'rgba(255,255,255,0.35)', fontSize: 11, lineHeight: 15 },
+  playWrap: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: '#E50914',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#E50914',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.45,
+    shadowRadius: 5,
+  },
+});
+
+// ── SIMILAR SECTION ─────────────────────────────────────────────
+const simStyles = StyleSheet.create({
+  section: {
+    backgroundColor: '#0f0f0f',
+    paddingBottom: 24,
+    paddingTop: 20,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.06)',
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 20,
+    marginBottom: 12,
+  },
+  accentBar: {
+    width: 3,
+    height: 18,
+    backgroundColor: '#E50914',
+    borderRadius: 2,
+  },
+  title: {
+    color: '#FFFFFF',
+    fontSize: 17,
+    fontWeight: '800',
+    letterSpacing: -0.2,
+  },
+  card: {
+    borderRadius: 8,
+    overflow: 'hidden',
+    backgroundColor: '#1c1c1c',
+  },
+  poster: {
+    width: 110,
+    height: 160,
+  },
+  emptyWrap: {
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  emptyText: {
+    color: 'rgba(255,255,255,0.3)',
+    fontSize: 12,
+    fontStyle: 'italic',
+    letterSpacing: 0.1,
   },
 });

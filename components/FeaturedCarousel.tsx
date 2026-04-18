@@ -1,4 +1,4 @@
-  import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { View, FlatList, StyleSheet, useWindowDimensions, Animated, Platform, PanResponder } from 'react-native';
 import FeaturedMovie from './FeaturedMovie';
 import { MovieDetail, AnimeDetail } from '../types';
@@ -7,6 +7,7 @@ import { colors } from '../theme';
 interface Props {
   movies: (MovieDetail | AnimeDetail)[];
   onWatch: (movie: MovieDetail | AnimeDetail) => void;
+  onMoreInfo?: (movie: MovieDetail | AnimeDetail) => void;
 }
 
 /**
@@ -15,7 +16,7 @@ interface Props {
  * - Paginación horizontal con snapping y autoplay.
  * - Indicadores (dots) de la slide actual.
  */
-export default function FeaturedCarousel({ movies, onWatch }: Props) {
+export default function FeaturedCarousel({ movies, onWatch, onMoreInfo }: Props) {
   const { width } = useWindowDimensions();
   const listRef = useRef<FlatList<MovieDetail | AnimeDetail>>(null);
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -101,6 +102,7 @@ export default function FeaturedCarousel({ movies, onWatch }: Props) {
       <FeaturedMovie
         movie={only}
         onWatch={() => onWatch(only)}
+        onMoreInfo={onMoreInfo ? () => onMoreInfo(only) : undefined}
       />
     );
   }
@@ -114,6 +116,7 @@ export default function FeaturedCarousel({ movies, onWatch }: Props) {
             <FeaturedMovie
               movie={movies[currentIndex]}
               onWatch={() => onWatch(movies[currentIndex])}
+              onMoreInfo={onMoreInfo ? () => onMoreInfo(movies[currentIndex]) : undefined}
             />
           </Animated.View>
         </View>
@@ -124,7 +127,11 @@ export default function FeaturedCarousel({ movies, onWatch }: Props) {
           data={movies}
           keyExtractor={(item) => String(item.id)}
           renderItem={({ item }) => (
-            <FeaturedMovie movie={item} onWatch={() => onWatch(item)} />
+            <FeaturedMovie
+              movie={item}
+              onWatch={() => onWatch(item)}
+              onMoreInfo={onMoreInfo ? () => onMoreInfo(item) : undefined}
+            />
           )}
           horizontal
           pagingEnabled
@@ -136,7 +143,7 @@ export default function FeaturedCarousel({ movies, onWatch }: Props) {
         />
       )}
 
-      {/* Indicadores tipo dots con animación */}
+      {/* Indicadores tipo pill — activo más largo con glow */}
       <View style={styles.dotsContainer}>
         {movies.map((_, idx) => {
           const isActive = idx === currentIndex;
@@ -146,18 +153,13 @@ export default function FeaturedCarousel({ movies, onWatch }: Props) {
               style={[
                 styles.dot,
                 isActive ? styles.dotActive : styles.dotInactive,
-                isActive && {
-                  transform: [{
-                    scale: 1.2,
-                  }],
-                },
               ]}
             />
           );
         })}
       </View>
 
-      {/* Progress bar del autoplay (Oculto en Android) */}
+      {/* Progress bar con gradiente */}
       {movies.length > 1 && Platform.OS !== 'android' && (
         <View style={styles.progressBarContainer}>
           <Animated.View
@@ -183,35 +185,50 @@ const styles = StyleSheet.create({
   },
   dotsContainer: {
     position: 'absolute',
-    bottom: 30,
+    bottom: 24,
     left: 0,
     right: 0,
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
+    gap: 6,
   },
   dot: {
-    width: 8,
-    height: 8,
     borderRadius: 4,
-    marginHorizontal: 4,
   },
   dotActive: {
+    width: 24,
+    height: 4,
     backgroundColor: colors.primary,
+    borderRadius: 2,
+    // Glow effect via shadow
+    shadowColor: colors.primary,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.6,
+    shadowRadius: 6,
+    elevation: 4,
   },
   dotInactive: {
-    backgroundColor: '#666',
+    width: 8,
+    height: 4,
+    backgroundColor: 'rgba(255, 255, 255, 0.3)',
+    borderRadius: 2,
   },
   progressBarContainer: {
     position: 'absolute',
     bottom: 0,
     left: 0,
     right: 0,
-    height: 3,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    height: 2,
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
   },
   progressBar: {
     height: '100%',
     backgroundColor: colors.primary,
+    // Sutil glow en la barra de progreso
+    shadowColor: colors.primary,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.5,
+    shadowRadius: 4,
   },
 });

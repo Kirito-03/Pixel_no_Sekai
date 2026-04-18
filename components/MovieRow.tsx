@@ -7,24 +7,28 @@ import {
   useWindowDimensions,
   PanResponder,
   Platform,
-  GestureResponderHandlers
+  GestureResponderHandlers,
+  StyleSheet,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Movie, TVShow, ContentItem } from '../types';
 import MovieCard from './MovieCard';
-import { colors, spacing } from '../theme';
+import { colors, spacing, typography } from '../theme';
 
 interface Props {
   title: string;
   movies: (Movie | TVShow | ContentItem)[];
   onMoviePress: (id: number) => void;
+  accentColor?: string;
 }
 
-export default function MovieRow({ title, movies, onMoviePress }: Props) {
+export default function MovieRow({ title, movies, onMoviePress, accentColor = colors.primary }: Props) {
   const { width } = useWindowDimensions();
   const isSmallScreen = width < 768;
-  const CARD_WIDTH = isSmallScreen ? width * 0.32 : 130;
-  const CARD_MARGIN = isSmallScreen ? 8 : 10;
+  const isWeb = Platform.OS === 'web';
+  // Cards más grandes y premium
+  const CARD_WIDTH = isSmallScreen ? width * 0.34 : 155;
+  const CARD_MARGIN = isSmallScreen ? 10 : 12;
   const TOTAL_CARD_WIDTH = CARD_WIDTH + CARD_MARGIN;
   const CARDS_PER_SCREEN = Math.floor(width / TOTAL_CARD_WIDTH);
   const SCROLL_AMOUNT = TOTAL_CARD_WIDTH * CARDS_PER_SCREEN;
@@ -48,7 +52,6 @@ export default function MovieRow({ title, movies, onMoviePress }: Props) {
       },
 
       onPanResponderMove: (_, gestureState) => {
-        // Velocidad mínima: factor de 0.3 (mucho más lento)
         const newOffset = scrollXRef.current - (gestureState.dx * 0.3);
         flatListRef.current?.scrollToOffset({ offset: newOffset, animated: false });
       },
@@ -59,21 +62,14 @@ export default function MovieRow({ title, movies, onMoviePress }: Props) {
     })
   ).current;
 
-
   const handleLeftArrow = () => {
     const newPosition = Math.max(0, scrollX - SCROLL_AMOUNT);
-    flatListRef.current?.scrollToOffset({ 
-      offset: newPosition, 
-      animated: true 
-    });
+    flatListRef.current?.scrollToOffset({ offset: newPosition, animated: true });
   };
 
   const handleRightArrow = () => {
     const newPosition = scrollX + SCROLL_AMOUNT;
-    flatListRef.current?.scrollToOffset({ 
-      offset: newPosition, 
-      animated: true 
-    });
+    flatListRef.current?.scrollToOffset({ offset: newPosition, animated: true });
   };
 
   const handleScroll = (event: any) => {
@@ -82,77 +78,35 @@ export default function MovieRow({ title, movies, onMoviePress }: Props) {
     const layoutWidth = event.nativeEvent.layoutMeasurement.width;
     const maxScroll = contentWidth - layoutWidth;
     
-    // Sincronizamos el estado de la posición de scroll
     setScrollX(offsetX);
     scrollXRef.current = offsetX;
-
-    // Lógica para mostrar/ocultar las flechas
     setShowLeftArrow(offsetX > 5);
     setShowRightArrow(offsetX < maxScroll - 5);
   };
 
-  const dynamicStyles = {
-    container: {
-      marginBottom: isSmallScreen ? spacing.md : spacing.lg,
-    },
-    title: {
-      fontSize: isSmallScreen ? 17 : 20,
-      fontWeight: 'bold' as const,
-      color: colors.text,
-      marginBottom: isSmallScreen ? spacing.sm : spacing.md,
-      marginLeft: isSmallScreen ? spacing.md : spacing.md,
-    },
-    listContainer: {
-      position: 'relative' as const,
-    },
-    list: {
-      paddingHorizontal: isSmallScreen ? spacing.sm : spacing.md,
-      paddingVertical: isSmallScreen ? 6 : 4,
-    },
-    arrow: {
-      position: 'absolute' as const,
-      top: 0,
-      bottom: 0,
-      width: isSmallScreen ? 0 : 50,
-      backgroundColor: 'rgba(0, 0, 0, 0.75)',
-      justifyContent: 'center' as const,
-      alignItems: 'center' as const,
-      zIndex: 99,
-    },
-    leftArrow: {
-      left: 0,
-      borderTopRightRadius: 4,
-      borderBottomRightRadius: 4,
-    },
-    rightArrow: {
-      right: 0,
-      borderTopLeftRadius: 4,
-      borderBottomLeftRadius: 4,
-    },
-  };
-
   return (
-    <View style={dynamicStyles.container}>
-      <Text style={dynamicStyles.title}>{title}</Text>
+    <View style={styles.container}>
+      {/* Título de la sección con barra de acento */}
+      <View style={styles.titleRow}>
+        <View style={[styles.titleAccent, { backgroundColor: accentColor }]} />
+        <Text style={styles.sectionTitle}>{title}</Text>
+      </View>
       
       <View 
         style={[
-          dynamicStyles.listContainer,
-          Platform.OS === 'web' && ({ cursor: 'grab' } as any)
+          styles.listContainer,
+          isWeb && ({ cursor: 'grab' } as any)
         ]} 
         {...(panResponder.panHandlers as GestureResponderHandlers)}
       >
+        {/* Flecha izquierda — glassmorphism */}
         {showLeftArrow && !isSmallScreen && (
           <TouchableOpacity 
-            style={[
-              dynamicStyles.arrow, 
-              dynamicStyles.leftArrow,
-              Platform.OS === 'web' && ({ cursor: 'pointer' } as any)
-            ]}
+            style={[styles.arrow, styles.leftArrow]}
             onPress={handleLeftArrow}
-            activeOpacity={0.8}
+            activeOpacity={0.85}
           >
-            <Ionicons name="chevron-back" size={40} color={colors.text} />
+            <Ionicons name="chevron-back" size={28} color={colors.text} />
           </TouchableOpacity>
         )}
 
@@ -165,26 +119,76 @@ export default function MovieRow({ title, movies, onMoviePress }: Props) {
           renderItem={({ item }) => (
             <MovieCard movie={item} onPress={() => onMoviePress(item.id)} />
           )}
-          contentContainerStyle={dynamicStyles.list}
+          contentContainerStyle={styles.listContent}
           onScroll={handleScroll}
           scrollEventThrottle={16}
           scrollEnabled={Platform.OS !== 'web'} 
         />
 
+        {/* Flecha derecha — glassmorphism */}
         {showRightArrow && !isSmallScreen && (
           <TouchableOpacity 
-            style={[
-              dynamicStyles.arrow, 
-              dynamicStyles.rightArrow,
-              Platform.OS === 'web' && ({ cursor: 'pointer' } as any)
-            ]}
+            style={[styles.arrow, styles.rightArrow]}
             onPress={handleRightArrow}
-            activeOpacity={0.8}
+            activeOpacity={0.85}
           >
-            <Ionicons name="chevron-forward" size={40} color={colors.text} />
+            <Ionicons name="chevron-forward" size={28} color={colors.text} />
           </TouchableOpacity>
         )}
       </View>
     </View>
   );
 }
+
+const styles = StyleSheet.create({
+  container: {
+    marginBottom: 32,
+  },
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 14,
+    paddingHorizontal: 20,
+    gap: 10,
+  },
+  titleAccent: {
+    width: 3,
+    height: 20,
+    borderRadius: 2,
+  },
+  sectionTitle: {
+    ...typography.sectionTitle,
+    color: colors.text,
+  },
+  listContainer: {
+    position: 'relative',
+  },
+  listContent: {
+    paddingHorizontal: 20,
+    paddingVertical: 6,
+  },
+  arrow: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    width: 48,
+    backgroundColor: 'rgba(0, 0, 0, 0.65)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 99,
+  },
+  leftArrow: {
+    left: 0,
+    borderTopRightRadius: 8,
+    borderBottomRightRadius: 8,
+    borderRightWidth: 1,
+    borderRightColor: 'rgba(255,255,255,0.06)',
+  },
+  rightArrow: {
+    right: 0,
+    borderTopLeftRadius: 8,
+    borderBottomLeftRadius: 8,
+    borderLeftWidth: 1,
+    borderLeftColor: 'rgba(255,255,255,0.06)',
+  },
+});

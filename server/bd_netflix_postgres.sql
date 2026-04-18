@@ -95,6 +95,37 @@ CREATE INDEX IF NOT EXISTS idx_lista_items_lista_id ON lista_items(lista_id);
 CREATE INDEX IF NOT EXISTS idx_lista_items_content_id ON lista_items(content_id);
 
 -- ========================================
+-- Tables: Pixel no Sekai (Mi Lista / Progreso)
+-- Persistencia por profile_id (no depende de la tabla perfiles)
+-- ========================================
+CREATE TABLE IF NOT EXISTS pns_my_list_items (
+  id SERIAL PRIMARY KEY,
+  profile_id BIGINT NOT NULL,
+  content_id INTEGER NOT NULL,
+  content_type TEXT NOT NULL CHECK (content_type IN ('movie', 'tv', 'anime')),
+  added_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT uniq_pns_my_list_item UNIQUE (profile_id, content_id, content_type)
+);
+
+CREATE INDEX IF NOT EXISTS idx_pns_my_list_profile_id ON pns_my_list_items(profile_id);
+CREATE INDEX IF NOT EXISTS idx_pns_my_list_content ON pns_my_list_items(content_type, content_id);
+
+CREATE TABLE IF NOT EXISTS pns_watch_progress (
+  id SERIAL PRIMARY KEY,
+  profile_id BIGINT NOT NULL,
+  anime_id INTEGER NOT NULL,
+  episode_id INTEGER NOT NULL,
+  current_seconds INTEGER NOT NULL DEFAULT 0,
+  duration_seconds INTEGER NOT NULL DEFAULT 0,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT uniq_pns_watch_progress UNIQUE (profile_id, anime_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_pns_progress_profile_id ON pns_watch_progress(profile_id);
+CREATE INDEX IF NOT EXISTS idx_pns_progress_anime_id ON pns_watch_progress(anime_id);
+CREATE INDEX IF NOT EXISTS idx_pns_progress_episode_id ON pns_watch_progress(episode_id);
+
+-- ========================================
 -- Table: contenido
 -- ========================================
 CREATE TABLE IF NOT EXISTS contenido (
@@ -210,4 +241,3 @@ BEGIN
       EXECUTE FUNCTION update_updated_at_column();
   END IF;
 END $$;
-

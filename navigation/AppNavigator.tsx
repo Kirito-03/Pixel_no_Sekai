@@ -114,6 +114,8 @@ function MainTabs({ route }: { route: any }) {
         options={{
           tabBarIcon: ({ color }) => <Ionicons name="home" size={24} color={color} />,
           tabBarLabel: 'Inicio',
+          // El header superior del Home reemplaza el tab bar — ocultarlo en esta tab
+          tabBarStyle: { display: 'none' },
         }}
       />
       <Tab.Screen
@@ -122,6 +124,7 @@ function MainTabs({ route }: { route: any }) {
         options={{
           tabBarIcon: ({ color }) => <Ionicons name="search" size={24} color={color} />,
           tabBarLabel: 'Buscar',
+          tabBarStyle: { display: 'none' },
         }}
       />
       <Tab.Screen
@@ -130,6 +133,7 @@ function MainTabs({ route }: { route: any }) {
         options={{
           tabBarIcon: ({ color }) => <Ionicons name="newspaper-outline" size={24} color={color} />,
           tabBarLabel: 'Noticias',
+          tabBarStyle: { display: 'none' },
         }}
       />
       <Tab.Screen
@@ -138,6 +142,7 @@ function MainTabs({ route }: { route: any }) {
         options={{
           tabBarIcon: ({ color }) => <Ionicons name="book-outline" size={24} color={color} />,
           tabBarLabel: 'Manga',
+          tabBarStyle: { display: 'none' },
         }}
       />
       <Tab.Screen
@@ -146,6 +151,7 @@ function MainTabs({ route }: { route: any }) {
         options={{
           tabBarIcon: ({ color }) => <Ionicons name="bookmark" size={24} color={color} />,
           tabBarLabel: 'Mi Lista',
+          tabBarStyle: { display: 'none' },
         }}
       />
       <Tab.Screen
@@ -154,6 +160,7 @@ function MainTabs({ route }: { route: any }) {
         options={{
           tabBarIcon: ({ color }) => <Ionicons name="person-circle" size={24} color={color} />,
           tabBarLabel: 'Mi perfil',
+          tabBarStyle: { display: 'none' },
         }}
       />
 

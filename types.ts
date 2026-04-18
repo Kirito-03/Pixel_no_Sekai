@@ -115,6 +115,7 @@ export interface AnimeEpisode {
   description?: string;
   image?: string;
   url?: string;
+  downloadUrl?: string;
   sources?: VideoSource[];
 }
 
@@ -163,8 +164,9 @@ export interface ContentItem {
   vote_average: number;
   source: 'tmdb' | 'anilist';
   // Campos opcionales para enriquecer el filtrado y la UI
-  genres?: string[]; // Solo aplicable principalmente para anime
-  isAdult?: boolean; // Marcador para contenido +18 (Ecchi/Hentai en anime)
+  genres?: string[];   // Solo aplicable principalmente para anime
+  isAdult?: boolean;   // Marcador para contenido +18 (Ecchi/Hentai en anime)
+  status?: string;     // Estado del anime: 'Airing' | 'Finished' | 'Upcoming' — usado para badges
 }
 
 // Navegación

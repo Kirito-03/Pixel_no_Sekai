@@ -1,38 +1,115 @@
 import React, { useState } from 'react';
-import { Modal } from 'react-native';
+import { Alert, Modal, Platform } from 'react-native';
 import AnimeSeriesModal from './AnimeSeriesModal';
 import EpisodePlayer from './EpisodePlayer';
 import { ContentItem, AnimeEpisode, AnimeSeason } from '../types';
+import { useProfile } from '../contexts/ProfileContext';
+import { canReachUrl } from '../services/connectivity';
+import { offlineDownloads } from '../services/offlineDownloads';
+import { catalogService } from '../services/catalogService';
 
 interface AnimeSeriesModalWrapperProps {
   content: ContentItem | null;
   visible: boolean;
   onClose: () => void;
+  startFromEpisodeId?: number | null;
 }
 
 export default function AnimeSeriesModalWrapper({
   content,
   visible,
   onClose,
+  startFromEpisodeId = null,
 }: AnimeSeriesModalWrapperProps) {
+  const { currentProfile } = useProfile();
   const [showEpisodePlayer, setShowEpisodePlayer] = useState(false);
   const [selectedEpisode, setSelectedEpisode] = useState<AnimeEpisode | null>(null);
   const [selectedSeason, setSelectedSeason] = useState<AnimeSeason | null>(null);
   const [currentEpisodeIndex, setCurrentEpisodeIndex] = useState(0);
+  const [autoplaying, setAutoplaying] = useState(false);
 
-  const handlePlayEpisode = (episode: AnimeEpisode, season: AnimeSeason) => {
-  console.log('Wrapper: Playing episode:', episode.title);
-    
+  React.useEffect(() => {
+    if (!visible) return;
+    if (!content || content.type !== 'anime') return;
+    if (!startFromEpisodeId || autoplaying) return;
+
+    let cancelled = false;
+    const run = async () => {
+      try {
+        setAutoplaying(true);
+        const episodes = await catalogService.getAnimeEpisodes(Number(content.id));
+        const target = episodes.find((ep) => Number(ep.id) === Number(startFromEpisodeId));
+        if (!target) return;
+
+        const grouped = new Map<number, AnimeEpisode[]>();
+        for (const ep of episodes) {
+          const season = typeof ep.season === 'number' ? ep.season : 1;
+          const url = ep.stream_url || ep.video_url || undefined;
+          const episodeItem: AnimeEpisode = {
+            id: String(ep.id),
+            number: ep.episode_number,
+            title: ep.title || `Episodio ${ep.episode_number}`,
+            url,
+            downloadUrl: ep.video_url || undefined,
+          };
+          const list = grouped.get(season) || [];
+          list.push(episodeItem);
+          grouped.set(season, list);
+        }
+
+        const seasons: AnimeSeason[] = Array.from(grouped.entries())
+          .sort((a, b) => a[0] - b[0])
+          .map(([season, eps]) => ({
+            id: `season-${season}`,
+            season,
+            title: season === 1 ? 'Temporada 1' : `Temporada ${season}`,
+            episodes: eps.sort((a, b) => a.number - b.number),
+          }));
+
+        const s = seasons.find((x) => x.season === (target.season || 1));
+        const e = s?.episodes.find((x) => Number(x.id) === Number(startFromEpisodeId));
+        const idx = s ? s.episodes.findIndex((x) => Number(x.id) === Number(startFromEpisodeId)) : -1;
+        if (cancelled || !s || !e || idx < 0) return;
+        setSelectedSeason(s);
+        setSelectedEpisode(e);
+        setCurrentEpisodeIndex(idx);
+        setShowEpisodePlayer(true);
+      } finally {
+        if (!cancelled) setAutoplaying(false);
+      }
+    };
+    run();
+    return () => {
+      cancelled = true;
+    };
+  }, [visible, content?.id, content?.type, startFromEpisodeId, autoplaying]);
+
+  const handlePlayEpisode = async (episode: AnimeEpisode, season: AnimeSeason) => {
     // NO cerrar el modal de detalles, solo abrir el reproductor
-    setSelectedEpisode(episode);
+    let ep = episode;
+    const profileId = currentProfile?.id;
+    const animeId = content?.id ? Number(content.id) : 0;
+    const episodeId = Number(episode.id);
+
+    if (Platform.OS === 'android' && profileId && animeId && Number.isFinite(episodeId) && episodeId > 0) {
+      const online = await canReachUrl(String(episode.url || ''));
+      if (!online) {
+        const localUri = await offlineDownloads.getEpisodeUri(profileId, episodeId);
+        if (!localUri) {
+          Alert.alert('Sin conexión', 'Este episodio no está descargado.');
+          return;
+        }
+        ep = { ...episode, url: localUri };
+      }
+    }
+
+    setSelectedEpisode(ep);
     setSelectedSeason(season);
-    setCurrentEpisodeIndex(season.episodes.findIndex(ep => ep.id === episode.id));
+    setCurrentEpisodeIndex(season.episodes.findIndex(e => e.id === episode.id));
     setShowEpisodePlayer(true);
-  console.log('Wrapper: Episode player opened');
   };
 
   const handleCloseEpisodePlayer = () => {
-  console.log('Wrapper: Closing episode player');
     setShowEpisodePlayer(false);
     setSelectedEpisode(null);
     setSelectedSeason(null);
@@ -65,7 +142,7 @@ export default function AnimeSeriesModalWrapper({
     <>
       <AnimeSeriesModal
         content={content}
-        visible={visible}
+        visible={visible && !showEpisodePlayer}
         onClose={onClose}
         onPlayEpisode={handlePlayEpisode}
       />
@@ -81,7 +158,9 @@ export default function AnimeSeriesModalWrapper({
           <EpisodePlayer
             episode={selectedEpisode}
             animeTitle={getTitle()}
+            animeId={content?.id ? Number(content.id) : 0}
             seasonNumber={selectedSeason.season}
+            profileId={currentProfile?.id}
             onClose={handleCloseEpisodePlayer}
             onNextEpisode={handleNextEpisode}
             onPreviousEpisode={handlePreviousEpisode}

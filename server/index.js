@@ -24,6 +24,9 @@ const { default: adminRoutes } = await import('./routes/admin.js');
 const { default: userRoutes } = await import('./routes/user.js');
 const { default: transcodeRoutes } = await import('./routes/transcode.js');
 const { default: catalogRoutes } = await import('./routes/catalog.js');
+const { default: myListRoutes } = await import('./routes/myList.js');
+const { default: progressRoutes } = await import('./routes/progress.js');
+const { default: continueWatchingRoutes } = await import('./routes/continueWatching.js');
 const { default: pool } = await import('./db.js');
 
 // Crear carpeta de uploads si no existe
@@ -72,7 +75,7 @@ app.use(cors({
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   // Aceptar tanto mayúsculas como minúsculas para el header personalizado
-  allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'X-Client-BaseURL', 'x-client-baseurl'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'X-Client-BaseURL', 'x-client-baseurl', 'X-Profile-Id', 'x-profile-id', 'X-Perfil-Id', 'x-perfil-id'],
   exposedHeaders: ['Content-Type']
 }));
 
@@ -189,6 +192,9 @@ app.use('/api/admin', adminRoutes);
 app.use('/api/catalog', catalogRoutes);
 app.use('/api/user', userRoutes);
 app.use('/transcode', transcodeRoutes);
+app.use('/my-list', myListRoutes);
+app.use('/progress', progressRoutes);
+app.use('/continue-watching', continueWatchingRoutes);
 
 // CORS Proxy para servicios externos de anime
 app.get('/api/cors-proxy', async (req, res) => {
@@ -791,11 +797,50 @@ app.get('/videos/animes_madre.m3u', (req, res) => {
 const PORT = process.env.PORT || 3001;
 const HOST = process.env.HOST || '0.0.0.0'; // Escuchar en todas las interfaces
 
-app.listen(PORT, HOST, () => {
-  console.log(`Backend escuchando en http://${HOST}:${PORT}`);
-  console.log(`Acceso local: http://localhost:${PORT}`);
-  console.log(`Acceso desde emulador Android: http://10.0.2.2:${PORT}`);
-});
+async function ensurePixelNoSekaiTables() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS pns_my_list_items (
+      id SERIAL PRIMARY KEY,
+      profile_id BIGINT NOT NULL,
+      content_id INTEGER NOT NULL,
+      content_type TEXT NOT NULL CHECK (content_type IN ('movie', 'tv', 'anime')),
+      added_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT uniq_pns_my_list_item UNIQUE (profile_id, content_id, content_type)
+    );
+  `);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_pns_my_list_profile_id ON pns_my_list_items(profile_id);`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_pns_my_list_content ON pns_my_list_items(content_type, content_id);`);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS pns_watch_progress (
+      id SERIAL PRIMARY KEY,
+      profile_id BIGINT NOT NULL,
+      anime_id INTEGER NOT NULL,
+      episode_id INTEGER NOT NULL,
+      current_seconds INTEGER NOT NULL DEFAULT 0,
+      duration_seconds INTEGER NOT NULL DEFAULT 0,
+      updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT uniq_pns_watch_progress UNIQUE (profile_id, anime_id)
+    );
+  `);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_pns_progress_profile_id ON pns_watch_progress(profile_id);`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_pns_progress_anime_id ON pns_watch_progress(anime_id);`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_pns_progress_episode_id ON pns_watch_progress(episode_id);`);
+}
+
+(async () => {
+  try {
+    await ensurePixelNoSekaiTables();
+  } catch (e) {
+    console.error('Error asegurando tablas Pixel no Sekai:', e.message);
+  }
+
+  app.listen(PORT, HOST, () => {
+    console.log(`Backend escuchando en http://${HOST}:${PORT}`);
+    console.log(`Acceso local: http://localhost:${PORT}`);
+    console.log(`Acceso desde emulador Android: http://10.0.2.2:${PORT}`);
+  });
+})();
 
 // Users: get by id (validate session)
 app.get('/users/:id', async (req, res) => {

@@ -1,6 +1,7 @@
-import React, { useRef, useState, useEffect } from 'react';
-import { View, TextInput, FlatList, StyleSheet, Text, TouchableOpacity, Animated, ActivityIndicator } from 'react-native';
+import React, { useRef, useState, useEffect, useCallback } from 'react';
+import { View, TextInput, FlatList, StyleSheet, Text, TouchableOpacity, Animated, ActivityIndicator, Platform, SafeAreaView } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useNavigation } from '@react-navigation/native';
 import MovieCard from '../components/MovieCard';
 import MovieModal from '../components/MovieModal';
 import { colors, spacing, shadows, borderRadius } from '../theme';
@@ -10,6 +11,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { catalogService } from '../services/catalogService';
 
 export default function SearchScreen() {
+  const navigation = useNavigation<any>();
   const { adultContentEnabled, currentProfile } = useProfile();
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<ContentItem[]>([]);
@@ -21,6 +23,16 @@ export default function SearchScreen() {
   const [isFocused, setIsFocused] = useState(false);
   const typingTimer = useRef<any>(null);
   const latestQueryRef = useRef<string>('');
+
+  // ESC en web → goBack
+  useEffect(() => {
+    if (Platform.OS !== 'web') return;
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') navigation.goBack();
+    };
+    window.addEventListener('keydown', handleKey);
+    return () => window.removeEventListener('keydown', handleKey);
+  }, [navigation]);
 
   // Animated values
   const focusAnim = useRef(new Animated.Value(0)).current;
@@ -211,6 +223,22 @@ export default function SearchScreen() {
 
   return (
     <View style={styles.container}>
+      {/* ── TOP BAR ── */}
+      <SafeAreaView>
+        <View style={styles.topBar}>
+          <TouchableOpacity
+            style={styles.backBtn}
+            onPress={() => navigation.goBack()}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          >
+            <Ionicons name="arrow-back" size={22} color={colors.text} />
+          </TouchableOpacity>
+          <Text style={styles.topTitle}>Buscar</Text>
+          {/* Espacio simétrico */}
+          <View style={styles.backBtn} />
+        </View>
+      </SafeAreaView>
+
       <Animated.View style={[styles.inputWrapper, { borderColor, borderWidth: 2 }]}>
         <Ionicons
           name="search"
@@ -349,6 +377,30 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.background,
   },
+
+  /* TOP BAR */
+  topBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: 'rgba(255,255,255,0.08)',
+  },
+  backBtn: {
+    width: 40,
+    height: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  topTitle: {
+    color: colors.text,
+    fontSize: 17,
+    fontWeight: '700',
+    letterSpacing: -0.2,
+  },
+
   inputWrapper: {
     flexDirection: 'row',
     alignItems: 'center',
