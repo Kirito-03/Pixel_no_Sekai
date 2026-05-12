@@ -1,4 +1,4 @@
-import React, { useRef } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -10,7 +10,7 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import { MangaItem } from '../data/mockManga';
+import { MangaStatus } from '../services/mangaApi';
 
 function formatDate(iso: string): string {
   const d = new Date(iso);
@@ -20,19 +20,57 @@ function formatDate(iso: string): string {
 const STATUS_COLORS: Record<string, string> = {
   'En emisión': '#00C853',
   'Finalizado': '#E50914',
+  Hiatus: '#FFD600',
+  Cancelado: '#9E9E9E',
 };
+
+export interface MangaItemUI {
+  id: string;
+  title: string;
+  image: string;
+  status: MangaStatus;
+  rating: number;
+  chapters: number;
+  updatedAt: string;
+  popular?: boolean;
+}
+
+function PremiumCoverFallback({ label, status }: { label?: string; status?: string }) {
+  return (
+    <View style={styles.fallbackWrap}>
+      <LinearGradient
+        colors={['#191919', '#111111', '#0A0A0A']}
+        locations={[0, 0.62, 1]}
+        style={StyleSheet.absoluteFillObject}
+      />
+      <LinearGradient
+        colors={['rgba(229,9,20,0.16)', 'transparent']}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 0 }}
+        style={StyleSheet.absoluteFillObject}
+      />
+      <Text style={styles.fallbackBrand}>{label || 'PIXEL NO SEKAI'}</Text>
+      {status ? (
+        <View style={styles.fallbackBadge}>
+          <Text style={styles.fallbackBadgeText}>{String(status).toUpperCase()}</Text>
+        </View>
+      ) : null}
+    </View>
+  );
+}
 
 // ─────────────────────────────────────────────
 //  MANGA CARD — Grid vertical tipo poster
 // ─────────────────────────────────────────────
 interface MangaCardProps {
-  item: MangaItem;
+  item: MangaItemUI;
   onPress: () => void;
 }
 
 export function MangaCard({ item, onPress }: MangaCardProps) {
   const scale = useRef(new Animated.Value(1)).current;
   const isWeb = Platform.OS === 'web';
+  const [imageError, setImageError] = useState(false);
 
   const onIn = () =>
     Animated.spring(scale, { toValue: 1.05, useNativeDriver: true, friction: 5 }).start();
@@ -50,7 +88,16 @@ export function MangaCard({ item, onPress }: MangaCardProps) {
       <Animated.View style={[styles.card, { transform: [{ scale }] }]}>
         {/* Imagen poster */}
         <View style={styles.posterBox}>
-          <Image source={{ uri: item.image }} style={StyleSheet.absoluteFillObject} resizeMode="cover" />
+          {!item.image || imageError ? (
+            <PremiumCoverFallback label="MANGA" status={item.status} />
+          ) : (
+            <Image
+              source={{ uri: item.image }}
+              style={StyleSheet.absoluteFillObject}
+              resizeMode="cover"
+              onError={() => setImageError(true)}
+            />
+          )}
 
           {/* Overlay bottom */}
           <LinearGradient
@@ -94,13 +141,14 @@ export function MangaCard({ item, onPress }: MangaCardProps) {
 //  MANGA RANKING ITEM — Popular esta semana
 // ─────────────────────────────────────────────
 interface MangaRankingItemProps {
-  item: MangaItem & { rank: number };
+  item: MangaItemUI & { rank: number };
   onPress: () => void;
 }
 
 export function MangaRankingItem({ item, onPress }: MangaRankingItemProps) {
   const isTop = item.rank === 1;
   const scale = useRef(new Animated.Value(1)).current;
+  const [imageError, setImageError] = useState(false);
 
   const onIn = () =>
     Animated.spring(scale, { toValue: 1.02, useNativeDriver: true, friction: 6 }).start();
@@ -117,7 +165,13 @@ export function MangaRankingItem({ item, onPress }: MangaRankingItemProps) {
     >
       <Animated.View style={[styles.rankCard, isTop && styles.rankCardTop, { transform: [{ scale }] }]}>
         {/* Thumbnail */}
-        <Image source={{ uri: item.image }} style={styles.rankThumb} resizeMode="cover" />
+        <View style={styles.rankThumbBox}>
+          {!item.image || imageError ? (
+            <PremiumCoverFallback label="MANGA" status={item.status} />
+          ) : (
+            <Image source={{ uri: item.image }} style={StyleSheet.absoluteFillObject} resizeMode="cover" onError={() => setImageError(true)} />
+          )}
+        </View>
 
         {/* Info */}
         <View style={styles.rankInfo}>
@@ -146,14 +200,14 @@ export function MangaRankingItem({ item, onPress }: MangaRankingItemProps) {
 // ─────────────────────────────────────────────
 //  FILTER CHIPS
 // ─────────────────────────────────────────────
-export type MangaFilter = 'Todos' | 'En emisión' | 'Finalizado';
+export type MangaFilter = 'Todos' | MangaStatus;
 
 interface FilterChipsProps {
   active: MangaFilter;
   onChange: (f: MangaFilter) => void;
 }
 
-const FILTERS: MangaFilter[] = ['Todos', 'En emisión', 'Finalizado'];
+const FILTERS: MangaFilter[] = ['Todos', 'En emisión', 'Finalizado', 'Hiatus', 'Cancelado'];
 
 export function MangaFilterChips({ active, onChange }: FilterChipsProps) {
   return (
@@ -188,6 +242,35 @@ const styles = StyleSheet.create({
   posterBox: {
     height: 240,
     backgroundColor: '#1a1a1a',
+  },
+  fallbackWrap: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+    position: 'absolute',
+  },
+  fallbackBrand: {
+    color: 'rgba(255,255,255,0.44)',
+    fontSize: 12,
+    fontWeight: '900',
+    letterSpacing: 2.1,
+  },
+  fallbackBadge: {
+    position: 'absolute',
+    bottom: 10,
+    right: 10,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.14)',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+  },
+  fallbackBadgeText: {
+    color: 'rgba(255,255,255,0.72)',
+    fontSize: 9,
+    fontWeight: '800',
+    letterSpacing: 0.7,
   },
   statusBadge: {
     position: 'absolute',
@@ -256,9 +339,10 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(229,9,20,0.3)',
     backgroundColor: '#1a0a0a',
   },
-  rankThumb: {
+  rankThumbBox: {
     width: 72,
     height: 90,
+    backgroundColor: '#1a1a1a',
   },
   rankInfo: {
     flex: 1,

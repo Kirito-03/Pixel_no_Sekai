@@ -24,6 +24,7 @@ import { useTabNavigation } from '../hooks/useTabNavigation';
 import { myListApi, MyListEntry } from '../services/myListApi';
 import { continueWatchingApi, ContinueWatchingEntry } from '../services/continueWatchingApi';
 import { progressApi } from '../services/progressApi';
+import { getResumeTarget } from '../services/resumeTarget';
 
 function normalizeImagePath(path?: string | null): string {
   if (!path) return '';
@@ -44,6 +45,7 @@ export default function MyListScreen() {
   const [selectedContent, setSelectedContent] = useState<ContentItem | null>(null);
   const [modalVisible, setModalVisible] = useState(false);
   const [startFromEpisodeId, setStartFromEpisodeId] = useState<number | null>(null);
+  const [startFromTimeSeconds, setStartFromTimeSeconds] = useState<number | null>(null);
   const [removingKey, setRemovingKey] = useState<string | null>(null);
   const [metaByAnimeId, setMetaByAnimeId] = useState<Map<number, MyListEntry>>(new Map());
   const [continueRows, setContinueRows] = useState<ContinueWatchingEntry[]>([]);
@@ -173,6 +175,7 @@ export default function MyListScreen() {
 
   const openModal = (item: ContentItem) => {
     setStartFromEpisodeId(null);
+    setStartFromTimeSeconds(null);
     setSelectedContent(item);
     setModalVisible(true);
   };
@@ -180,6 +183,7 @@ export default function MyListScreen() {
   const closeModal = () => {
     setModalVisible(false);
     setStartFromEpisodeId(null);
+    setStartFromTimeSeconds(null);
     setSelectedContent(null);
     if (currentProfile) {
       loadMyList();
@@ -266,9 +270,21 @@ export default function MyListScreen() {
                   totalEpisodes={totalEpisodes}
                   progress={progress}
                   onPress={() => {
-                    setStartFromEpisodeId(row.episode_id ?? null);
-                    setSelectedContent(item);
-                    setModalVisible(true);
+                    (async () => {
+                      let targetEpisodeId: number | null = row.episode_id ?? null;
+                      let targetTime = typeof row.current_time === 'number' ? row.current_time : Number(row.current_time || 0);
+                      if (currentProfile?.id) {
+                        try {
+                          const target = await getResumeTarget(Number(item.id), Number(currentProfile.id));
+                          targetEpisodeId = target.episodeId ?? targetEpisodeId;
+                          targetTime = Number(target.resumeTime || targetTime || 0);
+                        } catch { }
+                      }
+                      setStartFromEpisodeId(targetEpisodeId);
+                      setStartFromTimeSeconds(targetTime);
+                      setSelectedContent(item);
+                      setModalVisible(true);
+                    })();
                   }}
                   onRemove={() => openConfirmRemove({ animeId: item.id, title: item.title, source: 'continue', episodeId: row.episode_id })}
                 />
@@ -334,6 +350,7 @@ export default function MyListScreen() {
           content={selectedContent}
           visible={modalVisible}
           startFromEpisodeId={startFromEpisodeId}
+          startFromTimeSeconds={startFromTimeSeconds}
           onClose={closeModal}
         />
       ) : (

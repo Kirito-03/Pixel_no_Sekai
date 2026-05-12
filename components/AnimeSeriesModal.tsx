@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+  import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -33,12 +33,13 @@ import { useMyList } from '../contexts/MyListContext';
 import EpisodePlayer from './EpisodePlayer';
 import { canReachUrl } from '../services/connectivity';
 import { offlineDownloads } from '../services/offlineDownloads';
+import { getResumeTarget } from '../services/resumeTarget';
 
 interface AnimeSeriesModalProps {
   content: ContentItem | null;
   visible: boolean;
   onClose: () => void;
-  onPlayEpisode?: (episode: AnimeEpisode, season: AnimeSeason) => void;
+  onPlayEpisode?: (episode: AnimeEpisode, season: AnimeSeason, resumeTimeSeconds?: number) => void;
 }
 
 export default function AnimeSeriesModal({
@@ -428,13 +429,13 @@ export default function AnimeSeriesModal({
   };
 
   // Episode handling functions
-  const handlePlayEpisode = (episode: AnimeEpisode, season: AnimeSeason) => {
+  const handlePlayEpisode = (episode: AnimeEpisode, season: AnimeSeason, resumeTimeSeconds?: number) => {
     console.log('Playing episode:', episode.title, 'from season:', season.title);
     console.log('Episode ID:', episode.id, 'Season ID:', season.id);
     
     if (onPlayEpisode) {
       console.log('Using external onPlayEpisode handler');
-      onPlayEpisode(episode, season);
+      onPlayEpisode(episode, season, resumeTimeSeconds);
     } else {
       console.log('Using internal episode handling (fallback)');
       // Fallback para compatibilidad
@@ -473,7 +474,7 @@ export default function AnimeSeriesModal({
   };
 
   // Ver ahora: series -> primer episodio; películas -> abrir trailer si existe
-  const handleWatchNow = () => {
+  const handleWatchNow = async () => {
     // Series de anime: reproducir primer episodio de la primera temporada
     if (
       currentContent?.type === 'anime' &&
@@ -484,8 +485,30 @@ export default function AnimeSeriesModal({
     ) {
       const firstSeason = streamingInfo.seasons[0];
       const firstEpisode = firstSeason?.episodes?.[0];
-      if (firstEpisode) {
-        handlePlayEpisode(firstEpisode, firstSeason);
+      if (!firstEpisode) return;
+
+      if (!currentProfile?.id || !currentContent?.id) {
+        handlePlayEpisode(firstEpisode, firstSeason, 0);
+        return;
+      }
+
+      try {
+        const target = await getResumeTarget(Number(currentContent.id), Number(currentProfile.id));
+        const targetEpisodeId = target.episodeId ? String(target.episodeId) : '';
+        const resumeTime = Number(target.resumeTime || 0);
+        if (targetEpisodeId) {
+          for (const s of streamingInfo.seasons) {
+            const ep = s.episodes?.find((e) => String(e.id) === targetEpisodeId);
+            if (ep) {
+              handlePlayEpisode(ep, s, resumeTime);
+              return;
+            }
+          }
+        }
+        handlePlayEpisode(firstEpisode, firstSeason, 0);
+        return;
+      } catch {
+        handlePlayEpisode(firstEpisode, firstSeason, 0);
         return;
       }
     }
@@ -820,7 +843,7 @@ export default function AnimeSeriesModal({
             }
           >
             {/* HERO SECTION */}
-            <View style={heroStyles.heroSection}>
+            <View style={[heroStyles.heroSection, { height: isSmallScreen ? height * 0.72 : height * 0.75 }]}>
               {/* Backdrop + gradiente cinematográfico */}
               {trailerDelay && trailerKey && !trailerFinished ? (
                 <View style={styles.trailerBackground}>
@@ -897,11 +920,11 @@ export default function AnimeSeriesModal({
                       heroStyles.backdropImage,
                       Platform.OS === 'web' && {
                         // @ts-ignore
-                        objectPosition: (currentContent as any)?.banner_position ?? '50% 8%',
-                        transform: [{ scale: 1.06 }],
+                        objectPosition: (currentContent as any)?.banner_position ?? '52% 40%',
+                        transform: [{ scale: 1.05 }],
                       },
                       Platform.OS !== 'web' && {
-                        transform: [{ scale: 1.06 }, { translateY: 14 }],
+                        transform: [{ scale: 1.05 }, { translateY: 10 }],
                       },
                     ]}
                     resizeMode="cover"
@@ -910,13 +933,13 @@ export default function AnimeSeriesModal({
                   <LinearGradient
                     colors={[
                       'rgba(0,0,0,0.0)',
-                      'rgba(0,0,0,0.0)',
-                      'rgba(0,0,0,0.45)',
-                      'rgba(0,0,0,0.82)',
-                      'rgba(0,0,0,0.97)',
+                      'rgba(0,0,0,0.10)',
+                      'rgba(0,0,0,0.32)',
+                      'rgba(0,0,0,0.62)',
+                      'rgba(0,0,0,0.86)',
                       'rgba(0,0,0,1.0)',
                     ]}
-                    locations={[0, 0.25, 0.48, 0.68, 0.88, 1]}
+                    locations={[0, 0.18, 0.42, 0.62, 0.82, 1]}
                     style={StyleSheet.absoluteFill}
                   />
                 </>
@@ -1031,7 +1054,19 @@ export default function AnimeSeriesModal({
               return (
                 <TouchableOpacity
                   style={continueStyles.card}
-                  onPress={() => handlePlayEpisode(nextEp, firstSeason)}
+                  onPress={async () => {
+                    if (!currentProfile?.id || !currentContent?.id) {
+                      handlePlayEpisode(nextEp, firstSeason, 0);
+                      return;
+                    }
+                    try {
+                      const target = await getResumeTarget(Number(currentContent.id), Number(currentProfile.id));
+                      const resumeTime = String(target.episodeId) === String(nextEp.id) ? Number(target.resumeTime || 0) : 0;
+                      handlePlayEpisode(nextEp, firstSeason, resumeTime);
+                    } catch {
+                      handlePlayEpisode(nextEp, firstSeason, 0);
+                    }
+                  }}
                   activeOpacity={0.92}
                 >
                   {/* Miniatura */}
@@ -1976,13 +2011,14 @@ const heroStyles = StyleSheet.create({
   gradient: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
   heroContent: {
     position: 'absolute',
-    top: 14,
-    bottom: 0,
+    top: 0,
     left: 0,
     right: 0,
+    bottom: 0,
     paddingHorizontal: 24,
-    paddingBottom: 30,
-    paddingTop: 138,      // baja el bloque de información dentro del hero
+    paddingVertical: 72,
+    justifyContent: 'center',
+    transform: [{ translateY: 56 }],
     maxWidth: 740,        // evita que el texto flote en pantallas ultrawides
   },
   metaRow: {
@@ -1990,7 +2026,7 @@ const heroStyles = StyleSheet.create({
     alignItems: 'center',
     gap: 8,
     flexWrap: 'wrap',
-    marginBottom: 12,
+    marginBottom: 18,
   },
   ratingPill: {
     flexDirection: 'row',
@@ -2017,7 +2053,7 @@ const heroStyles = StyleSheet.create({
     color: '#FFFFFF',
     fontWeight: '900',
     letterSpacing: -0.7,
-    marginBottom: 10,
+    marginBottom: 18,
     lineHeight: 40,
     textShadowColor: 'rgba(0,0,0,0.95)',
     textShadowOffset: { width: 0, height: 2 },
@@ -2027,7 +2063,7 @@ const heroStyles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 6,
-    marginBottom: 12,
+    marginBottom: 18,
   },
   genreChip: {
     paddingHorizontal: 10,
@@ -2042,13 +2078,13 @@ const heroStyles = StyleSheet.create({
     color: 'rgba(255,255,255,0.7)',
     fontSize: 13,
     lineHeight: 22,
-    marginBottom: 20,
+    marginBottom: 28,
     maxWidth: 500,        // limita el ancho del texto en desktop
   },
   actionRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+    gap: 14,
     flexWrap: 'wrap',
   },
   btnPlay: {
@@ -2094,13 +2130,20 @@ const continueStyles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: '#181818',
     marginHorizontal: 16,
-    marginTop: 0,
+    marginTop: -52,
     marginBottom: 4,
     borderRadius: 10,
     overflow: 'hidden',
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: 'rgba(255,255,255,0.09)',
     minHeight: 84,
+    position: 'relative',
+    zIndex: 5,
+    shadowColor: '#000',
+    shadowOpacity: 0.45,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 10,
   },
   thumb: {
     width: 116,
@@ -2138,10 +2181,15 @@ const continueStyles = StyleSheet.create({
     alignItems: 'center',
     gap: 6,
     backgroundColor: '#E50914',
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    marginRight: 14,
-    borderRadius: 7,
+    paddingHorizontal: 18,
+    paddingVertical: 12,
+    marginRight: 0,
+    alignSelf: 'stretch',
+    justifyContent: 'center',
+    minWidth: 112,
+    borderLeftWidth: StyleSheet.hairlineWidth,
+    borderLeftColor: 'rgba(0,0,0,0.35)',
+    borderRadius: 0,
   },
   playBtnText: { color: '#fff', fontSize: 12, fontWeight: '800', letterSpacing: 0.2 },
 });

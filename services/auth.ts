@@ -4,6 +4,7 @@ import { doc, getDoc, setDoc, serverTimestamp, collection, getDocs } from 'fireb
 import * as AuthSession from 'expo-auth-session'
 import * as WebBrowser from 'expo-web-browser'
 import { Platform } from 'react-native'
+import { googleSignInAndroid, googleSignOutAndroid } from './googleSignin'
 
 WebBrowser.maybeCompleteAuthSession()
 
@@ -45,6 +46,11 @@ export const loginGoogle = async () => {
     await ensureUserProfile(cred.user)
     return cred
   }
+  if (Platform.OS === 'android') {
+    const cred = await signInWithGoogleAndroid()
+    await ensureUserProfile(cred.user)
+    return cred
+  }
   const expoClientId = (process.env.EXPO_PUBLIC_GOOGLE_EXPO_CLIENT_ID || process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID) as string
   if (!expoClientId) throw new Error('GOOGLE_CLIENT_ID_MISSING')
   const proxyRedirect = (AuthSession.makeRedirectUri as any)({ useProxy: true })
@@ -65,7 +71,33 @@ export const loginGoogle = async () => {
   return cred
 }
 
-export const logout = () => signOut(auth)
+export const signInWithGoogleAndroid = async () => {
+  if (Platform.OS !== 'android') throw new Error('PLATFORM_NOT_ANDROID')
+  const webClientId = (process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID || '') as string
+  if (!webClientId) throw new Error('GOOGLE_WEB_CLIENT_ID_MISSING')
+
+  try {
+    const { idToken, statusCodes } = await googleSignInAndroid(webClientId)
+    if (!idToken) throw new Error('GOOGLE_ID_TOKEN_MISSING')
+    const credential = GoogleAuthProvider.credential(idToken)
+    return await signInWithCredential(auth, credential)
+  } catch (e: any) {
+    if (e?.code === statusCodes.SIGN_IN_CANCELLED) throw new Error('GOOGLE_AUTH_CANCELED')
+    if (e?.code === statusCodes.IN_PROGRESS) throw new Error('GOOGLE_AUTH_IN_PROGRESS')
+    if (e?.code === statusCodes.PLAY_SERVICES_NOT_AVAILABLE) throw new Error('GOOGLE_PLAY_SERVICES_NOT_AVAILABLE')
+    throw e
+  }
+}
+
+export const logout = async () => {
+  if (Platform.OS === 'android') {
+    try {
+      await googleSignOutAndroid()
+    } catch (e) {
+    }
+  }
+  return signOut(auth)
+}
 
 export const requestPasswordReset = async (email: string) => {
   await sendPasswordResetEmail(auth, email)

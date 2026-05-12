@@ -22,6 +22,7 @@ import { AdminShell } from '../../components/admin/AdminShell';
 interface DashboardStats {
     totalAnime: number;
     totalEpisodes: number;
+    totalNews?: number;
     storageStats: Array<{
         storage_type: string;
         count: number;
@@ -163,6 +164,7 @@ export default function AdminDashboardScreen() {
                                     <View style={styles.statsGrid}>
                                         <StatCard style={statItemStyle} title="Anime" value={stats?.totalAnime || 0} icon="film-outline" />
                                         <StatCard style={statItemStyle} title="Episodios" value={stats?.totalEpisodes || 0} icon="play-circle-outline" />
+                                        <StatCard style={statItemStyle} title="Noticias" value={stats?.totalNews || 0} icon="newspaper-outline" />
                                         <StatCard style={statItemStyle} title="Storage (R2)" value={storageTotal} icon="cloud-outline" />
                                         <StatCard style={statItemStyle} title="Transcode" value={0} icon="pulse-outline" />
                                     </View>
@@ -183,6 +185,19 @@ export default function AdminDashboardScreen() {
                                             icon="add-circle"
                                             onPress={() => navigation.navigate('AnimeForm', { mode: 'create' })}
                                             primary
+                                        />
+                                        <QuickAction
+                                            title="Actualizar noticias"
+                                            subtitle="NewsAPI → cache"
+                                            icon="refresh"
+                                            onPress={async () => {
+                                                try {
+                                                    await adminApiService.refreshNews();
+                                                    loadStats();
+                                                } catch (e) {
+                                                    console.error('Error refreshing news:', e);
+                                                }
+                                            }}
                                         />
                                     </View>
                                 </View>

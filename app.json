@@ -21,13 +21,15 @@
         "backgroundColor": "#ffffff"
       },
       "predictiveBackGestureEnabled": false,
-      "package": "com.dragonflux.pixelnosekai"
+      "package": "com.dragonflux.pixelnosekai",
+      "googleServicesFile": "./google-services.json"
     },
     "web": {
       "favicon": "./assets/icon-arle.png"
     },
     "plugins": [
-      "expo-font"
+      "expo-font",
+      "@react-native-google-signin/google-signin"
     ]
   }
 }

@@ -8,7 +8,7 @@
  *   - Devolver la URL pública del playlist
  */
 
-import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, PutObjectCommand, ListObjectsV2Command, DeleteObjectsCommand } from '@aws-sdk/client-s3';
 import { readFile, readdir, rm } from 'fs/promises';
 import { existsSync } from 'fs';
 import { join, extname, basename } from 'path';
@@ -166,4 +166,46 @@ export async function deleteLocalHlsFolder(localDir) {
   }
   await rm(localDir, { recursive: true, force: true });
   console.log(`[r2Service] 🗑️  Carpeta local eliminada: ${localDir}`);
+}
+
+export async function deleteR2Prefix(prefix) {
+  const cleanPrefix = String(prefix || '').replace(/^\/+/, '');
+  if (!cleanPrefix) return { deleted: 0 };
+
+  let continuationToken = undefined;
+  let deleted = 0;
+
+  while (true) {
+    const listed = await r2Client.send(
+      new ListObjectsV2Command({
+        Bucket: BUCKET,
+        Prefix: cleanPrefix,
+        ContinuationToken: continuationToken,
+      })
+    );
+
+    const contents = Array.isArray(listed?.Contents) ? listed.Contents : [];
+    const keys = contents.map((o) => o?.Key).filter(Boolean);
+
+    if (keys.length) {
+      const chunks = [];
+      for (let i = 0; i < keys.length; i += 1000) chunks.push(keys.slice(i, i + 1000));
+      for (const chunk of chunks) {
+        await r2Client.send(
+          new DeleteObjectsCommand({
+            Bucket: BUCKET,
+            Delete: { Objects: chunk.map((Key) => ({ Key })), Quiet: true },
+          })
+        );
+        deleted += chunk.length;
+      }
+    }
+
+    if (!listed?.IsTruncated) break;
+    continuationToken = listed?.NextContinuationToken;
+    if (!continuationToken) break;
+  }
+
+  console.log(`[r2Service] 🗑️  Eliminados ${deleted} objetos bajo: ${cleanPrefix}`);
+  return { deleted };
 }

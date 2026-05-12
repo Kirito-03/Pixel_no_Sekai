@@ -7,6 +7,7 @@ import Header from '../components/Header';
 import FeaturedCarousel from '../components/FeaturedCarousel';
 import MovieRow from '../components/MovieRow';
 import MovieModal from '../components/MovieModal';
+import { getResumeTarget } from '../services/resumeTarget';
 import { useProfile } from '../contexts/ProfileContext';
 import { useMyList } from '../contexts/MyListContext';
 import { catalogService, CatalogAnime } from '../services/catalogService';
@@ -24,6 +25,8 @@ export default function HomeScreen({ navigation }: Props) {
     const [featuredItems, setFeaturedItems] = useState<ContentItem[]>([]); // Sección "Destacados"
     const [selectedContent, setSelectedContent] = useState<ContentItem | null>(null);
     const [modalVisible, setModalVisible] = useState(false);
+    const [startFromEpisodeId, setStartFromEpisodeId] = useState<number | null>(null);
+    const [startFromTimeSeconds, setStartFromTimeSeconds] = useState<number | null>(null);
     const [loading, setLoading] = useState(true);
     const [blackHeader, setBlackHeader] = useState(false);
     const [contentFilter, setContentFilter] = useState<'all' | 'movies' | 'series' | 'anime'>('anime');
@@ -347,6 +350,22 @@ export default function HomeScreen({ navigation }: Props) {
         handleContentPress(contentItem);
     };
 
+    const handleWatchAnime = async (contentItem: ContentItem) => {
+        if (!currentProfile) {
+            handleContentPress(contentItem);
+            return;
+        }
+        try {
+            const target = await getResumeTarget(Number(contentItem.id), Number(currentProfile.id));
+            setStartFromEpisodeId(target.episodeId ?? null);
+            setStartFromTimeSeconds(target.resumeTime ?? 0);
+        } catch {
+            setStartFromEpisodeId(null);
+            setStartFromTimeSeconds(null);
+        }
+        handleContentPress(contentItem);
+    };
+
     const hasAnyContent = contentSections.airing?.length ||
         contentSections.finished?.length ||
         contentSections.upcoming?.length;
@@ -389,7 +408,7 @@ export default function HomeScreen({ navigation }: Props) {
                                     source: 'tmdb'
                                 });
                             } else {
-                                handleContentNavigation(mapCatalogAnimeToContentItem({
+                                handleWatchAnime(mapCatalogAnimeToContentItem({
                                     id: movie.id,
                                     title: (movie as any).title?.romaji || (movie as any).title?.native || '',
                                     description: (movie as any).description || '',
@@ -531,7 +550,13 @@ export default function HomeScreen({ navigation }: Props) {
             <MovieModal
                 content={selectedContent}
                 visible={modalVisible}
-                onClose={() => setModalVisible(false)}
+                startFromEpisodeId={startFromEpisodeId}
+                startFromTimeSeconds={startFromTimeSeconds}
+                onClose={() => {
+                    setModalVisible(false);
+                    setStartFromEpisodeId(null);
+                    setStartFromTimeSeconds(null);
+                }}
             />
         </View>
     );

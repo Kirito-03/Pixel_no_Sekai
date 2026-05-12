@@ -20,7 +20,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../theme';
 import { useAuth } from '../contexts/AuthContext';
-import { loginEmail, requestPasswordReset, loginGoogle as loginGoogleProxy, getUserDetails } from '../services/auth';
+import { loginEmail, requestPasswordReset, loginGoogle as loginGoogleProxy, getUserDetails, signInWithGoogleAndroid } from '../services/auth';
 import * as GoogleAuth from 'expo-auth-session/providers/google';
 import Constants from 'expo-constants';
 import { GoogleAuthProvider, signInWithCredential } from 'firebase/auth';
@@ -100,6 +100,12 @@ export default function LoginScreen({ navigation }: any) {
         const userDetails = await getUserDetails();
         await login({ uid: cred.user.uid, email: cred.user.email || '', role: userDetails.role });
         // navigation.replace('SeleccionPerfil'); // Eliminado
+        return;
+      }
+      if (Platform.OS === 'android') {
+        const cred = await signInWithGoogleAndroid();
+        const userDetails = await getUserDetails();
+        await login({ uid: cred.user.uid, email: cred.user.email || '', role: userDetails.role });
         return;
       }
       const res = await googlePromptAsync();

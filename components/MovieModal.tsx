@@ -42,6 +42,8 @@ interface MovieModalProps {
   content: ContentItem | null;
   visible: boolean;
   onClose: () => void;
+  startFromEpisodeId?: number | null;
+  startFromTimeSeconds?: number | null;
   movie?: MovieDetail | null;
   onAddToList?: (content: ContentItem) => void;
   onRemoveFromList?: (contentId: number) => void;
@@ -53,6 +55,8 @@ export default function MovieModal({
   movie, 
   visible, 
   onClose,
+  startFromEpisodeId = null,
+  startFromTimeSeconds = null,
   onAddToList,
   onRemoveFromList,
   isInList = false 
@@ -517,6 +521,8 @@ export default function MovieModal({
         content={currentContent}
         visible={visible}
         onClose={onClose}
+        startFromEpisodeId={currentContent.type === 'anime' ? startFromEpisodeId : null}
+        startFromTimeSeconds={currentContent.type === 'anime' ? startFromTimeSeconds : null}
       />
     );
   }

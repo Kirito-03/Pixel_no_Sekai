@@ -18,7 +18,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import databaseService from '../services/databaseService';
-import { registerEmail, loginEmail, loginGoogle as loginGoogleProxy } from '../services/auth';
+import { registerEmail, loginEmail, loginGoogle as loginGoogleProxy, signInWithGoogleAndroid } from '../services/auth';
 import * as GoogleAuth from 'expo-auth-session/providers/google';
 import { GoogleAuthProvider, signInWithCredential } from 'firebase/auth';
 import { auth } from '../services/firebase';
@@ -276,6 +276,11 @@ const RegisterScreen: React.FC<RegisterScreenProps> = ({ navigation }) => {
       setGoogleLoading(true);
       if (Platform.OS === 'web') {
         const cred = await loginGoogleProxy();
+        navigation.reset({ index: 0, routes: [{ name: 'Principal' }] });
+        return;
+      }
+      if (Platform.OS === 'android') {
+        await signInWithGoogleAndroid();
         navigation.reset({ index: 0, routes: [{ name: 'Principal' }] });
         return;
       }

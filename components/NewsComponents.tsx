@@ -1,4 +1,4 @@
-import React, { useRef } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -24,6 +24,30 @@ function formatDate(iso: string): string {
   return d.toLocaleDateString('es-ES', { day: 'numeric', month: 'long' });
 }
 
+function PremiumImageFallback({ label, category }: { label?: string; category?: string }) {
+  return (
+    <View style={styles.fallbackWrap}>
+      <LinearGradient
+        colors={['#191919', '#111111', '#0A0A0A']}
+        locations={[0, 0.62, 1]}
+        style={StyleSheet.absoluteFillObject}
+      />
+      <LinearGradient
+        colors={['rgba(229,9,20,0.16)', 'transparent']}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 0 }}
+        style={StyleSheet.absoluteFillObject}
+      />
+      <Text style={styles.fallbackBrand}>{label || 'PIXEL NO SEKAI'}</Text>
+      {category ? (
+        <View style={styles.fallbackBadge}>
+          <Text style={styles.fallbackBadgeText}>{String(category).toUpperCase()}</Text>
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
 // ─────────────────────────────────────────────
 // HERO — Noticia destacada
 // ─────────────────────────────────────────────
@@ -34,6 +58,7 @@ interface NewsHeroProps {
 
 export function NewsHero({ item, onPress }: NewsHeroProps) {
   const scale = useRef(new Animated.Value(1)).current;
+  const [imageError, setImageError] = useState(false);
 
   const onIn = () =>
     Animated.spring(scale, { toValue: 1.015, useNativeDriver: true, friction: 6 }).start();
@@ -49,7 +74,16 @@ export function NewsHero({ item, onPress }: NewsHeroProps) {
       style={styles.heroWrapper}
     >
       <Animated.View style={[styles.heroCard, { transform: [{ scale }] }]}>
-        <Image source={{ uri: item.image }} style={StyleSheet.absoluteFillObject} resizeMode="cover" />
+        {!item.image || imageError ? (
+          <PremiumImageFallback label="NEWS" category={item.badge} />
+        ) : (
+          <Image
+            source={{ uri: item.image }}
+            style={StyleSheet.absoluteFillObject}
+            resizeMode="cover"
+            onError={() => setImageError(true)}
+          />
+        )}
 
         {/* Gradiente top → bottom */}
         <LinearGradient
@@ -101,6 +135,7 @@ interface NewsCardProps {
 export function NewsCard({ item, onPress }: NewsCardProps) {
   const scale = useRef(new Animated.Value(1)).current;
   const isWeb = Platform.OS === 'web';
+  const [imageError, setImageError] = useState(false);
 
   const onIn = () =>
     Animated.spring(scale, { toValue: 1.04, useNativeDriver: false, friction: 6 }).start();
@@ -118,7 +153,11 @@ export function NewsCard({ item, onPress }: NewsCardProps) {
       <Animated.View style={[styles.card, { transform: [{ scale }] }]}>
         {/* Imagen */}
         <View style={styles.cardImageBox}>
-          <Image source={{ uri: item.image }} style={styles.cardImage} resizeMode="cover" />
+          {!item.image || imageError ? (
+            <PremiumImageFallback label="NEWS" category={item.badge} />
+          ) : (
+            <Image source={{ uri: item.image }} style={styles.cardImage} resizeMode="cover" onError={() => setImageError(true)} />
+          )}
           <LinearGradient
             colors={['transparent', 'rgba(0,0,0,0.6)']}
             style={StyleSheet.absoluteFillObject}
@@ -261,6 +300,35 @@ const styles = StyleSheet.create({
   cardImage: {
     width: '100%',
     height: '100%',
+  },
+  fallbackWrap: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+    position: 'absolute',
+  },
+  fallbackBrand: {
+    color: 'rgba(255,255,255,0.44)',
+    fontSize: 12,
+    fontWeight: '900',
+    letterSpacing: 2.1,
+  },
+  fallbackBadge: {
+    position: 'absolute',
+    bottom: 10,
+    right: 10,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.14)',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+  },
+  fallbackBadgeText: {
+    color: 'rgba(255,255,255,0.72)',
+    fontSize: 9,
+    fontWeight: '800',
+    letterSpacing: 0.7,
   },
   cardBadge: {
     position: 'absolute',

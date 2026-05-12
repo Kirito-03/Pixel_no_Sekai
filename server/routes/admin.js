@@ -8,7 +8,9 @@ import { unlink } from 'fs/promises';
 import { fileURLToPath } from 'url';
 import { basename, dirname, join } from 'path';
 import { spawn } from 'child_process';
-import { uploadHlsFolderToR2, deleteLocalHlsFolder } from '../services/r2Service.js';
+import { uploadHlsFolderToR2, deleteLocalHlsFolder, deleteR2Prefix } from '../services/r2Service.js';
+import { refreshNews } from '../services/newsService.js';
+import { refreshMangaPopularCache } from '../services/mangaService.js';
 
 const router = express.Router();
 
@@ -538,8 +540,67 @@ router.delete('/episodes/:id', async (req, res) => {
     const { id } = req.params;
 
     try {
+        const hard =
+            req.query?.hard === true ||
+            req.query?.hard === 'true' ||
+            req.query?.hard === 1 ||
+            req.query?.hard === '1' ||
+            req.query?.mode === 'hard';
+
+        const cleanup =
+            req.query?.cleanup === undefined
+                ? hard
+                : req.query?.cleanup === true ||
+                req.query?.cleanup === 'true' ||
+                req.query?.cleanup === 1 ||
+                req.query?.cleanup === '1';
+
+        const episode = await pool.query(
+            `SELECT id, video_url, stream_url, storage_type FROM anime_episodes WHERE id = $1 LIMIT 1`,
+            [id]
+        );
+        if (!episode.rows.length) {
+            return res.status(404).json({ message: 'Episodio no encontrado' });
+        }
+
+        const row = episode.rows[0];
+
+        if (hard) {
+            if (cleanup) {
+                const storageType = String(row.storage_type || '').trim().toLowerCase();
+                const videoUrl = String(row.video_url || '').trim();
+                const streamUrl = String(row.stream_url || '').trim();
+
+                if (storageType === 'local' && videoUrl.includes('/uploads/episodes/')) {
+                    const fileName = basename(videoUrl.split('?')[0]);
+                    const localPath = join(episodeUploadsDir, fileName);
+                    if (existsSync(localPath)) {
+                        await unlink(localPath);
+                    }
+                }
+
+                if (streamUrl.includes('/hls/') && streamUrl.includes('/index.m3u8')) {
+                    const match = streamUrl.match(/\/hls\/([^/]+)\/index\.m3u8/i);
+                    const hlsId = match?.[1] ? String(match[1]).trim() : '';
+                    if (hlsId) {
+                        try {
+                            await deleteR2Prefix(`hls/${hlsId}/`);
+                        } catch (e) {
+                        }
+                        try {
+                            await deleteLocalHlsFolder(join(__dirname, '..', 'hls', hlsId));
+                        } catch (e) {
+                        }
+                    }
+                }
+            }
+
+            const deleted = await pool.query('DELETE FROM anime_episodes WHERE id = $1 RETURNING id', [id]);
+            return res.json({ ok: true, mode: 'hard', deleted_id: deleted.rows[0]?.id || Number(id) });
+        }
+
         const result = await pool.query(
-            'UPDATE anime_episodes SET is_active = false WHERE id = $1 RETURNING *',
+            'UPDATE anime_episodes SET is_active = false WHERE id = $1 RETURNING id',
             [id]
         );
 
@@ -547,7 +608,7 @@ router.delete('/episodes/:id', async (req, res) => {
             return res.status(404).json({ message: 'Episodio no encontrado' });
         }
 
-        res.json({ ok: true, message: 'Episodio eliminado exitosamente' });
+        res.json({ ok: true, mode: 'soft', message: 'Episodio desactivado exitosamente' });
     } catch (error) {
         console.error('Error eliminando episodio:', error);
         res.status(500).json({
@@ -766,9 +827,16 @@ router.get('/stats', async (req, res) => {
        GROUP BY storage_type`
         );
 
+        let newsCount = { rows: [{ count: '0' }] };
+        try {
+            newsCount = await pool.query('SELECT COUNT(*) FROM news_articles WHERE is_active = true');
+        } catch (e) {
+        }
+
         res.json({
             totalAnime: parseInt(animeCount.rows[0].count),
             totalEpisodes: parseInt(episodeCount.rows[0].count),
+            totalNews: parseInt(newsCount.rows[0].count),
             recentAnime: recentAnime.rows,
             storageStats: storageStats.rows
         });
@@ -778,6 +846,76 @@ router.get('/stats', async (req, res) => {
             message: 'Error al obtener estadísticas',
             error: error.message
         });
+    }
+});
+
+// ========================================
+// News Admin
+// ========================================
+
+/**
+ * POST /api/admin/news/refresh
+ * Fuerza actualización manual desde NewsAPI
+ */
+router.post('/news/refresh', async (req, res) => {
+    try {
+        const result = await refreshNews(pool);
+        if (!result.ok) return res.status(400).json(result);
+        return res.json(result);
+    } catch (e) {
+        return res.status(500).json({ message: 'Error actualizando noticias', error: e.message });
+    }
+});
+
+/**
+ * PATCH /api/admin/news/:id/featured
+ * Marcar/desmarcar destacada
+ */
+router.patch('/news/:id/featured', async (req, res) => {
+    const id = Number(req.params.id);
+    const isFeatured = req.body?.is_featured === true || req.body?.is_featured === 'true' || req.body?.is_featured === 1 || req.body?.is_featured === '1';
+    if (!id) return res.status(400).json({ message: 'id inválido' });
+    try {
+        const r = await pool.query(
+            `UPDATE news_articles SET is_featured = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $1 RETURNING id, slug, is_featured`,
+            [id, isFeatured]
+        );
+        if (!r.rows.length) return res.status(404).json({ message: 'Noticia no encontrada' });
+        return res.json(r.rows[0]);
+    } catch (e) {
+        return res.status(500).json({ message: 'Error actualizando destacada', error: e.message });
+    }
+});
+
+/**
+ * DELETE /api/admin/news/:id
+ * Desactivar noticia
+ */
+router.delete('/news/:id', async (req, res) => {
+    const id = Number(req.params.id);
+    if (!id) return res.status(400).json({ message: 'id inválido' });
+    try {
+        const r = await pool.query(
+            `UPDATE news_articles SET is_active = false, updated_at = CURRENT_TIMESTAMP WHERE id = $1 RETURNING id, slug`,
+            [id]
+        );
+        if (!r.rows.length) return res.status(404).json({ message: 'Noticia no encontrada' });
+        return res.json({ ok: true });
+    } catch (e) {
+        return res.status(500).json({ message: 'Error eliminando noticia', error: e.message });
+    }
+});
+
+// ========================================
+// Manga Admin
+// ========================================
+
+router.post('/manga/refresh', async (req, res) => {
+    try {
+        const result = await refreshMangaPopularCache(pool);
+        return res.json(result);
+    } catch (e) {
+        return res.status(500).json({ message: 'Error actualizando manga', error: e.message });
     }
 });
 

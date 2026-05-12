@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -6,14 +6,45 @@ import {
   StyleSheet,
   useWindowDimensions,
   Platform,
+  ActivityIndicator,
+  TouchableOpacity,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
-import { MOCK_NEWS, MOCK_TRENDING } from '../data/mockNews';
+import { MOCK_TRENDING } from '../data/mockNews';
 import { NewsHero, NewsCard, TrendingItem } from '../components/NewsComponents';
 import Header from '../components/Header';
 import { useTabNavigation } from '../hooks/useTabNavigation';
+import { newsApi, NewsArticle } from '../services/newsApi';
+
+const LOCAL_FALLBACK_HERO: NewsArticle = {
+  id: -1,
+  title: 'Noticias Destacadas',
+  slug: '__fallback-local__',
+  excerpt: 'Actualizando noticias. Vuelve en breve para ver lo más reciente.',
+  content: null,
+  source_name: 'Pixel no Sekai',
+  source_url: null,
+  image_url: null,
+  published_at: new Date().toISOString(),
+  category: 'industria',
+  tags: [],
+  language: 'es',
+  is_featured: true,
+  external_url: null,
+  has_valid_image: false,
+  is_publishable: true,
+  quality_score: 100,
+  use_fallback_image: true,
+};
+
+function summarizeFromParts(title?: string | null, excerpt?: string | null, content?: string | null) {
+  const text = String(excerpt || content || '').replace(/\s+/g, ' ').trim();
+  if (text) return text.slice(0, 180);
+  const fallback = String(title || '').replace(/\s+/g, ' ').trim();
+  return fallback ? `${fallback.slice(0, 140)}...` : 'Sin resumen disponible.';
+}
 
 export default function NewsScreen() {
   const { width } = useWindowDimensions();
@@ -22,10 +53,77 @@ export default function NewsScreen() {
   const navigation = useNavigation<any>();
   const { navigateByLabel } = useTabNavigation();
   const [blackHeader, setBlackHeader] = useState(true);
+  const [loading, setLoading] = useState(true);
+  const [featured, setFeatured] = useState<NewsArticle | null>(null);
+  const [items, setItems] = useState<NewsArticle[]>([]);
+  const [trending, setTrending] = useState<Array<{ id: string; rank: number; title: string; description: string }>>([]);
+  const [category, setCategory] = useState<string>('');
 
-  // Separar hero del resto
-  const hero = MOCK_NEWS.find(n => n.featured) ?? MOCK_NEWS[0];
-  const grid = MOCK_NEWS.filter(n => n.id !== hero.id);
+  const categories = useMemo(
+    () => ['', 'estreno', 'temporada', 'película', 'tráiler', 'industria', 'manga', 'evento'],
+    []
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    const run = async () => {
+      setLoading(true);
+      try {
+        const f = await newsApi.featured({ limit: 9 });
+        const list = await newsApi.list({ category: category || undefined, page: 1, limit: 18 });
+        const t = await newsApi.trending();
+        if (cancelled) return;
+        setFeatured(f.featured);
+
+        const bySlug = new Map<string, NewsArticle>();
+        const pushMany = (arr: NewsArticle[]) => {
+          for (const row of arr || []) {
+            const key = String(row?.slug || row?.id || '').trim();
+            if (!key) continue;
+            if (!bySlug.has(key)) bySlug.set(key, row);
+          }
+        };
+        pushMany(list.data || []);
+        pushMany(f.items || []);
+        pushMany(t.items || []);
+        if (f.featured) pushMany([f.featured]);
+        setItems(Array.from(bySlug.values()));
+
+        setTrending(
+          ((t.items && t.items.length ? t.items : list.data) || []).slice(0, 4).map((a, idx) => ({
+            id: String(a.slug || a.id),
+            rank: idx + 1,
+            title: a.title,
+            description: summarizeFromParts(a.title, a.excerpt || null, a.content || null),
+          }))
+        );
+      } catch {
+        if (cancelled) return;
+        setFeatured(LOCAL_FALLBACK_HERO);
+        setItems([]);
+        setTrending(MOCK_TRENDING.map((x) => ({ id: String(x.id), rank: x.rank, title: x.title, description: x.description })));
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+    run();
+    return () => {
+      cancelled = true;
+    };
+  }, [category]);
+
+  const toNewsItem = (a: NewsArticle) => ({
+    id: a.slug,
+    title: a.title,
+    description: summarizeFromParts(a.title, a.excerpt || null, a.content || null),
+    image: a.image_url || '',
+    badge: (a.category || 'Industria').replace(/^./, (c) => c.toUpperCase()),
+    date: a.published_at || new Date().toISOString(),
+    featured: a.is_featured,
+  });
+
+  const hero = featured ? toNewsItem(featured) : null;
+  const grid = items.filter((n) => n.slug !== featured?.slug).map(toNewsItem);
 
   // En web 3 columnas, mobile 1 columna
   const columns = isSmallScreen ? 1 : 3;
@@ -60,22 +158,62 @@ export default function NewsScreen() {
         </SafeAreaView>
 
         {/* ── HERO ── */}
-        <NewsHero item={hero} onPress={() => {}} />
+        {hero ? (
+          <NewsHero
+            item={hero as any}
+            onPress={() => navigation.navigate('NewsDetail', { slug: String((featured as any)?.slug || hero.id) })}
+          />
+        ) : null}
+
+        {/* ── CATEGORIES ── */}
+        <View style={styles.categoryRow}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.categoryRowInner}>
+            {categories.map((c) => {
+              const active = c === category;
+              const label = c ? c.toUpperCase() : 'TODO';
+              return (
+                <TouchableOpacity
+                  key={c || 'all'}
+                  activeOpacity={0.9}
+                  onPress={() => setCategory(c)}
+                  style={[styles.categoryChip, active && styles.categoryChipActive]}
+                >
+                  <Text style={[styles.categoryChipText, active && styles.categoryChipTextActive]}>{label}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+        </View>
 
         {/* ── GRID SECTION ── */}
         <View style={styles.section}>
-          {chunks.map((chunk, ci) => (
-            <View key={ci} style={styles.gridRow}>
-              {chunk.map(item => (
-                <NewsCard key={item.id} item={item} onPress={() => {}} />
-              ))}
-              {/* Relleno si falta columna */}
-              {chunk.length < columns &&
-                Array.from({ length: columns - chunk.length }).map((_, i) => (
-                  <View key={`pad-${i}`} style={{ flex: 1 }} />
-                ))}
+          {loading ? (
+            <View style={styles.loadingBox}>
+              <ActivityIndicator size="large" color="#E50914" />
             </View>
-          ))}
+          ) : grid.length === 0 ? (
+            <View style={styles.emptyBox}>
+              <Ionicons name="newspaper-outline" size={46} color="rgba(255,255,255,0.18)" />
+              <Text style={styles.emptyTitle}>Sin noticias</Text>
+              <Text style={styles.emptyText}>Intenta otra categoría o vuelve más tarde</Text>
+            </View>
+          ) : (
+            chunks.map((chunk, ci) => (
+              <View key={ci} style={styles.gridRow}>
+                {chunk.map((item) => (
+                  <NewsCard
+                    key={item.id}
+                    item={item as any}
+                    onPress={() => navigation.navigate('NewsDetail', { slug: String(item.id) })}
+                  />
+                ))}
+                {chunk.length < columns &&
+                  Array.from({ length: columns - chunk.length }).map((_, i) => (
+                    <View key={`pad-${i}`} style={{ flex: 1 }} />
+                  ))}
+              </View>
+            ))
+          )}
         </View>
 
         {/* ── TENDENCIAS ── */}
@@ -88,7 +226,7 @@ export default function NewsScreen() {
 
           {/* Lista en dos columnas en web */}
           <View style={isSmallScreen ? styles.trendingCol : styles.trendingGrid}>
-            {MOCK_TRENDING.map(item => (
+            {(trending.length ? trending : MOCK_TRENDING.map((x) => ({ id: String(x.id), rank: x.rank, title: x.title, description: x.description }))).map(item => (
               <View
                 key={item.id}
                 style={isSmallScreen ? { width: '100%' } : styles.trendingCell}
@@ -160,6 +298,56 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 14,
     marginBottom: 14,
+  },
+  categoryRow: {
+    paddingHorizontal: 20,
+    marginBottom: 18,
+  },
+  categoryRowInner: {
+    gap: 10,
+    paddingRight: 12,
+  },
+  categoryChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 999,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.10)',
+  },
+  categoryChipActive: {
+    backgroundColor: 'rgba(229,9,20,0.22)',
+    borderColor: 'rgba(229,9,20,0.35)',
+  },
+  categoryChipText: {
+    color: 'rgba(255,255,255,0.72)',
+    fontSize: 12,
+    fontWeight: '800',
+    letterSpacing: 0.6,
+  },
+  categoryChipTextActive: {
+    color: '#FFFFFF',
+  },
+  loadingBox: {
+    paddingVertical: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  emptyBox: {
+    paddingVertical: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  emptyTitle: {
+    color: '#FFFFFF',
+    fontSize: 18,
+    fontWeight: '900',
+    marginTop: 2,
+  },
+  emptyText: {
+    color: 'rgba(255,255,255,0.55)',
+    fontSize: 13,
   },
 
   /* TRENDING */

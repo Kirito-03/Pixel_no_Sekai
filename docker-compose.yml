@@ -53,6 +53,7 @@ services:
       NODE_ENV: ${NODE_ENV:-development}
       # APIs externas (desde .env)
       TMDB_API_KEY: ${TMDB_API_KEY}
+      NEWSAPI_KEY: ${NEWSAPI_KEY}
       TRANSLATE_PROVIDER: ${TRANSLATE_PROVIDER:-libre}
       DEEPL_API_KEY: ${DEEPL_API_KEY:-}
       # Google OAuth & Auth

@@ -165,8 +165,13 @@ class AdminApiService {
     /**
      * Delete episode (soft delete)
      */
-    async deleteEpisode(id: number) {
-        const response = await this.axiosInstance.delete(`/api/admin/episodes/${id}`);
+    async deleteEpisode(id: number, opts?: { mode?: 'soft' | 'hard'; cleanup?: boolean }) {
+        const mode = opts?.mode === 'hard' ? 'hard' : 'soft';
+        const params =
+            mode === 'hard'
+                ? { mode: 'hard', cleanup: opts?.cleanup !== false }
+                : undefined;
+        const response = await this.axiosInstance.delete(`/api/admin/episodes/${id}`, { params });
         return response.data;
     }
 
@@ -227,6 +232,15 @@ class AdminApiService {
      */
     async getDashboardStats(): Promise<DashboardStats> {
         const response = await this.axiosInstance.get('/api/admin/stats');
+        return response.data;
+    }
+
+    // ========================================
+    // News Admin
+    // ========================================
+
+    async refreshNews() {
+        const response = await this.axiosInstance.post('/api/admin/news/refresh');
         return response.data;
     }
 }

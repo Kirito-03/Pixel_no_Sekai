@@ -21,6 +21,7 @@ interface EpisodePlayerProps {
   animeId: number;
   seasonNumber: number;
   profileId?: number;
+  resumeTimeSeconds?: number;
   onClose: () => void;
   onNextEpisode?: () => void;
   onPreviousEpisode?: () => void;
@@ -34,6 +35,7 @@ const EpisodePlayer: React.FC<EpisodePlayerProps> = ({
   animeId,
   seasonNumber,
   profileId,
+  resumeTimeSeconds = 0,
   onClose,
   onNextEpisode,
   onPreviousEpisode,
@@ -52,6 +54,7 @@ const EpisodePlayer: React.FC<EpisodePlayerProps> = ({
   const uiOpacity = useRef(new Animated.Value(1)).current;
   const lastProgressSecond = useRef<number>(0);
   const inFlightProgress = useRef<Promise<any> | null>(null);
+  const didSeekForEpisode = useRef<string>('');
 
   const episodeId = useMemo(() => {
     const n = Number(episode.id);
@@ -171,6 +174,10 @@ const EpisodePlayer: React.FC<EpisodePlayerProps> = ({
   // ── Load sources ─────────────────────────────────────────────
   useEffect(() => { loadEpisodeSources(); }, [episode.id]);
 
+  useEffect(() => {
+    didSeekForEpisode.current = '';
+  }, [episode.id]);
+
   const loadEpisodeSources = async () => {
     try {
       setLoading(true);
@@ -224,6 +231,17 @@ const EpisodePlayer: React.FC<EpisodePlayerProps> = ({
           crossOrigin="anonymous"
           playsInline
           onPlay={() => setIsPlaying(true)}
+          onLoadedMetadata={() => {
+            const el = webVideoRef.current as any;
+            const key = String(episode.id);
+            if (didSeekForEpisode.current === key) return;
+            const t = Number(resumeTimeSeconds || 0);
+            if (!el || !Number.isFinite(t) || t <= 0) return;
+            try {
+              el.currentTime = t;
+              didSeekForEpisode.current = key;
+            } catch { }
+          }}
           onPause={() => {
             setIsPlaying(false);
             const el = webVideoRef.current as any;
@@ -264,6 +282,7 @@ const EpisodePlayer: React.FC<EpisodePlayerProps> = ({
 
     // ── MOBILE: premium WebView player ───────────────────────
     const safeVideoUrl = encodeURI(videoUrl);
+    const resumeAt = Math.max(0, Math.floor(Number(resumeTimeSeconds || 0)));
     const videoHTML = `
       <!DOCTYPE html>
       <html lang="es">
@@ -496,6 +515,9 @@ const EpisodePlayer: React.FC<EpisodePlayerProps> = ({
             document.head.appendChild(hlsScript);
             ` : ''}
 
+            var RESUME_AT = ${resumeAt};
+            var didSeek = false;
+
             var video = document.getElementById('videoPlayer');
             var playBtn = document.getElementById('play-btn');
             var progressFill = document.getElementById('progress-fill');
@@ -547,6 +569,19 @@ const EpisodePlayer: React.FC<EpisodePlayerProps> = ({
               if (document.fullscreenElement) { document.exitFullscreen(); }
               else { document.documentElement.requestFullscreen().catch(function(){}); }
             }
+
+            video.addEventListener('loadedmetadata', function() {
+              if (didSeek) return;
+              if (!RESUME_AT || RESUME_AT <= 0) return;
+              try {
+                var t = RESUME_AT;
+                if (isFinite(video.duration) && video.duration > 0) {
+                  t = Math.min(t, Math.max(0, video.duration - 1));
+                }
+                video.currentTime = t;
+                didSeek = true;
+              } catch (e) {}
+            });
             function showUI() {
               [topBar, controls, gradTop, gradBottom, navPrev, navNext].forEach(function(el){
                 if (el) el.classList.remove('ui-hidden');

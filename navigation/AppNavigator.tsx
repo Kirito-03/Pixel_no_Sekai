@@ -16,7 +16,10 @@ import CategoryScreen from '../screens/CategoryScreen';
 import MyListScreen from '../screens/MyListScreen';
 import DownloadsScreen from '../screens/DownloadsScreen';
 import NewsScreen from '../screens/NewsScreen';
+import NewsDetailScreen from '../screens/NewsDetailScreen';
 import MangaScreen from '../screens/MangaScreen';
+import MangaDetailScreen from '../screens/MangaDetailScreen';
+import MangaReaderScreen from '../screens/MangaReaderScreen';
 import AdminLoginScreen from '../screens/admin/AdminLoginScreen';
 import AdminDashboardScreen from '../screens/admin/AdminDashboardScreen';
 import AnimeListScreen from '../screens/admin/AnimeListScreen';
@@ -32,6 +35,8 @@ const RootStack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
 const HomeStack = createNativeStackNavigator();
 const AdminStack = createNativeStackNavigator();
+const NewsStack = createNativeStackNavigator();
+const MangaStack = createNativeStackNavigator();
 
 function HomeNavigator() {
   return (
@@ -52,6 +57,25 @@ function AdminNavigator() {
       <AdminStack.Screen name="AnimeForm" component={AnimeFormScreen as any} />
       <AdminStack.Screen name="EpisodeManager" component={EpisodeManagerScreen as any} />
     </AdminStack.Navigator>
+  );
+}
+
+function NewsNavigator() {
+  return (
+    <NewsStack.Navigator screenOptions={{ headerShown: false, animation: Platform.OS === 'android' ? 'fade' : 'default' }}>
+      <NewsStack.Screen name="NoticiasHome" component={NewsScreen as any} />
+      <NewsStack.Screen name="NewsDetail" component={NewsDetailScreen as any} />
+    </NewsStack.Navigator>
+  );
+}
+
+function MangaNavigator() {
+  return (
+    <MangaStack.Navigator screenOptions={{ headerShown: false, animation: Platform.OS === 'android' ? 'fade' : 'default' }}>
+      <MangaStack.Screen name="MangaHome" component={MangaScreen as any} />
+      <MangaStack.Screen name="MangaDetail" component={MangaDetailScreen as any} />
+      <MangaStack.Screen name="MangaReader" component={MangaReaderScreen as any} />
+    </MangaStack.Navigator>
   );
 }
 
@@ -129,7 +153,7 @@ function MainTabs({ route }: { route: any }) {
       />
       <Tab.Screen
         name="Noticias"
-        component={NewsScreen}
+        component={NewsNavigator}
         options={{
           tabBarIcon: ({ color }) => <Ionicons name="newspaper-outline" size={24} color={color} />,
           tabBarLabel: 'Noticias',
@@ -138,7 +162,7 @@ function MainTabs({ route }: { route: any }) {
       />
       <Tab.Screen
         name="Manga"
-        component={MangaScreen}
+        component={MangaNavigator}
         options={{
           tabBarIcon: ({ color }) => <Ionicons name="book-outline" size={24} color={color} />,
           tabBarLabel: 'Manga',

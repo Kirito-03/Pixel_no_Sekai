@@ -40,6 +40,11 @@ export default function EpisodeManagerScreen() {
     const [cleanupLocalAfterProcess, setCleanupLocalAfterProcess] = useState(false);
     const [showAddModal, setShowAddModal] = useState(false);
     const [editingEpisode, setEditingEpisode] = useState<any>(null);
+    const [showDeleteModal, setShowDeleteModal] = useState(false);
+    const [deleteEpisodeTarget, setDeleteEpisodeTarget] = useState<any>(null);
+    const [deleteMode, setDeleteMode] = useState<'soft' | 'hard'>('soft');
+    const [deleteLoading, setDeleteLoading] = useState(false);
+    const [deleteNotice, setDeleteNotice] = useState('');
 
     const [episodeForm, setEpisodeForm] = useState<{
         episode_number: string;
@@ -168,26 +173,33 @@ export default function EpisodeManagerScreen() {
     };
 
     const handleDeleteEpisode = (episode: any) => {
-        Alert.alert(
-            'Confirmar Eliminación',
-            `¿Eliminar episodio ${episode.episode_number}?`,
-            [
-                { text: 'Cancelar', style: 'cancel' },
-                {
-                    text: 'Eliminar',
-                    style: 'destructive',
-                    onPress: async () => {
-                        try {
-                            await adminApiService.deleteEpisode(episode.id);
-                            Alert.alert('Éxito', 'Episodio eliminado');
-                            loadEpisodes();
-                        } catch (error) {
-                            Alert.alert('Error', 'No se pudo eliminar el episodio');
-                        }
-                    },
-                },
-            ]
-        );
+        setDeleteEpisodeTarget(episode);
+        setDeleteMode('soft');
+        setDeleteNotice('');
+        setShowDeleteModal(true);
+    };
+
+    const confirmDeleteEpisode = async () => {
+        if (!deleteEpisodeTarget?.id || deleteLoading) return;
+        setDeleteLoading(true);
+        setDeleteNotice('');
+        try {
+            await adminApiService.deleteEpisode(deleteEpisodeTarget.id, { mode: deleteMode, cleanup: true });
+            setEpisodes(prev => prev.filter(e => e.id !== deleteEpisodeTarget.id));
+            setShowDeleteModal(false);
+            setDeleteEpisodeTarget(null);
+            await loadEpisodes();
+            setDeleteNotice(deleteMode === 'hard' ? 'Episodio eliminado' : 'Episodio desactivado');
+            setTimeout(() => setDeleteNotice(''), 2500);
+        } catch (error: any) {
+            const msg =
+                error?.response?.data?.message ||
+                error?.message ||
+                'No se pudo eliminar el episodio';
+            setDeleteNotice(msg);
+        } finally {
+            setDeleteLoading(false);
+        }
     };
 
     const handleUploadVideo = async (episode: any) => {
@@ -478,6 +490,11 @@ export default function EpisodeManagerScreen() {
                         </Text>
                     </TouchableOpacity>
                 </View>
+                {!!deleteNotice && !showDeleteModal && (
+                    <View style={styles.inlineNotice}>
+                        <Text style={styles.inlineNoticeText}>{deleteNotice}</Text>
+                    </View>
+                )}
 
                 {/* Episodes List */}
                 {isLoading ? (
@@ -692,6 +709,91 @@ export default function EpisodeManagerScreen() {
                                     <Text style={styles.saveButtonText}>
                                         {editingEpisode ? 'Guardar Cambios' : 'Agregar Episodio'}
                                     </Text>
+                                </TouchableOpacity>
+                            </View>
+                        </View>
+                    </View>
+                </Modal>
+
+                <Modal
+                    visible={showDeleteModal}
+                    animationType="fade"
+                    transparent={true}
+                    onRequestClose={() => setShowDeleteModal(false)}
+                >
+                    <View style={styles.modalOverlay}>
+                        <View style={styles.confirmModalContainer}>
+                            <View style={styles.confirmHeader}>
+                                <Text style={styles.confirmTitle}>Confirmar eliminación</Text>
+                                <TouchableOpacity
+                                    onPress={() => {
+                                        if (deleteLoading) return;
+                                        setShowDeleteModal(false);
+                                    }}
+                                >
+                                    <Ionicons name="close" size={24} color="#FFFFFF" />
+                                </TouchableOpacity>
+                            </View>
+
+                            <Text style={styles.confirmBody}>
+                                {deleteEpisodeTarget
+                                    ? `Episodio S${deleteEpisodeTarget.season || 1} • E${deleteEpisodeTarget.episode_number}`
+                                    : 'Episodio'}
+                            </Text>
+
+                            <View style={styles.deleteModeRow}>
+                                <TouchableOpacity
+                                    style={[styles.deleteModeChip, deleteMode === 'soft' && styles.deleteModeChipActive]}
+                                    onPress={() => setDeleteMode('soft')}
+                                    disabled={deleteLoading}
+                                >
+                                    <Text style={[styles.deleteModeChipText, deleteMode === 'soft' && styles.deleteModeChipTextActive]}>
+                                        Desactivar
+                                    </Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity
+                                    style={[styles.deleteModeChip, deleteMode === 'hard' && styles.deleteModeChipDanger]}
+                                    onPress={() => setDeleteMode('hard')}
+                                    disabled={deleteLoading}
+                                >
+                                    <Text style={[styles.deleteModeChipText, deleteMode === 'hard' && styles.deleteModeChipTextActive]}>
+                                        Eliminar
+                                    </Text>
+                                </TouchableOpacity>
+                            </View>
+
+                            {deleteMode === 'soft' ? (
+                                <Text style={styles.confirmHint}>
+                                    Se marcará como inactivo y desaparecerá del panel.
+                                </Text>
+                            ) : (
+                                <Text style={styles.confirmHintDanger}>
+                                    Se borrará el registro y se intentará limpiar archivos asociados.
+                                </Text>
+                            )}
+
+                            {!!deleteNotice && <Text style={styles.deleteNotice}>{deleteNotice}</Text>}
+
+                            <View style={styles.confirmActions}>
+                                <TouchableOpacity
+                                    style={styles.cancelButton}
+                                    onPress={() => setShowDeleteModal(false)}
+                                    disabled={deleteLoading}
+                                >
+                                    <Text style={styles.cancelButtonText}>Cancelar</Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity
+                                    style={[styles.deleteButton, deleteMode === 'hard' && styles.deleteButtonDanger]}
+                                    onPress={confirmDeleteEpisode}
+                                    disabled={deleteLoading}
+                                >
+                                    {deleteLoading ? (
+                                        <ActivityIndicator size="small" color="#FFFFFF" />
+                                    ) : (
+                                        <Text style={styles.deleteButtonText}>
+                                            {deleteMode === 'hard' ? 'Eliminar' : 'Desactivar'}
+                                        </Text>
+                                    )}
                                 </TouchableOpacity>
                             </View>
                         </View>
@@ -930,6 +1032,21 @@ const styles = StyleSheet.create({
         paddingHorizontal: 24,
         paddingBottom: 14,
     },
+    inlineNotice: {
+        marginHorizontal: 24,
+        marginBottom: 14,
+        paddingVertical: 10,
+        paddingHorizontal: 12,
+        borderRadius: 8,
+        backgroundColor: 'rgba(255, 255, 255, 0.06)',
+        borderWidth: 1,
+        borderColor: 'rgba(255, 255, 255, 0.10)',
+    },
+    inlineNoticeText: {
+        color: 'rgba(255, 255, 255, 0.85)',
+        fontSize: 12,
+        fontWeight: '800',
+    },
     optionChip: {
         flexDirection: 'row',
         alignItems: 'center',
@@ -985,6 +1102,128 @@ const styles = StyleSheet.create({
     },
     modalContent: {
         padding: 24,
+    },
+    confirmModalContainer: {
+        width: '100%',
+        maxWidth: 520,
+        backgroundColor: '#141414',
+        borderRadius: 10,
+        borderWidth: 1,
+        borderColor: '#262626',
+        overflow: 'hidden',
+    },
+    confirmHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        padding: 20,
+        paddingBottom: 14,
+        borderBottomWidth: 1,
+        borderBottomColor: '#262626',
+    },
+    confirmTitle: {
+        fontSize: 18,
+        fontWeight: '900',
+        color: '#FFFFFF',
+    },
+    confirmBody: {
+        color: '#FFFFFF',
+        fontSize: 14,
+        fontWeight: '800',
+        paddingHorizontal: 20,
+        paddingTop: 16,
+    },
+    deleteModeRow: {
+        flexDirection: 'row',
+        gap: 10,
+        paddingHorizontal: 20,
+        paddingTop: 14,
+    },
+    deleteModeChip: {
+        flex: 1,
+        paddingVertical: 10,
+        borderRadius: 8,
+        borderWidth: 1,
+        borderColor: '#333333',
+        backgroundColor: '#000000',
+        alignItems: 'center',
+    },
+    deleteModeChipActive: {
+        borderColor: 'rgba(229, 9, 20, 0.55)',
+        backgroundColor: 'rgba(229, 9, 20, 0.08)',
+    },
+    deleteModeChipDanger: {
+        borderColor: 'rgba(229, 9, 20, 0.65)',
+        backgroundColor: 'rgba(229, 9, 20, 0.12)',
+    },
+    deleteModeChipText: {
+        color: '#B3B3B3',
+        fontSize: 12,
+        fontWeight: '900',
+        textTransform: 'uppercase',
+    },
+    deleteModeChipTextActive: {
+        color: '#FFFFFF',
+    },
+    confirmHint: {
+        color: '#808080',
+        fontSize: 12,
+        fontWeight: '700',
+        paddingHorizontal: 20,
+        paddingTop: 12,
+    },
+    confirmHintDanger: {
+        color: '#FFD54F',
+        fontSize: 12,
+        fontWeight: '800',
+        paddingHorizontal: 20,
+        paddingTop: 12,
+    },
+    deleteNotice: {
+        paddingHorizontal: 20,
+        paddingTop: 12,
+        color: '#FFFFFF',
+        fontSize: 12,
+        fontWeight: '800',
+    },
+    confirmActions: {
+        flexDirection: 'row',
+        gap: 10,
+        paddingHorizontal: 20,
+        paddingTop: 18,
+        paddingBottom: 20,
+    },
+    cancelButton: {
+        flex: 1,
+        paddingVertical: 12,
+        borderRadius: 8,
+        borderWidth: 1,
+        borderColor: '#333333',
+        backgroundColor: '#000000',
+        alignItems: 'center',
+    },
+    cancelButtonText: {
+        color: '#B3B3B3',
+        fontSize: 13,
+        fontWeight: '800',
+    },
+    deleteButton: {
+        flex: 1,
+        paddingVertical: 12,
+        borderRadius: 8,
+        backgroundColor: '#333333',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    deleteButtonDanger: {
+        backgroundColor: '#E50914',
+    },
+    deleteButtonText: {
+        color: '#FFFFFF',
+        fontSize: 13,
+        fontWeight: '900',
+        textTransform: 'uppercase',
+        letterSpacing: 0.5,
     },
     row: {
         flexDirection: 'row',

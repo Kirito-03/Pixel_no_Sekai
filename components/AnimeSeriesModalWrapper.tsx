@@ -13,6 +13,7 @@ interface AnimeSeriesModalWrapperProps {
   visible: boolean;
   onClose: () => void;
   startFromEpisodeId?: number | null;
+  startFromTimeSeconds?: number | null;
 }
 
 export default function AnimeSeriesModalWrapper({
@@ -20,6 +21,7 @@ export default function AnimeSeriesModalWrapper({
   visible,
   onClose,
   startFromEpisodeId = null,
+  startFromTimeSeconds = null,
 }: AnimeSeriesModalWrapperProps) {
   const { currentProfile } = useProfile();
   const [showEpisodePlayer, setShowEpisodePlayer] = useState(false);
@@ -27,6 +29,7 @@ export default function AnimeSeriesModalWrapper({
   const [selectedSeason, setSelectedSeason] = useState<AnimeSeason | null>(null);
   const [currentEpisodeIndex, setCurrentEpisodeIndex] = useState(0);
   const [autoplaying, setAutoplaying] = useState(false);
+  const [resumeTimeSeconds, setResumeTimeSeconds] = useState<number>(0);
 
   React.useEffect(() => {
     if (!visible) return;
@@ -70,6 +73,7 @@ export default function AnimeSeriesModalWrapper({
         const e = s?.episodes.find((x) => Number(x.id) === Number(startFromEpisodeId));
         const idx = s ? s.episodes.findIndex((x) => Number(x.id) === Number(startFromEpisodeId)) : -1;
         if (cancelled || !s || !e || idx < 0) return;
+        setResumeTimeSeconds(Number(startFromTimeSeconds || 0));
         setSelectedSeason(s);
         setSelectedEpisode(e);
         setCurrentEpisodeIndex(idx);
@@ -82,9 +86,9 @@ export default function AnimeSeriesModalWrapper({
     return () => {
       cancelled = true;
     };
-  }, [visible, content?.id, content?.type, startFromEpisodeId, autoplaying]);
+  }, [visible, content?.id, content?.type, startFromEpisodeId, startFromTimeSeconds, autoplaying]);
 
-  const handlePlayEpisode = async (episode: AnimeEpisode, season: AnimeSeason) => {
+  const handlePlayEpisode = async (episode: AnimeEpisode, season: AnimeSeason, resumeSeconds?: number) => {
     // NO cerrar el modal de detalles, solo abrir el reproductor
     let ep = episode;
     const profileId = currentProfile?.id;
@@ -106,6 +110,7 @@ export default function AnimeSeriesModalWrapper({
     setSelectedEpisode(ep);
     setSelectedSeason(season);
     setCurrentEpisodeIndex(season.episodes.findIndex(e => e.id === episode.id));
+    setResumeTimeSeconds(Number(resumeSeconds || 0));
     setShowEpisodePlayer(true);
   };
 
@@ -123,6 +128,7 @@ export default function AnimeSeriesModalWrapper({
     const nextEpisode = selectedSeason.episodes[nextIndex];
     setCurrentEpisodeIndex(nextIndex);
     setSelectedEpisode(nextEpisode);
+    setResumeTimeSeconds(0);
   };
 
   const handlePreviousEpisode = () => {
@@ -132,6 +138,7 @@ export default function AnimeSeriesModalWrapper({
     const prevEpisode = selectedSeason.episodes[prevIndex];
     setCurrentEpisodeIndex(prevIndex);
     setSelectedEpisode(prevEpisode);
+    setResumeTimeSeconds(0);
   };
 
   const getTitle = () => {
@@ -161,6 +168,7 @@ export default function AnimeSeriesModalWrapper({
             animeId={content?.id ? Number(content.id) : 0}
             seasonNumber={selectedSeason.season}
             profileId={currentProfile?.id}
+            resumeTimeSeconds={resumeTimeSeconds}
             onClose={handleCloseEpisodePlayer}
             onNextEpisode={handleNextEpisode}
             onPreviousEpisode={handlePreviousEpisode}
@@ -172,4 +180,3 @@ export default function AnimeSeriesModalWrapper({
     </>
   );
 }
-
